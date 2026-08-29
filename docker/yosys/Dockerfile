@@ -23,7 +23,7 @@ WORKDIR /yosys
 # pull and build
 RUN curl -L ${YOSYS_REPO}/archive/${YOSYS_COMMIT}.tar.gz | tar -xzC . --strip-components=1 && \
     make config-clang && \
-    make -j && \
+    make -j$(nproc) && \
     make PREFIX=/build install
 
 # copy into runnner

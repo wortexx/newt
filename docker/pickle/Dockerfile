@@ -49,12 +49,12 @@ WORKDIR /svase
 RUN git clone ${SVASE_REPO}.git . && git checkout ${SVASE_COMMIT} && \
     git submodule update --init --recursive && \
     export CXX=clang++-16 && \
-    make -j && \
+    make -j$(nproc) && \
     cp build/svase /build/bin/svase
 
 WORKDIR /sv2v
 RUN curl -L ${SV2V_REPO}/archive/${SV2V_COMMIT}.tar.gz | tar -xzC . --strip-components=1 && \
-    make -j && \
+    make -j$(nproc) && \
     cp bin/sv2v /build/bin/sv2v
 
 # copy into runnner
