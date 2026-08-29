@@ -31,6 +31,13 @@ check "openroad"     openroad -version
 check "riscv64 gcc"  riscv64-unknown-elf-gcc --version
 check "verilator"    verilator --version
 check "verible lint" verible-verilog-lint --version
+# Flow-support utilities the Makefiles call by name, not EDA tools themselves -
+# missing gawk broke a live overnight synth-all run (yosys.mk/openroad.mk pipe
+# their logs through `gawk '{ print strftime(...) }'`, which plain awk lacks);
+# unzip is used by OpenROAD's checkpoint.tcl. Version-checking the 9 tools
+# above never would have caught this.
+check "gawk"         gawk --version
+check "unzip"        unzip -v
 
 # Zknh toolchain probe (spec: eda-tooling-image, "Zknh toolchain support")
 tmpdir=$(mktemp -d)

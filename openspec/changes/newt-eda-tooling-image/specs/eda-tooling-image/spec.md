@@ -13,10 +13,11 @@ The `newt-eda` image SHALL be built on `ubuntu:24.04` and SHALL contain, on `PAT
 - **Pinned, unchanged from the 2024 image**: yosys from the `phsauter/yosys` fork at commit `3ce5059`, morty `v0.9.0`, svase `f5f5290`, sv2v `v0.0.11`, bender `v0.27.4`.
 - **Bumped**: OpenROAD at a tagged release from 2025 or later; riscv64 bare-metal GCC ≥ 13 with binutils ≥ 2.40 (so `-march=rv64gc_zknh` compiles).
 - **New**: Verilator v5.x (stable release) and Verible (lint + format binaries).
+- **Flow-support utilities the Makefiles call by name, not just the EDA tools themselves**: `gawk` (yosys.mk's and openroad.mk's log-timestamping pipelines pipe through `gawk '{ print strftime(...), $0 }'` - a plain POSIX `awk` does not have `strftime`) and `unzip` (OpenROAD's `checkpoint.tcl` save/load flow). Found missing from the image only by actually running `make synth-all` against it (`gawk`) and grepping the flow scripts (`unzip`) - version-checking the EDA tools alone does not catch a missing support utility the flow silently depends on.
 
 #### Scenario: All tools present and at required versions
 
-- **WHEN** `yosys --version`, `morty --version`, `svase --help` (svase's own `--version` throws an unhandled `cxxopts` exception before reaching its version-print path - a pre-existing bug in that pin, not something this change touches), `sv2v --version`, `bender --version`, `openroad -version`, `riscv64-unknown-elf-gcc --version`, `verilator --version`, and `verible-verilog-lint --version` are run inside the image
+- **WHEN** `yosys --version`, `morty --version`, `svase --help` (svase's own `--version` throws an unhandled `cxxopts` exception before reaching its version-print path - a pre-existing bug in that pin, not something this change touches), `sv2v --version`, `bender --version`, `openroad -version`, `riscv64-unknown-elf-gcc --version`, `verilator --version`, `verible-verilog-lint --version`, `gawk --version`, and `unzip -v` are run inside the image
 - **THEN** each command exits 0 and reports the pinned or minimum version above
 
 #### Scenario: Zknh toolchain support
