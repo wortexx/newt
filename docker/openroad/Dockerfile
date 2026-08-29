@@ -7,87 +7,48 @@
 #
 # based on: https://docs.docker.com/build/building/multi-stage/
 # syntax=docker/dockerfile:1
-ARG DOCKER_BASE_IMG=almalinux:8.9
+ARG DOCKER_BASE_IMG=ubuntu:24.04
 
 FROM ${DOCKER_BASE_IMG} AS builder
 ARG OR_REPO=https://github.com/The-OpenROAD-Project/OpenROAD
-ARG OR_COMMIT=589dee1c8b0d678bd2989dbb1150df86a0b5271f
+# OpenROAD does not cut regular tagged releases (last tag: v0.9.0-beta, 2020);
+# pin to a recent master commit instead and bump periodically.
+ARG OR_COMMIT=2c569269719c59ef6eef90bcc33f8bc7afc16c02
 # install packages
 COPY packages.txt /packages.txt
-RUN yum install -y $(cat /packages.txt)
-RUN yum install -y yum-utils
-RUN yum config-manager --set-enabled powertools && yum update -y
-
-# following dependencies from:
-# https://github.com/The-OpenROAD-Project/OpenLane/blob/master/docker/openroad_app/Dockerfile
-# with versions from: https://github.com/The-OpenROAD-Project/OpenROAD/blob/c02333b7cf98b74a78ac70715d8157535046957c/etc/DependencyInstaller.sh
-
-# Build Boost
-WORKDIR /boost
-RUN curl -L https://sourceforge.net/projects/boost/files/boost/1.80.0/boost_1_80_0.tar.bz2/download | tar --strip-components=1 -xjC . && \
-    ./bootstrap.sh && \
-    ./b2 install --with-iostreams --with-test --with-serialization --with-system --with-thread -j $(nproc)
-
-# Build Eigen
-WORKDIR /eigen
-RUN curl -L https://gitlab.com/libeigen/eigen/-/archive/3.4/eigen-3.4.tar.gz | tar --strip-components=1 -xzC . && \
-    mkdir build && \
-    cd build && \
-    cmake .. && \
-    make -j$(nproc) && \
-    make install
-
-# Build Lemon
-WORKDIR /lemon
-RUN curl -L https://github.com/The-OpenROAD-Project/lemon-graph/archive/refs/tags/1.3.1.tar.gz | tar --strip-components=1 -xzC . && \
-    cmake -B build . && \
-    cmake --build build -j $(nproc) --target install
-
-# Build Spdlog
-WORKDIR /spdlog
-RUN curl -L https://github.com/gabime/spdlog/archive/refs/tags/v1.8.1.tar.gz | tar --strip-components=1 -xzC . && \
-    mkdir build && \
-    cd build && \
-    cmake .. && \
-    make install -j $(nproc)
-
-# Build Swig
-RUN yum remove -y swig3
-WORKDIR /swig
-RUN curl -L https://github.com/swig/swig/archive/refs/tags/v4.1.0.tar.gz | tar --strip-components=1 -xzC . && \
-    ./autogen.sh && \
-    ./configure --prefix=/usr && \
-    make -j $(nproc) && \
-    make install
-
-# Build OR Tools
-WORKDIR /ortools
-RUN curl -L https://github.com/google/or-tools/archive/refs/tags/v9.5.tar.gz | tar --strip-components=1 -xzC . && \
-    cmake -B build . -DBUILD_DEPS:BOOL=ON && \
-    cmake --build build -j $(nproc) --target install
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends $(cat /packages.txt) && \
+    rm -rf /var/lib/apt/lists/*
 
 WORKDIR /openroad
-RUN yum install -y doxygen
-
-# ToDo: submodules lose their correct versions if done via archive -> OpenLane uses util.py, copy?
-# pull and build
+# pull; OpenROAD's own etc/DependencyInstaller.sh resolves boost/eigen/lemon/
+# spdlog/or-tools/etc for the target OS (replaces the hand-rolled per-library
+# builds from the pre-2025 image, see design.md decision D2)
 RUN git clone ${OR_REPO}.git . && git checkout ${OR_COMMIT} && \
     git submodule update --init --recursive
+RUN ./etc/DependencyInstaller.sh -all
+
 RUN mkdir build && mkdir -p /build/version && mkdir install
-RUN cd build && cmake -DCMAKE_INSTALL_PREFIX=$(pwd)/install ..
-RUN cd build && make -j$(nproc)
-RUN cd build && make install
+RUN cd build && cmake -DCMAKE_INSTALL_PREFIX=$(pwd)/install .. && \
+    make -j$(nproc) && \
+    make install
 RUN cp -r build/install/bin /build/
 
-# Add OR_Tools
-RUN mkdir -p /build/lib
-RUN cp /usr/local/lib64/libortools.so.9 /build/lib/libortools.so.9 
-ENV PATH /build/bin:$PATH
+# carry forward whatever shared libs the built binaries actually link against
+# (boost/eigen/or-tools/etc land in system paths via the installer above)
+RUN mkdir -p /build/lib && \
+    for bin in /build/bin/*; do \
+      ldd "$bin" 2>/dev/null | awk '/=> \// {print $3}'; \
+    done | sort -u | xargs -r -I{} cp -n {} /build/lib/
 
 # copy into runnner
 FROM ${DOCKER_BASE_IMG} AS runner
 COPY packages.txt /packages.txt
-RUN yum install -y $(cat /packages.txt)
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends $(cat /packages.txt) && \
+    rm -rf /var/lib/apt/lists/*
 COPY --from=builder /build /build
 ENV PATH /build/bin:$PATH
 ENV LD_LIBRARY_PATH=/build/lib:$LD_LIBRARY_PATH

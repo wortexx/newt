@@ -7,16 +7,17 @@
 #
 # based on: https://docs.docker.com/build/building/multi-stage/
 # syntax=docker/dockerfile:1
-ARG DOCKER_BASE_IMG=almalinux:8.9
+ARG DOCKER_BASE_IMG=ubuntu:24.04
 
 FROM ${DOCKER_BASE_IMG} AS builder
 ARG YOSYS_REPO=https://github.com/phsauter/yosys
 ARG YOSYS_COMMIT=3ce5059a88c987cab4df665ab347bc88e8401824
+ENV DEBIAN_FRONTEND=noninteractive
 # install packages
 COPY packages.txt /packages.txt
-RUN yum install -y yum-utils
-RUN yum config-manager --set-enabled powertools && yum update -y
-RUN yum install -y $(cat /packages.txt)
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends $(cat /packages.txt) && \
+    rm -rf /var/lib/apt/lists/*
 
 WORKDIR /yosys
 # pull and build

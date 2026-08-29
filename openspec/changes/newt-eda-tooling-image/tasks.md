@@ -1,0 +1,34 @@
+# newt-eda tooling image — tasks
+
+Tags: **[edit]** = plain file editing, **[docker]** = needs local Docker builds (minutes–~1 h per stage), **[long-run]** = EDA long run (hours, big RAM) — cheap gates (version smoke tests, build success) are the completion criteria everywhere except the final adoption gate.
+
+## 1. Base-image port (almalinux → ubuntu)
+
+- [x] 1.1 **[edit]** Switch `DOCKER_BASE_IMG` to `ubuntu:24.04` in `docker/{pickle,yosys,openroad,riscv64,all}/Dockerfile`; replace yum/powertools/epel invocations with `apt-get` (noninteractive, `--no-install-recommends`, clean lists). Verify by grep: no `yum`/`almalinux` left under `docker/`. — verified clean.
+- [x] 1.2 **[edit]** Port each stage's `packages.txt` from yum to apt package names (build deps per stage; `docker/all/packages.txt` keeps only runtime libs + python3/pip for `requirements.txt`). Verify each list installs in a bare `ubuntu:24.04` container (`apt-get install -y $(cat packages.txt)` exits 0). — verified via each stage's real `docker build` (apt-get install step), not a standalone bare-container run.
+- [ ] 1.3 **[docker]** Rebuild the pinned `pickle` stage on the new base (bender `v0.27.4` via the `x86_64-linux-gnu` release asset; morty/svase/sv2v pins unchanged — pin stage compiler packages if a pinned tool won't build on 24.04, per design D3 risk note). Verify `bender --version`, `morty --version`, `svase --version`, `sv2v --version` inside the stage image.
+- [ ] 1.4 **[docker]** Rebuild the pinned `yosys` stage (fork `phsauter/yosys@3ce5059`, unchanged) on the new base. Verify `yosys --version` reports the fork build and `yosys -p 'help'` exits 0.
+
+## 2. Tool bumps and additions
+
+- [ ] 2.1 **[docker]** Bump `docker/openroad/Dockerfile` to the newest tagged OpenROAD release; replace hand-rolled boost/eigen/lemon/spdlog/swig builds with the tag's `etc/DependencyInstaller.sh` (design D2); record the tag in `OR_COMMIT`. Verify `openroad -version` in the stage image reports the chosen tag and `openroad -exit /dev/null` runs headless.
+- [ ] 2.2 **[docker]** Bump `docker/riscv64/Dockerfile` to a ≥ 2024 `riscv-gnu-toolchain` release tag (GCC ≥ 13, binutils ≥ 2.40), same `--prefix=/build` shape. Verify `riscv64-unknown-elf-gcc --version` ≥ 13 and a testfile compiles with `-march=rv64gc_zknh` (spec scenario).
+- [ ] 2.3 **[docker]** Add `docker/verilator/` builder stage: source build at a v5.x stable tag into `/build`. Verify `verilator --version` reports v5.x and a trivial `verilator --lint-only` on a two-line SV module passes in the stage image.
+- [ ] 2.4 **[edit]** Add Verible to `docker/all/Dockerfile` from the prebuilt static release tarball into `/build/bin` (design D4), version as an `ARG`. Verified via 3.1's composite smoke test.
+
+## 3. Composite image and naming
+
+- [ ] 3.1 **[docker]** Update `docker/all/Dockerfile` (apt runtime deps, copy the fifth `/build` tree from the verilator stage) and `docker/Makefile` (`IMG_NAME = ghcr.io/wortexx/newt-eda`, `build-verilator` target, legacy image reference kept per design D7). Verify `make -C docker build` succeeds and all nine version checks from the spec ("All tools present" scenario) pass inside the composite image.
+- [ ] 3.2 **[edit]** Add a smoke-test script `docker/smoke-test.sh` running exactly those version/exit-0 checks (incl. the `rv64gc_zknh` compile probe), so CI and humans share one gate. Verify it exits 0 against the image from 3.1 and non-zero against the 2024 image (missing verilator).
+
+## 4. CI workflow (build + publish)
+
+- [ ] 4.1 **[edit]** Add `.github/workflows/docker-image.yml`: triggers on `push` to `main`, `pull_request`, and `workflow_dispatch` with `paths: docker/**` + the workflow file; per-stage `docker/build-push-action` builds with GHCR registry cache; runs `docker/smoke-test.sh` against the built composite; publishes `<yyyy-mm-dd>-<sha>` + `:dev` only on `main` (design D5); `permissions: packages: write`. Verify with `actionlint` (or careful review) — cheap gate; real proof is 4.2/4.3.
+- [ ] 4.2 **[docker]** Open the PR and confirm the PR run builds all stages and the smoke test passes without publishing (spec "Pull request build-verifies only" scenario). If a cold-cache build exceeds runner limits, split stages into matrix jobs per design D5 fallback.
+- [ ] 4.3 **[docker]** After merge, confirm the `main` run publishes: `docker pull ghcr.io/wortexx/newt-eda:<date>-<sha>` and `:dev` both succeed and share a digest (spec scenario); set GHCR package visibility to public (one-time UI step).
+
+## 5. Adoption gate and entry-point flip
+
+- [ ] 5.1 **[long-run]** Run the adoption gate on the published tag: `make ig-hw-all && make pickle-all && make synth-all` on unmodified Basilisk (dev box with swap or large runner; regenerate `basilisk.sources.json` in-container per infra-plan Appendix B). Verify run completes, yosys `CHECK` reports 0 problems, and cell count / area / WNS are diffed against the 2024 `basilisk_area.rpt` baseline with large deltas investigated.
+- [ ] 5.2 **[edit]** Flip `docker-compose.yml` and `use-docker.sh` to `ghcr.io/wortexx/newt-eda:dev` (only after 5.1 is green — design D6/D7). Verify `./use-docker.sh` on a clean checkout drops into a shell in the new image with the repo mounted.
+- [ ] 5.3 **[edit]** Update `docs/infra-plan.md`: tick the Phase 1 checklist, record the published tag, the chosen tool versions, and the baseline-diff numbers from 5.1. Verify the Phase 1 section reflects reality (adoption gate results included).

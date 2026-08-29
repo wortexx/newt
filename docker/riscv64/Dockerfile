@@ -7,22 +7,25 @@
 #
 # based on: https://docs.docker.com/build/building/multi-stage/
 # syntax=docker/dockerfile:1
-ARG DOCKER_BASE_IMG=almalinux:8.9
+ARG DOCKER_BASE_IMG=ubuntu:24.04
 
 FROM ${DOCKER_BASE_IMG} AS builder
 ARG RISCV64_REPO=https://github.com/riscv-collab/riscv-gnu-toolchain
-ARG RISCV64_COMMIT=23d031ef253bbdf1c551f86a3fbf3e24bc842f7d
+# GCC >= 13 / binutils >= 2.40 so -march=rv64gc_zknh is available (keeps the
+# Zknh standard-extension option open, see docs/infra-plan.md Phase 1)
+ARG RISCV64_TAG=2026.08.27
+ENV DEBIAN_FRONTEND=noninteractive
 # install packages
 COPY packages.txt /packages.txt
-RUN yum install -y yum-utils
-RUN yum config-manager --set-enabled powertools && yum update -y
-RUN yum install -y $(cat /packages.txt)
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends $(cat /packages.txt) && \
+    rm -rf /var/lib/apt/lists/*
 
 WORKDIR /riscv
-# pull and build
+# pull and build (bare-metal newlib target)
 RUN mkdir -p /build
-RUN git clone --recursive ${RISCV64_REPO}.git && cd riscv-gnu-toolchain && git checkout ${RISCV64_COMMIT}
-RUN cd riscv-gnu-toolchain && ./configure --prefix=/build && make -j
+RUN git clone --recursive --branch ${RISCV64_TAG} ${RISCV64_REPO}.git && \
+    cd riscv-gnu-toolchain && ./configure --prefix=/build && make -j$(nproc)
 
 # copy into runnner
 FROM ${DOCKER_BASE_IMG} AS runner

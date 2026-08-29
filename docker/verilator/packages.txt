@@ -1,0 +1,14 @@
+autoconf
+build-essential
+ca-certificates
+curl
+git
+flex
+bison
+libfl2
+libfl-dev
+zlib1g-dev
+help2man
+perl
+python3
+ccache
