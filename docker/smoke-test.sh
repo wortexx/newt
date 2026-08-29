@@ -20,7 +20,11 @@ check() {
 
 check "yosys"        yosys --version
 check "morty"        morty --version
-check "svase"        svase --version
+# svase's own --version throws an unhandled cxxopts exception (tries to read
+# a required positional "top" argument before checking --version was passed)
+# and aborts - a pre-existing bug in this pin, not something we touch. --help
+# takes the same early-return path successfully, so use that instead.
+check "svase"        svase --help
 check "sv2v"         sv2v --version
 check "bender"       bender --version
 check "openroad"     openroad -version
