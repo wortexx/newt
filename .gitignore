@@ -30,5 +30,6 @@ target/ihp13/openroad/reports/
 .dvt
 dvt_build.log
 .vscode
+.DS_Store
 
 *.log
