@@ -1,0 +1,127 @@
+name: newt-eda image
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docker/**'
+      - '.github/workflows/docker-image.yml'
+  pull_request:
+    paths:
+      - 'docker/**'
+      - '.github/workflows/docker-image.yml'
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository_owner }}/newt-eda
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Needed on every run, not just main pushes: the default docker-container
+      # buildx driver runs BuildKit in an isolated container that does not
+      # share image storage with the local Docker daemon, so a later stage's
+      # `FROM <local-tag>` can't see an earlier stage's `load: true` output -
+      # it tries to resolve it as a real registry ref instead and fails. Each
+      # stage below pushes to GHCR under a `:ci` working tag so the composite
+      # build's FROM lines resolve for real. This assumes GITHUB_TOKEN has
+      # packages:write on pull_request too, true for same-repo PRs (no
+      # external contributors yet); revisit if that changes.
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute tags
+        id: meta
+        run: |
+          echo "date=$(date -u +%F)" >> "$GITHUB_OUTPUT"
+          echo "sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      # Each stage caches independently on GHCR so an unchanged Dockerfile is
+      # a cache hit and only touched stages actually rebuild (design.md D5).
+      - name: Build pickle stage
+        uses: docker/build-push-action@v6
+        with:
+          context: docker/pickle
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-pickle:ci
+          push: true
+          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-cache:pickle
+          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-cache:pickle,mode=max
+
+      - name: Build yosys stage
+        uses: docker/build-push-action@v6
+        with:
+          context: docker/yosys
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-yosys:ci
+          push: true
+          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-cache:yosys
+          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-cache:yosys,mode=max
+
+      - name: Build openroad stage
+        uses: docker/build-push-action@v6
+        with:
+          context: docker/openroad
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-openroad:ci
+          push: true
+          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-cache:openroad
+          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-cache:openroad,mode=max
+
+      - name: Build riscv64 stage
+        uses: docker/build-push-action@v6
+        with:
+          context: docker/riscv64
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-riscv64:ci
+          push: true
+          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-cache:riscv64
+          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-cache:riscv64,mode=max
+
+      - name: Build verilator stage
+        uses: docker/build-push-action@v6
+        with:
+          context: docker/verilator
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-verilator:ci
+          push: true
+          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-cache:verilator
+          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-cache:verilator,mode=max
+
+      - name: Build composite image
+        uses: docker/build-push-action@v6
+        with:
+          context: docker/all
+          build-args: |
+            PICKLE_IMG=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-pickle:ci
+            YOSYS_IMG=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-yosys:ci
+            OPENROAD_IMG=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-openroad:ci
+            RISCV64_IMG=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-riscv64:ci
+            VERILATOR_IMG=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-verilator:ci
+          tags: newt-eda:smoke-test
+          load: true
+          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-cache:all
+          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-cache:all,mode=max
+
+      - name: Smoke test
+        run: |
+          docker run --rm -v "${{ github.workspace }}/docker/smoke-test.sh:/smoke-test.sh:ro" \
+            newt-eda:smoke-test bash /smoke-test.sh
+
+      # Publish only after the smoke test passes, and only on main (never on PRs).
+      - name: Tag and publish
+        if: github.event_name != 'pull_request'
+        run: |
+          docker tag newt-eda:smoke-test "${REGISTRY}/${IMAGE_NAME}:${{ steps.meta.outputs.date }}-${{ steps.meta.outputs.sha }}"
+          docker tag newt-eda:smoke-test "${REGISTRY}/${IMAGE_NAME}:dev"
+          docker push "${REGISTRY}/${IMAGE_NAME}:${{ steps.meta.outputs.date }}-${{ steps.meta.outputs.sha }}"
+          docker push "${REGISTRY}/${IMAGE_NAME}:dev"

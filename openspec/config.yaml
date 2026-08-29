@@ -1,13 +1,39 @@
 schema: spec-driven
 
-# Project context (optional)
-# This is shown to AI when creating artifacts.
-# Add your tech stack, conventions, style guides, domain knowledge, etc.
-# Example:
-#   context: |
-#     Tech stack: TypeScript, React, Node.js
-#     We use conventional commits
-#     Domain: e-commerce platform
+context: |
+  Project "newt": a master-thesis fork of Basilisk (pulp-platform/cheshire-ihp130-o),
+  a Linux-capable RV64 SoC (CVA6 host core via Cheshire) targeting IHP's SG13G2
+  130nm open-source PDK with a fully open EDA flow.
+  Thesis goal: add SHA crypto instructions to CVA6 — via a CV-X-IF coprocessor or
+  the Zknh standard extension (decision pending) — and carry them end-to-end through
+  the real flow for silicon-realistic PPA numbers. See docs/custom-isa-extension.md
+  (thesis plan) and docs/infra-plan.md (CI/infra plan, living document).
+
+  Tech stack:
+  - RTL: SystemVerilog in hw/; deps managed by Bender (cheshire, cva6, axi,
+    hyperbus, register_interface), pinned in Bender.yml/Bender.lock
+  - Flow: Bender -> Morty -> SVase -> sv2v -> Yosys (custom fork, do NOT rebase)
+    -> OpenROAD; driven by Makefiles (iguana.mk, tools.mk, target/ihp13/*.mk)
+  - Sim: Questa-only today (make ig-sim-rtl); Verilator flow is planned (Phase 2)
+  - Tooling runs in Docker (docker/, use-docker.sh); newt-eda image planned
+
+  Conventions and constraints:
+  - Upstream is dormant (since 2024-10); we own all tooling decisions
+  - PROJ_NAME/RTL_NAME stay "basilisk" — many scripts hardcode it; do not rename
+  - Modify dependencies (cheshire, cva6) via forks pinned in Bender.yml, not patches
+  - CVA6 config: cv64a6_imafdcsclic_sv39; CV-X-IF exists but is disabled/tied off
+  - Licensing: Solderpad 0.51 for hardware/scripts, Apache-2.0 for software;
+    keep SPDX headers in new files
+  - Synth needs >35 GB RAM, ~2.5 h; backend >24 h and does not close timing
+    (WNS ~ -2.5 ns, known/accepted) — full-flow validation is expensive and
+    cannot be a per-change gate
+
+rules:
+  proposal:
+    - State which flow stages the change touches (RTL / sim / synth / backend / CI / sw)
+  tasks:
+    - Mark tasks that need EDA tools or long runs (synth/P&R) vs plain editing,
+      and prefer cheap validation (lint, unit sim) as the completion gate
 
 # Per-artifact rules (optional)
 # Add custom rules for specific artifacts.
