@@ -19,16 +19,17 @@ ARG SV2V_REPO=https://github.com/zachjs/sv2v
 ARG SV2V_COMMIT=v0.0.11
 
 ENV DEBIAN_FRONTEND=noninteractive
-# install packages
+# install packages (keep the apt cache around: both installers below shell out
+# to their own "apt-get install" and need a live package index)
 COPY packages.txt /packages.txt
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends $(cat /packages.txt) && \
-    rm -rf /var/lib/apt/lists/*
+    apt-get install -y --no-install-recommends $(cat /packages.txt)
 # install rust cargo (morty)
 RUN curl https://sh.rustup.rs -sSf | bash -s -- -y
 ENV PATH="/root/.cargo/bin:$PATH"
 # install haskell stack (sv2v)
 RUN curl -sSL https://get.haskellstack.org/ | bash
+RUN rm -rf /var/lib/apt/lists/*
 
 
 WORKDIR /build/bin

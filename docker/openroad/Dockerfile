@@ -14,12 +14,12 @@ ARG OR_REPO=https://github.com/The-OpenROAD-Project/OpenROAD
 # OpenROAD does not cut regular tagged releases (last tag: v0.9.0-beta, 2020);
 # pin to a recent master commit instead and bump periodically.
 ARG OR_COMMIT=2c569269719c59ef6eef90bcc33f8bc7afc16c02
-# install packages
+# install packages (keep the apt cache around: DependencyInstaller.sh below
+# shells out to its own "apt-get install" and needs a live package index)
 COPY packages.txt /packages.txt
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends $(cat /packages.txt) && \
-    rm -rf /var/lib/apt/lists/*
+    apt-get install -y --no-install-recommends $(cat /packages.txt)
 
 WORKDIR /openroad
 # pull; OpenROAD's own etc/DependencyInstaller.sh resolves boost/eigen/lemon/
@@ -28,6 +28,7 @@ WORKDIR /openroad
 RUN git clone ${OR_REPO}.git . && git checkout ${OR_COMMIT} && \
     git submodule update --init --recursive
 RUN ./etc/DependencyInstaller.sh -all
+RUN rm -rf /var/lib/apt/lists/*
 
 RUN mkdir build && mkdir -p /build/version && mkdir install
 RUN cd build && cmake -DCMAKE_INSTALL_PREFIX=$(pwd)/install .. && \

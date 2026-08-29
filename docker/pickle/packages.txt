@@ -2,12 +2,14 @@ build-essential
 ca-certificates
 curl
 git
+gnupg
 python3
 python3-pip
 tcl
 cmake
 clang-16
 libboost-all-dev
+libffi-dev
 libgmp-dev
 zlib1g-dev
 libtinfo-dev
