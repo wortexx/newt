@@ -21,6 +21,10 @@ target/nonfree
 # target/ihp13
 target/ihp13/pickle/out
 target/ihp13/macro_cells
+target/ihp13/backend-run/
+target/ihp13/*/out/
+target/ihp13/openroad/save/
+target/ihp13/openroad/reports/
 
 # Editor fun
 .dvt
