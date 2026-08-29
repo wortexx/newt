@@ -24,8 +24,12 @@ ENV DEBIAN_FRONTEND=noninteractive
 COPY packages.txt /packages.txt
 RUN apt-get update && \
     apt-get install -y --no-install-recommends $(cat /packages.txt)
-# install rust cargo (morty)
-RUN curl https://sh.rustup.rs -sSf | bash -s -- -y
+# install rust cargo (morty); pinned to a toolchain contemporaneous with
+# morty v0.9.0's Cargo.lock (released 2023-02) - "latest stable" rustc
+# eventually turns sv-parser-parser 0.12.1's ambiguous glob imports (E0659)
+# into a hard error, and that dependency version is locked, not something
+# we can bump without touching morty's own pin
+RUN curl https://sh.rustup.rs -sSf | bash -s -- -y --default-toolchain 1.67.0
 ENV PATH="/root/.cargo/bin:$PATH"
 # install haskell stack (sv2v)
 RUN curl -sSL https://get.haskellstack.org/ | bash
@@ -37,7 +41,7 @@ RUN curl -L ${BENDER_TAR} | tar -xzC .
 
 WORKDIR /morty
 RUN curl -L ${MORTY_REPO}/archive/${MORTY_COMMIT}.tar.gz | tar -xzC . --strip-components=1 && \
-    cargo build --release && \
+    cargo build --release --locked && \
     cp target/release/morty /build/bin/morty
 
 # ToDo: submodules lose their correct versions if done via archive -> fix in svase?
