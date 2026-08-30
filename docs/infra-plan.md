@@ -75,25 +75,48 @@ frequency; GitHub large runners cover synth until then.
       when needed, `cva6` (`CvxifEn=1` / `Zknh`); point `Bender.yml` at the forks + commits.
       Prefer forks over `pickle/patches/` for anything beyond a one-line change.
 
-## Phase 1 — `newt-eda` tooling image
+## Phase 1 — `newt-eda` tooling image  ✅ done (2026-08-30)
 
 Derive from the existing `docker/` multi-stage layout; do not rewrite from scratch.
+Full planning + implementation record: `openspec/changes/newt-eda-tooling-image/`
+(archived once synced; see its `tasks.md` for the blow-by-blow of every bug found and fixed).
 
-- [ ] `DOCKER_BASE_IMG`: `almalinux:8.9` → `ubuntu:24.04` in all of
+- [x] `DOCKER_BASE_IMG`: `almalinux:8.9` → `ubuntu:24.04` in all of
       `docker/{pickle,yosys,openroad,riscv64}/Dockerfile`; port `packages.txt` yum → apt.
-- [ ] **OpenROAD**: bump `OR_COMMIT` to a recent tagged release.
-- [ ] **riscv64 toolchain**: bump to GCC ≥ 13 (keeps `Zknh` option open).
-- [ ] **Keep pinned**: yosys fork, morty `v0.9.0`, svase, sv2v `v0.0.11`, bender `v0.27.4`.
-- [ ] **Add**: Verilator (v5.x stable), `verible` (lint/format).
-- [ ] Publish to **GHCR**: `ghcr.io/wortexx/newt-eda:<yyyy-mm-dd>-<sha>` + moving `:dev`.
-- [ ] Workflow: rebuild + push image on any `docker/**` change.
-- [ ] **Adoption gate:** run `make synth-all` on *unmodified* basilisk in the new image;
-      diff cell count / area / WNS against the 2024 baseline
-      (`target/ihp13/yosys/reports/basilisk_area.rpt`). Small deltas from the OpenROAD bump
-      expected; investigate large ones. Keep the 2024 image as fallback.
+- [x] **OpenROAD**: bumped `OR_COMMIT` to `2c56926` (latest master as of 2026-08-29 —
+      OpenROAD doesn't cut regular tagged releases; last one was `v0.9.0-beta`, 2020).
+      Dependency build switched to OpenROAD's own `etc/DependencyInstaller.sh -all`,
+      replacing the hand-rolled boost/eigen/lemon/spdlog/swig chain.
+- [x] **riscv64 toolchain**: bumped to release `2026.08.27` (GCC 16.1.0, well past the
+      ≥13 bar; `Zknh` compiles).
+- [x] **Kept pinned**: yosys fork `3ce5059`, morty `v0.9.0`, svase `f5f5290`, sv2v `v0.0.11`,
+      bender `v0.27.4`.
+- [x] **Added**: Verilator `v5.050`, Verible `v0.0-4148-g1ea007ec` (static release binary).
+- [x] Published to **GHCR**: `ghcr.io/wortexx/newt-eda:2026-08-29-8d13fe0` + moving `:dev`,
+      publicly pullable (confirmed by an anonymous `docker pull`, no visibility fix needed).
+- [x] Workflow: `.github/workflows/docker-image.yml` rebuilds + publishes on `docker/**`
+      changes (PRs build-verify only; `main` pushes publish).
+- [x] **Adoption gate: PASS.** `make synth-all` on unmodified Basilisk vs. the 2024 baseline:
+      completed in ~2h28m (baseline ~2h27m) on a 32GB-RAM/55GB-swap box, peak 29.6GB, no OOM;
+      yosys `CHECK` 0 problems both sides; cell count 722,285→714,166 (−1.1%), chip area
+      17,219,125.78→17,156,844.69 (−0.36%), DFF count 89,261→89,258 (−3) — smaller, not
+      bigger. Root-caused as far as worth chasing: bootrom cell redistribution traces to the
+      *intentional* GCC 13→16 bump; a residual ~830-module textual divergence in the pickled
+      RTL remains only partially explained (bender-version schema differences ruled out as the
+      cause; see Risks). Small, benign-direction, explained-enough per this proposal's own bar.
+      2024 image (`phsauter/pulp-iguana:dev`) kept reachable via `make -C docker pull-legacy`.
+- [ ] **Not yet done — adoption decision pending**: flip `docker-compose.yml`/`use-docker.sh`
+      to `newt-eda:dev` as the default dev image. Gate passed; flipping the default is a
+      separate call the user makes deliberately, not an automatic consequence of a green gate.
 - [ ] Expect 2–3 days adapting `chip.tcl` to newer OpenROAD command APIs
       (`remove_buffers` now requires instance args; `repair_timing` / `global_route` /
-      `detailed_route` flags moved; GUI / `save_image` changes).
+      `detailed_route` flags moved; GUI / `save_image` changes) — not attempted yet; this
+      phase only had to prove the yosys synth path, not full P&R.
+- [x] **Found and fixed along the way**: the image was missing `gawk`/`unzip`
+      (`yosys.mk`/`openroad.mk` pipe logs through `gawk '{ print strftime(...) }'`; OpenROAD's
+      `checkpoint.tcl` uses `unzip`) — neither is an EDA tool the original smoke test checked
+      for. Fixed in `docker/all/packages.txt`; smoke test extended so a missing flow-support
+      utility like this gets caught by CI next time.
 
 ## Phase 2 — Verilator simulation flow  *(critical path)*
 
@@ -210,6 +233,8 @@ Three options, in increasing order of payoff and effort:
 | Golden-image drift on every tool bump | Automate capture in Packer (Phase 6) |
 | Azure cost creep | Spot for synth; deallocate always; budget alert. Est. ~$50–150/mo depending on P&R cadence |
 | `detailed_route` never converges on the modified design | It is congestion-bound at 63 % util even for stock Basilisk; treat a clean route as a stretch goal, not a gate. Consider a secondary easier PDK (Sky130) for fast QoR during development |
+| Phase 1 adoption gate's ~1% cell/area delta has an unexplained residual: a ~830-module textual divergence in the pickled RTL (`sv2v.v`) between the 2024 baseline and the new image. Ruled out: bender release-asset choice (verified byte-identical `sources.json` from both `v0.27.4` assets on identical input) and the `TARGET_*` bender-version schema difference (those defines aren't referenced anywhere in the dependency tree). Not yet distinguished: pure module-reordering in morty's output vs. an actual semantic difference | Not blocking — delta is small and in the benign direction (design got smaller), 0 yosys `CHECK` problems both sides. Revisit if a future gate shows a similar or larger delta; a sort-and-diff-by-module pass on `sv2v.v`, or re-running pickle against a `bender 0.32.1`-shaped `sources.json`, would isolate it |
+| 2024 baseline's own `sources.json` was generated by a host-installed `bender 0.32.1`, not either Docker image's bundled `0.27.4` — a pre-existing baseline-generation inconsistency, discovered while investigating the row above | Note for future baseline captures: regenerate references fully in-container with the pinned tool versions, not via whatever `bender` happens to be on the host PATH |
 
 ---
 
