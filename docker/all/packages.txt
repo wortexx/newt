@@ -6,6 +6,7 @@ git
 unzip
 gdb
 valgrind
+g++
 libtool
 libllvm18
 libreadline8

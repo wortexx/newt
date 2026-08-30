@@ -77,6 +77,10 @@ make ig-sw-all
 make ig-sim-all
 # run simulation, select one in [...] and optinally add -gui
 make ig-sim-[rtl/sv2v/synth](-gui)
+
+# or simulate with the open-source Verilator flow instead of Questa
+# (see target/verilator/README.md - status, plusargs, what is/isn't simulated)
+make ig-sim-verilator
 ```
 
 ## Flow

@@ -1,0 +1,20 @@
+// Copyright 2026 ETH Zurich and University of Bologna.
+// Solderpad Hardware License, Version 0.51, see LICENSE for details.
+// SPDX-License-Identifier: SHL-0.51
+//
+// Scoped Verilator lint waivers for the Verilator simulation lane. Each
+// waiver is scoped to one rule and one file/instance, with a comment
+// explaining why - see openspec/changes/verilator-sim-flow/design.md
+// (Risks: "CVA6/Cheshire RTL trips Verilator") for the policy this follows.
+// Do NOT add a blanket `-Wno-*` or an unscoped `lint_off` here.
+
+`verilator_config
+
+// axi_llc_tag_store.sv zero-initializes a struct containing an enum member
+// via `'{default: '0}` - a widespread, harmless SystemVerilog idiom for
+// "zero this struct", not an actual invalid enum value. Verilator's
+// ENUMVALUE check (IEEE 1800-2023 6.19.3, implicit bit->enum conversion)
+// flags it at error severity by default. Upstream (pulp-platform/axi_llc),
+// not modified here per the project's dependency strategy (fork only if it
+// actively blocks us - this doesn't; it's an inert lint waiver).
+lint_off -rule ENUMVALUE -file "*axi_llc_tag_store.sv"

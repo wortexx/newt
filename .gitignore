@@ -26,6 +26,12 @@ target/ihp13/*/out/
 target/ihp13/openroad/save/
 target/ihp13/openroad/reports/
 
+# target/verilator
+target/verilator/build/
+target/verilator/obj_dir/
+# CVA6's tracer writes here when the model is run from the repo root
+/trace_hart_*.dasm
+
 # Editor fun
 .dvt
 dvt_build.log

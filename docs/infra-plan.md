@@ -118,19 +118,41 @@ Full planning + implementation record: `openspec/changes/newt-eda-tooling-image/
       for. Fixed in `docker/all/packages.txt`; smoke test extended so a missing flow-support
       utility like this gets caught by CI next time.
 
-## Phase 2 — Verilator simulation flow  *(critical path)*
+## Phase 2 — Verilator simulation flow  *(critical path)*  🟡 in progress
 
-Questa stays as a local-only waveform-debug target.
+Questa stays as a local-only waveform-debug target. Full record:
+`openspec/changes/verilator-sim-flow/` (not yet archived — green light not reached).
 
-- [ ] Add `bender script verilator` + a Verilator build to `iguana.mk`
-      (mirror `ig-sim-rtl`; reuse `BENDER_SIM_TARGETS`). Crib from Cheshire / CVA6 upstream
-      Verilator support.
-- [ ] Port `SIM_PRE_COMPILE` (`BOOTMODE` / `PRELMODE` / `BINARY`) to Verilator plusargs.
+- [x] Add `bender script verilator` + a Verilator build to `iguana.mk`
+      (mirror `ig-sim-rtl`; reuse `BENDER_SYNTH_TARGETS`, not `BENDER_SIM_TARGETS` — see the
+      change's task 1.1 for why `-t simulation` was rejected). Crib from Cheshire / CVA6
+      upstream Verilator support (a never-merged 2023 Cheshire branch cribbed for JTAG/DM
+      register-map details, not code — see design.md D2/D3).
+      DUT is `iguana_soc` (`-D NO_HYPERBUS`), not the chip top or a hand-duplicated
+      `cheshire_soc` wrapper — full 798-module SoC verilates clean (`verilator --cc`, one
+      scoped `.vlt` waiver, no IP fork needed).
+- [x] Port `SIM_PRE_COMPILE` (`BOOTMODE` / `PRELMODE` / `BINARY`) to Verilator plusargs
+      (`+BINARY=`, `+BOOTMODE=`, `+PRELMODE=`, `+TIMEOUT_CYCLES=`); this lane only supports
+      `BOOTMODE=0`/`PRELMODE=0` (SPM boot, JTAG preload) — other values are rejected with a
+      clear error rather than silently ignored.
 - [ ] **Green light:** `sw/tests/helloworld.spm.elf` boots and prints under Verilator, exit 0.
+      **Blocked.** A from-scratch JTAG-DTM + RISC-V Debug Module driver was built (bit-banged
+      TAP, DMI, SBA — no fesvr/DPI dependency) and validated at the TAP level (IDCODE readback
+      correct). The DMI protocol reports success throughout ELF preload and the abstract
+      command that sets `dpc`, but `DMSTATUS`'s hart-status bits (and separately, SBA memory
+      reads) return a value that never changes across repeated reads, including when no halt
+      is ever requested — not yet root-caused. Needs waveform access or a reference DMI-driver
+      trace to make further progress; see the change's tasks.md (3.1) for the full
+      investigation log.
 - [ ] Coprocessor **unit testbench** (Verilator or cocotb) driving the CV-X-IF / instruction
-      interface directly with NIST KAT vectors.
+      interface directly with NIST KAT vectors. **Descoped from this phase** — moved to
+      Phase 7 (depends on the still-open CV-X-IF-vs-`Zknh` decision and coprocessor RTL that
+      doesn't exist yet); this phase delivers the simulator infrastructure it will run on.
 - [ ] Fallback if full-SoC Verilator stalls (hyperbus / DRAM models are the usual snag):
       ship the unit TB first; do full-SoC sim in the synth lane later.
+      Turned out unnecessary for verilation itself (full SoC verilates fine without
+      hyperbus/DRAM, which this DUT ties off via `NO_HYPERBUS`); the *simulation* still
+      stalls, but on the DM protocol issue above, not on verilating the SoC.
 
 ## Phase 3 — CI fast lane (GitHub-hosted, every PR + push)
 
