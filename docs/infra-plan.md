@@ -13,7 +13,7 @@ instructions for a cryptographic (SHA) coprocessor on CVA6 / Cheshire, targeting
 ## 0. Context & constraints (learned from a full end-to-end backend run)
 
 | Fact | Implication |
-|---|---|
+| --- | --- |
 | Upstream repo dormant since 2024-10; Docker image built 2024-08-22 | Nobody upstream will refresh tooling — we own it. |
 | yosys is a **custom fork** (`github.com/phsauter/yosys` @ `3ce5059`) | Do **not** rebase onto upstream yosys unless it actively blocks us. |
 | OpenROAD is upstream (`589dee1c8`, ~mid-2024) | Safe to bump to a recent release. This is where all backend instability was. |
@@ -47,6 +47,7 @@ so the infra plan is identical. MMIO-accelerator option dropped from the critica
 Phase 0  ──►  Phase 1 (newt-eda image) ─┐
              Phase 2 (Verilator flow)  ─┴─►  Phase 3 (fast CI) ──► Phase 4 (synth CI) ──► Phase 5+6 (P&R + Azure)
                                                                 └►  Phase 7 (coprocessor RTL, ongoing, parallel)
+                                                                └►  Phase 8 (svase→yosys-slang, exploratory, parallel)
 ```
 
 **Do Phase 2 first among the technical work** — it is the long pole; everything meaningful
@@ -113,7 +114,7 @@ Questa stays as a local-only waveform-debug target.
 Container `newt-eda`; runner `ubuntu-latest` (or an 8-core larger runner if sim is slow).
 
 | Job | What | ~time |
-|---|---|---|
+| --- | --- | --- |
 | `lint` | `bender check`; `verible-verilog-lint` + `verilator --lint-only` on changed RTL | ~2 min |
 | `sw` | build test binaries incl. SHA KAT programs (riscv64 gcc) | ~3 min |
 | `sim-unit` | coprocessor TB — full NIST KAT set | 5–15 min |
@@ -166,12 +167,44 @@ Triggers: weekly + `workflow_dispatch` + tags/releases.
 - [ ] Decision needed from `custom-isa-extension.md`: mechanism (1 vs 2) + which hashes
       (SHA-256 / SHA-512 / SHA-3).
 
+## Phase 8 — Replace svase+sv2v with `yosys-slang`  *(exploratory, not blocking)*
+
+`svase` (github.com/pulp-platform/svase) is now archived upstream — no more fixes will land.
+It's a thin wrapper around **slang** (SV compiler frontend): parse+elaborate with slang,
+re-emit plain SystemVerilog for `sv2v` to downgrade further for yosys. Slang itself has no
+first-class "re-emit legal SV" mode, which is the whole reason svase exists as a separate tool.
+
+Three options, in increasing order of payoff and effort:
+
+1. **Fork svase** (matches the project's existing pattern for yosys/cheshire/cva6) — lowest
+   effort, keeps today's `morty → svase → sv2v → yosys` pipeline shape unchanged. Archival
+   mainly means no upstream fixes; svase pins its own slang version, so it won't break on its
+   own.
+2. **Adopt `yosys-slang`** (antmicro/povik's yosys plugin using slang as yosys's native
+   SystemVerilog frontend) — potentially removes **both** svase and sv2v from the pickle
+   chain, not just svase, since yosys would consume slang-elaborated SV directly instead of
+   needing it pre-flattened to old-style Verilog. Meaningfully better architecture, bigger
+   lift: needs validation against this design's parameterization/macros/attributes, and
+   changes `target/ihp13/pickle/pickle.mk`'s shape.
+3. **Custom slang-based re-emitter** — reimplementing svase's function from scratch. Not
+   recommended; more work than (2) for less benefit.
+
+- [ ] Prototype `yosys-slang` against unmodified Basilisk RTL; confirm it handles this
+      design's constructs before committing to it.
+- [ ] If it works: dedicated OpenSpec change (its own proposal/design/tasks) to replace the
+      `svase`+`sv2v` pipeline stages — this is a real architecture change to the synthesis
+      frontend, not a drop-in tool swap folded into another change.
+- [ ] If it doesn't: fall back to forking svase (option 1) so the pin stops depending on an
+      archived, unmaintained upstream.
+- No critical-path dependency on this phase; `svase f5f5290` stays pinned and untouched
+  everywhere else until this is prototyped and decided.
+
 ---
 
 ## Risks
 
 | Risk | Mitigation |
-|---|---|
+| --- | --- |
 | Questa → Verilator port is hard (Cheshire TB, hyperbus / DDR models) | Start with the coprocessor unit TB; accept synth-lane-only full-SoC sim initially |
 | OpenROAD bump breaks `chip.tcl` command APIs | Budget 2–3 days in Phase 1; keep the 2024 image as fallback |
 | Golden-image drift on every tool bump | Automate capture in Packer (Phase 6) |
@@ -183,7 +216,7 @@ Triggers: weekly + `workflow_dispatch` + tags/releases.
 ## Appendix A — observed resource profile (stock Basilisk, this hardware)
 
 | Phase | RAM peak | Parallelism | Wall time |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | yosys synthesis | ~30–35 GB | mostly 1–2 threads (ABC) | ~2.5 h (with swap) |
 | OpenROAD floorplan → CTS → global route | 8–15 GB | 8–12 threads | ~2 h |
 | OpenROAD `detailed_route` | ~26–30 GB | ~12–32 threads | many hours; did not converge (700 k → 516 k DRC violations over 2 iterations before manual stop) |
