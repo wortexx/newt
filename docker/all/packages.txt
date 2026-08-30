@@ -1,7 +1,9 @@
 ca-certificates
 curl
 dbus
+gawk
 git
+unzip
 gdb
 valgrind
 libtool
