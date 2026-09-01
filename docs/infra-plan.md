@@ -66,7 +66,8 @@ frequency; GitHub large runners cover synth until then.
       `target/ihp13/openroad/{save,reports}/` (`.bender`, `*.log`,
       `target/sim/vsim/work/` were already covered upstream). Pushed to fork.
 - [x] Branch protection on `main`: PR required (0 approvals — solo repo), status checks
-      required-but-empty (add Phase 3 job names once CI exists), no force-push/deletion.
+      required, no force-push/deletion. Required checks: `lint`, `sw` (Phase 3's real,
+      gating jobs — see Phase 3 below; its three stub jobs are deliberately not required).
 - [x] Add `docs/` (this file). CODEOWNERS dropped — pointless for a solo repo
       (recreate as `.github/CODEOWNERS` with `* @wortexx` if collaborators join).
 - [ ] **Naming:** keep `PROJ_NAME` / `RTL_NAME = basilisk` internally for now — many scripts
@@ -138,11 +139,20 @@ Container `newt-eda`; runner `ubuntu-latest` (or an 8-core larger runner if sim 
 
 | Job | What | ~time |
 | --- | --- | --- |
-| `lint` | `bender check`; `verible-verilog-lint` + `verilator --lint-only` on changed RTL | ~2 min |
+| `lint` | `bender sources` (was listed as `bender check` here originally — that command doesn't exist in any bender version, found via a real CI failure, see `ci-fast-lane` tasks.md 2.1); `verible-verilog-lint` + `verilator --lint-only` on changed RTL | ~2 min |
 | `sw` | build test binaries incl. SHA KAT programs (riscv64 gcc) | ~3 min |
 | `sim-unit` | coprocessor TB — full NIST KAT set | 5–15 min |
 | `sim-soc` | Verilator: Cheshire boot + one KAT through the new instructions | 15–40 min |
 | `synth-coproc` | yosys synth of the coprocessor module only → area + Fmax; fail on regression vs a checked-in budget file | 5–10 min |
+
+- [x] `.github/workflows/ci.yml`: all five jobs above exist and run on every push/PR.
+      `lint` and `sw` are real and gating (wired into `main`'s required status checks —
+      see Phase 0 above). `sim-unit`, `sim-soc`, and `synth-coproc` are intentionally
+      scaffolded stubs — each runs its real precondition check every run and reports which
+      blocker is still open (no Phase 7 coprocessor RTL yet; the `verilator-sim-flow`
+      JTAG-DM bug, deferred per that change's tasks.md) — but always exits 0 and is not a
+      required check until it graduates via a dedicated follow-up, never automatically.
+      Full planning record: `openspec/changes/ci-fast-lane/`.
 
 ## Phase 4 — CI synth lane
 

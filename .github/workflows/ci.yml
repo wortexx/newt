@@ -1,0 +1,229 @@
+# CI fast lane — docs/infra-plan.md Phase 3.
+#
+# `lint` and `sw` are real, blocking checks (required status checks on
+# `main`). `sim-unit`, `sim-soc`, and `synth-coproc` are intentionally
+# scaffolded stubs: each runs its real precondition check every time and
+# reports which named blocker is still open (Phase 7 coprocessor RTL not
+# landed yet, or the verilator-sim-flow JTAG-DM bug — see that change's
+# tasks.md task 3.1), but always exits 0 and is NOT a required status
+# check while stubbed. A green checkmark on one of the three stub jobs
+# means "ran, the tracked blocker is still open" — not "passed a
+# meaningful test." A stub graduates to a real, gating check only via a
+# deliberate follow-up change, never automatically just because its
+# blocker clears (see openspec/changes/ci-fast-lane/design.md D3 and
+# specs/ci-pipeline/spec.md for the full contract).
+name: CI
+
+on:
+  # pull_request already fires on every push to a branch with an open PR,
+  # so scoping push to main avoids running the whole workflow twice for
+  # the common case (push to a branch that already has a PR open) -
+  # found via two genuinely duplicate runs against the same commit.
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    container: ghcr.io/wortexx/newt-eda:dev
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # The container job's user doesn't own the runner-checked-out tree,
+      # which makes git (and bender, which shells out to git) refuse to
+      # touch it ("detected dubious ownership"). Confirmed necessary via a
+      # local repro of the same failure mode in a container run.
+      - name: Allow git to operate on the checked-out tree
+        run: git config --global --add safe.directory '*'
+
+      # bender has no `check` subcommand in any version (verified against
+      # both the image's pinned 0.27.4 and a newer 0.32.0 - `bender check`
+      # was a stale claim already sitting in docs/infra-plan.md's Phase 3
+      # table before this change, never actually run against real bender).
+      # `bender sources` is the closest real equivalent: it fully resolves
+      # Bender.yml/Bender.lock and errors on a genuine inconsistency.
+      #
+      # Wrapped in a retry: a fresh `bender sources`/`bender checkout`
+      # clones `cheshire`, which recursively clones ITS submodules,
+      # including `sw/deps/cva6-sdk`'s own submodules - one of which
+      # (buildroot, at the legacy `git://git.buildroot.net`) intermittently
+      # drops the connection. Confirmed genuinely transient (a later
+      # attempt against the same commit succeeded outright) rather than a
+      # workflow bug, so retry with a clean `.bender/` rather than trying
+      # to special-case that one remote.
+      - name: bender sources (dependency graph resolves and is consistent)
+        run: |
+          retry() {
+            local attempt=1 max=3
+            until "$@"; do
+              if [ "$attempt" -ge "$max" ]; then
+                echo "::error::giving up after $max attempts: $*"
+                return 1
+              fi
+              echo "Attempt $attempt/$max failed - retrying with a clean .bender/ in 20s (see this step's header comment)."
+              rm -rf .bender
+              sleep 20
+              attempt=$((attempt + 1))
+            done
+          }
+          try() { bender sources > /dev/null; }
+          retry try
+
+      - name: Determine changed RTL files
+        id: changed
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE="${{ github.event.pull_request.base.sha }}"
+          else
+            BASE="${{ github.event.before }}"
+            # `before` is all-zeros on a branch's first push - fall back
+            # to the repo's root commit so the diff still resolves.
+            if ! git cat-file -e "$BASE" 2>/dev/null; then
+              BASE=$(git rev-list --max-parents=0 HEAD | tail -1)
+            fi
+          fi
+          FILES=$(git diff --name-only --diff-filter=ACMR "$BASE" "${{ github.sha }}" -- '*.sv' '*.svh' || true)
+          echo "Base: $BASE"
+          echo "Changed RTL files:"
+          echo "${FILES:-<none>}"
+          {
+            echo "files<<EOF_FILES"
+            echo "$FILES"
+            echo "EOF_FILES"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: verible-verilog-lint (changed files)
+        if: steps.changed.outputs.files != ''
+        run: |
+          echo "${{ steps.changed.outputs.files }}" | xargs -r -n1 verible-verilog-lint
+
+      - name: verilator --lint-only (changed files)
+        if: steps.changed.outputs.files != ''
+        run: |
+          # Per-file, not full-elaboration: full-SoC --lint-only is covered
+          # separately by the (not-yet-gating) sim-soc job and is too slow
+          # for a fast-lane check. Each file still needs the project's
+          # include dirs/defines to resolve `include`s and package
+          # typedefs, so pull those from the same bender-generated script
+          # verilator.mk itself will eventually use, rather than hand
+          # maintaining a second copy.
+          bender script verilator -t rtl -t asic -t ihp13 -t cva6 -t cv64a6_imafdcsclic_sv39 > /tmp/verilator-flags.f
+          mapfile -t FLAGS < <(grep -E '^\+incdir|^\+define' /tmp/verilator-flags.f | sort -u)
+
+          status=0
+          while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            [ -f "$f" ] || continue # skip files deleted in this diff
+            echo "::group::verilator --lint-only $f"
+            verilator --lint-only -Wall "${FLAGS[@]}" "$f" || status=1
+            echo "::endgroup::"
+          done <<< "${{ steps.changed.outputs.files }}"
+          exit $status
+
+  sw:
+    runs-on: ubuntu-latest
+    container: ghcr.io/wortexx/newt-eda:dev
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Allow git to operate on the checked-out tree
+        run: git config --global --add safe.directory '*'
+
+      # Same retry rationale as lint's bender-sources step: `make
+      # ig-sw-all` triggers the same fresh, flaky-at-buildroot.net
+      # dependency checkout as a side effect of Makefile parsing.
+      - name: Build test binaries (make ig-sw-all)
+        run: |
+          retry() {
+            local attempt=1 max=3
+            until "$@"; do
+              if [ "$attempt" -ge "$max" ]; then
+                echo "::error::giving up after $max attempts: $*"
+                return 1
+              fi
+              echo "Attempt $attempt/$max failed - retrying with a clean .bender/ in 20s (see the lint job's bender-sources step for why)."
+              rm -rf .bender
+              sleep 20
+              attempt=$((attempt + 1))
+            done
+          }
+          try() { make ig-sw-all; }
+          retry try
+
+  sim-unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Coprocessor unit testbench (stub)
+        run: |
+          # Non-gating by design (spec: "Stubbed jobs ... never gate
+          # merges"): this job must exit 0 either way. If hw/coproc has
+          # started to land, that's a loud (but non-failing) signal that
+          # this job's body needs to be rewritten to run the real unit TB
+          # - not a reason to fail PRs until someone does that on purpose.
+          if [ -d hw/coproc ]; then
+            echo "::warning::hw/coproc now exists but sim-unit is still the stub implementation - update .github/workflows/ci.yml (see openspec/changes/ci-fast-lane/design.md D3) to run the real coprocessor unit TB and add sim-unit to main's required status checks."
+          else
+            echo "stub: pending Phase 7 coprocessor RTL (docs/infra-plan.md Phase 7) - hw/coproc does not exist yet, nothing to test."
+          fi
+
+  sim-soc:
+    runs-on: ubuntu-latest
+    container: ghcr.io/wortexx/newt-eda:dev
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Allow git to operate on the checked-out tree
+        run: git config --global --add safe.directory '*'
+
+      - name: Verilator SoC boot (stub - runs the real green-light test, does not gate on it)
+        run: |
+          # Non-gating by design: exits 0 in every branch below. This
+          # deliberately still attempts the real thing every run (cheap to
+          # just try) so the moment it starts passing is visible in the
+          # log, without silently starting to gate a merge on its own.
+          #
+          # Same retry rationale as lint's bender-sources step: whatever
+          # target actually runs (or fails to exist) here, Makefile
+          # parsing alone triggers the same fresh, flaky-at-buildroot.net
+          # dependency checkout first. Retrying keeps that flakiness from
+          # being misreported as "the tracked JTAG-DM blocker" below.
+          retry() {
+            local attempt=1 max=3
+            until "$@"; do
+              if [ "$attempt" -ge "$max" ]; then
+                return 1
+              fi
+              echo "Attempt $attempt/$max failed - retrying with a clean .bender/ in 20s (see the lint job's bender-sources step for why)."
+              rm -rf .bender
+              sleep 20
+              attempt=$((attempt + 1))
+            done
+          }
+          try() { make ig-sim-verilator BINARY=sw/tests/helloworld.spm.elf BOOTMODE=0 PRELMODE=0; }
+          set +e
+          retry try
+          result=$?
+          set -e
+          if [ "$result" -eq 0 ]; then
+            echo "::warning::make ig-sim-verilator passed - the verilator-sim-flow green light is no longer blocked. Update .github/workflows/ci.yml (see openspec/changes/ci-fast-lane/design.md D3) to make sim-soc fail on a real regression and add it to main's required status checks."
+          else
+            echo "stub: make ig-sim-verilator did not pass (exit $result) - see the log above for why. Likely the tracked verilator-sim-flow JTAG-DM blocker (its tasks.md task 3.1), but could also mean that change hasn't merged yet, or another regression - not gating yet either way."
+          fi
+
+  synth-coproc:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Coprocessor-only synthesis (stub)
+        run: |
+          if [ -d hw/coproc ]; then
+            echo "::warning::hw/coproc now exists but synth-coproc is still the stub implementation - update .github/workflows/ci.yml (see openspec/changes/ci-fast-lane/design.md D3) to run the real yosys synth-only check and add synth-coproc to main's required status checks."
+          else
+            echo "stub: pending Phase 7 coprocessor RTL (docs/infra-plan.md Phase 7) - hw/coproc does not exist yet, nothing to synthesize."
+          fi
