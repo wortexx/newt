@@ -23,6 +23,19 @@ on:
     branches: [main]
   pull_request:
 
+# GitHub Actions' default `run:` shell for a container job is plain `sh`
+# (dash in newt-eda, since it's Ubuntu-based) unless told otherwise - not
+# bash, even though bash is present in the image. Several steps below use
+# bash-only syntax (`mapfile`, arrays, `<<<` here-strings); under dash
+# those fail with a syntax error rather than just misbehaving. This went
+# undetected through every prior test push because every one of them had
+# zero changed `.sv` files, so the one step that actually hit this
+# (verilator --lint-only) was always skipped - only surfaced on the first
+# push that changed real RTL.
+defaults:
+  run:
+    shell: bash
+
 jobs:
   lint:
     runs-on: ubuntu-latest
@@ -109,16 +122,66 @@ jobs:
           # include dirs/defines to resolve `include`s and package
           # typedefs, so pull those from the same bender-generated script
           # verilator.mk itself will eventually use, rather than hand
-          # maintaining a second copy.
-          bender script verilator -t rtl -t asic -t ihp13 -t cva6 -t cv64a6_imafdcsclic_sv39 > /tmp/verilator-flags.f
-          mapfile -t FLAGS < <(grep -E '^\+incdir|^\+define' /tmp/verilator-flags.f | sort -u)
+          # maintaining a second copy. A file that `import`s a package
+          # (near-universal in this codebase) additionally needs that
+          # package's own source compiled alongside it - an include path
+          # alone does not resolve a SystemVerilog `import`, unlike
+          # `` `include ``. Detect package files by content (`grep` for a
+          # `package` declaration), not by a `*_pkg.sv` filename
+          # convention - found via a real CI failure that a first,
+          # filename-based version of this fix missed: upstream
+          # cheshire's hw/future/spinal_usb_ohci.sv defines
+          # spinal_usb_ohci_pkg without following that naming pattern.
+          #
+          # A changed file that instantiates other project modules (any
+          # hierarchical wrapper, e.g. this DUT's own harness instantiating
+          # iguana_soc) will always report MODMISSING for those instances
+          # under a genuinely per-file check - passing every transitively
+          # instantiated module's own file, and everything *they*
+          # instantiate, is the full-elaboration file list this step
+          # deliberately isn't running. -Wno-MODMISSING waives exactly
+          # that expected condition; verified separately that it does not
+          # mask a real syntax/type error in the file being linted.
+          #
+          # Also -Wno-fatal (matching verilator.mk's own established use of
+          # it, for the same reason): without it, a pre-existing *warning*
+          # in one of the upstream package files pulled in above for
+          # import resolution - not the changed file itself - would fail
+          # this job on every PR, since verilator treats any warning as
+          # fatal by default. This only demotes warnings; genuine %Error
+          # diagnostics (a real syntax/type error in the linted file
+          # itself) stay fatal regardless.
+          retry() {
+            local attempt=1 max=3
+            until "$@"; do
+              if [ "$attempt" -ge "$max" ]; then
+                echo "::error::giving up after $max attempts: $*"
+                return 1
+              fi
+              echo "Attempt $attempt/$max failed - retrying with a clean .bender/ in 20s (see the lint job's bender-sources step for why)."
+              rm -rf .bender
+              sleep 20
+              attempt=$((attempt + 1))
+            done
+          }
+          try() { bender script verilator -t rtl -t asic -t ihp13 -t cva6 -t cv64a6_imafdcsclic_sv39 > /tmp/verilator-flist.f; }
+          retry try
+
+          mapfile -t FLAGS < <(grep -E '^\+incdir|^\+define' /tmp/verilator-flist.f | sort -u)
+          grep -v '^+' /tmp/verilator-flist.f > /tmp/verilator-files-only.f
+          mapfile -t PKG_FILES < <(xargs -a /tmp/verilator-files-only.f grep -lE '^[[:space:]]*package[[:space:]]' 2>/dev/null | sort -u)
 
           status=0
           while IFS= read -r f; do
             [ -z "$f" ] && continue
             [ -f "$f" ] || continue # skip files deleted in this diff
+            PKG_ARGS=()
+            for p in "${PKG_FILES[@]}"; do
+              [ "$p" = "$f" ] && continue # don't pass the linted file twice if it's itself a package file
+              PKG_ARGS+=("$p")
+            done
             echo "::group::verilator --lint-only $f"
-            verilator --lint-only -Wall "${FLAGS[@]}" "$f" || status=1
+            verilator --lint-only -Wall -Wno-fatal -Wno-MODMISSING "${FLAGS[@]}" "${PKG_ARGS[@]}" "$f" || status=1
             echo "::endgroup::"
           done <<< "${{ steps.changed.outputs.files }}"
           exit $status

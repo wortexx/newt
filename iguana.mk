@@ -244,6 +244,13 @@ IG_SIM_ALL += $(IG_SIM_DIR)/vsim/compile.ihp13.gate.tcl
 .PHONY: ig-sim-rtl ig-sim-sv2v ig-sim-svase ig-sim-synth ig-sim-split-bootrom
 
 
+######################################
+# Verilator Simulation (Questa-free) #
+######################################
+
+include $(IG_ROOT)/target/verilator/verilator.mk
+
+
 ######################
 # Nonfree Components #
 ######################
