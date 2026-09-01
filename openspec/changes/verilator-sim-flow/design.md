@@ -111,21 +111,29 @@ did **not** change the observed symptom: this driver's traces never showed
 `resp=BUSY` in the first place (always `resp=0`, with frozen data), so the
 retry-then-reset path was never exercised. The root cause is still open.
 
-The two most likely next angles, for whoever picks this back up: (1) get an
-FST/VCD trace of a short repro (the no-halt `DMSTATUS`-only poll, described
-above) and inspect `dmi_jtag.sv`'s `state_q`/`error_q`/`dmi_req_valid`/
-`dmi_resp_valid` directly - this is a small, fast repro, not the full boot
-sequence; (2) cross-check against a Questa run of the existing
-`vip_cheshire_soc.sv`-based flow (`make ig-sim-rtl`, e.g. from a Linux VM,
-sidestepping this environment's Docker/virtiofs bender issue entirely) with
-a waveform dump around a `jtag_elf_run` sequence - a real DMI transaction
-trace from a known-working driver against the *same* RTL beats further
-guessing; (3) `croc`'s `jtag_test_simple.sv` also has some 1-bit-wide
-unpacked-array bit ordering built on a commented-out `{<<{}}}` streaming
-operator, replaced with a manual per-index copy in a later patch
-(`rtl/.patches/riscv-dbg/tb/0003-explicit-types-for-parameters.patch`) -
-this driver's own MSB-first send / LSB-first capture convention was derived
-directly from `dmi_jtag.sv`'s shift-register RTL (`dr_d = {tdi,
-dr_q[N-1:1]}`) and confirmed empirically via a correct IDCODE readback, so
-it's very unlikely to be the same bug, but worth a skeptical second look if
-(1) and (2) don't turn up the answer.
+Also read the canonical (unpatched) `jtag_test::riscv_dbg` driver that
+`vip_cheshire_soc.sv` itself instantiates (`riscv-dbg`'s
+`tb/jtag_dmi/jtag_test.sv`, using SystemVerilog's `{<<{}}}` streaming
+operator for bit-(un)packing): confirms this driver's MSB-first send order
+and same-address NOP-retrieve trick already match the canonical reference
+exactly. No new divergence found there.
+
+**Decision (2026-09-01): deferred to a follow-up, not blocking further
+infra work.** The most likely way to actually root-cause this is a
+licensed-simulator cross-check - either a real Questa run (e.g. from a
+Linux VM, sidestepping this environment's Docker/virtiofs bender issue
+entirely) or standing up an Xcelium lane (evaluated as feasible: Xcelium
+fully supports the class-based `jtag_test.sv` driver, unlike Quartus's
+bundled free ModelSim edition which does not support SystemVerilog classes
+at all; would need `bender script flist-plus` + a hand-ported do-file,
+since Bender has no native `xcelium` script target) - run against the
+*same* RTL, with a waveform dump around one DMI transaction. That is not
+worth blocking Phase 3 CI setup on securing a license/VM for, so this is
+parked rather than actively pursued right now.
+
+The lowest-cost angle that stays available without any licensed simulator,
+for whoever picks this back up: get an FST/VCD trace of a short repro (the
+no-halt `DMSTATUS`-only poll, described above) straight out of this
+Verilator harness and inspect `dmi_jtag.sv`'s `state_q`/`error_q`/
+`dmi_req_valid`/`dmi_resp_valid` directly - this is a small, fast repro,
+not the full boot sequence.

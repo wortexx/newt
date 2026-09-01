@@ -136,14 +136,18 @@ Questa stays as a local-only waveform-debug target. Full record:
       `BOOTMODE=0`/`PRELMODE=0` (SPM boot, JTAG preload) — other values are rejected with a
       clear error rather than silently ignored.
 - [ ] **Green light:** `sw/tests/helloworld.spm.elf` boots and prints under Verilator, exit 0.
-      **Blocked.** A from-scratch JTAG-DTM + RISC-V Debug Module driver was built (bit-banged
-      TAP, DMI, SBA — no fesvr/DPI dependency) and validated at the TAP level (IDCODE readback
-      correct). The DMI protocol reports success throughout ELF preload and the abstract
-      command that sets `dpc`, but `DMSTATUS`'s hart-status bits (and separately, SBA memory
-      reads) return a value that never changes across repeated reads, including when no halt
-      is ever requested — not yet root-caused. Needs waveform access or a reference DMI-driver
-      trace to make further progress; see the change's tasks.md (3.1) for the full
-      investigation log.
+      **Blocked, deferred (2026-09-01).** A from-scratch JTAG-DTM + RISC-V Debug Module driver
+      was built (bit-banged TAP, DMI, SBA — no fesvr/DPI dependency) and validated at the TAP
+      level (IDCODE readback correct). The DMI protocol reports success throughout ELF preload
+      and the abstract command that sets `dpc`, but `DMSTATUS`'s hart-status bits (and
+      separately, SBA memory reads) return a value that never changes across repeated reads,
+      including when no halt is ever requested — not yet root-caused despite comparison against
+      two reference drivers (`croc`'s `riscv_dbg_simple` and the canonical `riscv-dbg`
+      `jtag_test::riscv_dbg`). Root-causing this for real likely needs a licensed-simulator
+      cross-check (Questa or Xcelium) or a waveform trace — not worth blocking Phase 3 setup on,
+      so it's parked as follow-up work rather than a Phase 2 gate; see the change's tasks.md
+      (3.1) and design.md's addendum for the full investigation log. Phase 3's `sim-soc` job is
+      scaffolded against this and gated/skipped until it lands.
 - [ ] Coprocessor **unit testbench** (Verilator or cocotb) driving the CV-X-IF / instruction
       interface directly with NIST KAT vectors. **Descoped from this phase** — moved to
       Phase 7 (depends on the still-open CV-X-IF-vs-`Zknh` decision and coprocessor RTL that
