@@ -6,18 +6,23 @@ Defines what runs automatically on every push and pull request against this repo
 
 ## Requirements
 
-### Requirement: CI runs on every push and pull request
+### Requirement: CI runs on every push to main and every pull request
 
-The system SHALL run a CI workflow on every push to any branch and on every pull request, using the `newt-eda` container image on a GitHub-hosted runner.
+The system SHALL run a CI workflow on every push to `main` and on every pull request (which GitHub re-triggers on every subsequent push to that PR's branch), using the `newt-eda` container image on a GitHub-hosted runner. A push to a branch with no open pull request SHALL NOT trigger the workflow, so that a push to a branch already covered by an open PR does not also trigger a redundant, duplicate run of the same commit.
 
 #### Scenario: PR opened against main
 
 - **WHEN** a pull request is opened or updated against `main`
 - **THEN** the CI workflow runs and reports a status for each of its jobs on the PR
 
-#### Scenario: Push to a non-main branch
+#### Scenario: Further pushes to an open PR's branch
 
-- **WHEN** a commit is pushed to any branch
+- **WHEN** a commit is pushed to a branch that already has an open pull request
+- **THEN** the CI workflow runs once (via the `pull_request` trigger) for that commit, not twice
+
+#### Scenario: Push directly to main
+
+- **WHEN** a commit is pushed directly to `main` (e.g. a merge)
 - **THEN** the CI workflow runs the same job set as it would for a PR
 
 ### Requirement: Lint job blocks on real findings

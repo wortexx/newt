@@ -15,7 +15,12 @@
 name: CI
 
 on:
+  # pull_request already fires on every push to a branch with an open PR,
+  # so scoping push to main avoids running the whole workflow twice for
+  # the common case (push to a branch that already has a PR open) -
+  # found via two genuinely duplicate runs against the same commit.
   push:
+    branches: [main]
   pull_request:
 
 jobs:
@@ -40,8 +45,32 @@ jobs:
       # table before this change, never actually run against real bender).
       # `bender sources` is the closest real equivalent: it fully resolves
       # Bender.yml/Bender.lock and errors on a genuine inconsistency.
+      #
+      # Wrapped in a retry: a fresh `bender sources`/`bender checkout`
+      # clones `cheshire`, which recursively clones ITS submodules,
+      # including `sw/deps/cva6-sdk`'s own submodules - one of which
+      # (buildroot, at the legacy `git://git.buildroot.net`) intermittently
+      # drops the connection. Confirmed genuinely transient (a later
+      # attempt against the same commit succeeded outright) rather than a
+      # workflow bug, so retry with a clean `.bender/` rather than trying
+      # to special-case that one remote.
       - name: bender sources (dependency graph resolves and is consistent)
-        run: bender sources > /dev/null
+        run: |
+          retry() {
+            local attempt=1 max=3
+            until "$@"; do
+              if [ "$attempt" -ge "$max" ]; then
+                echo "::error::giving up after $max attempts: $*"
+                return 1
+              fi
+              echo "Attempt $attempt/$max failed - retrying with a clean .bender/ in 20s (see this step's header comment)."
+              rm -rf .bender
+              sleep 20
+              attempt=$((attempt + 1))
+            done
+          }
+          try() { bender sources > /dev/null; }
+          retry try
 
       - name: Determine changed RTL files
         id: changed
@@ -103,8 +132,26 @@ jobs:
       - name: Allow git to operate on the checked-out tree
         run: git config --global --add safe.directory '*'
 
+      # Same retry rationale as lint's bender-sources step: `make
+      # ig-sw-all` triggers the same fresh, flaky-at-buildroot.net
+      # dependency checkout as a side effect of Makefile parsing.
       - name: Build test binaries (make ig-sw-all)
-        run: make ig-sw-all
+        run: |
+          retry() {
+            local attempt=1 max=3
+            until "$@"; do
+              if [ "$attempt" -ge "$max" ]; then
+                echo "::error::giving up after $max attempts: $*"
+                return 1
+              fi
+              echo "Attempt $attempt/$max failed - retrying with a clean .bender/ in 20s (see the lint job's bender-sources step for why)."
+              rm -rf .bender
+              sleep 20
+              attempt=$((attempt + 1))
+            done
+          }
+          try() { make ig-sw-all; }
+          retry try
 
   sim-unit:
     runs-on: ubuntu-latest
@@ -139,8 +186,27 @@ jobs:
           # deliberately still attempts the real thing every run (cheap to
           # just try) so the moment it starts passing is visible in the
           # log, without silently starting to gate a merge on its own.
+          #
+          # Same retry rationale as lint's bender-sources step: whatever
+          # target actually runs (or fails to exist) here, Makefile
+          # parsing alone triggers the same fresh, flaky-at-buildroot.net
+          # dependency checkout first. Retrying keeps that flakiness from
+          # being misreported as "the tracked JTAG-DM blocker" below.
+          retry() {
+            local attempt=1 max=3
+            until "$@"; do
+              if [ "$attempt" -ge "$max" ]; then
+                return 1
+              fi
+              echo "Attempt $attempt/$max failed - retrying with a clean .bender/ in 20s (see the lint job's bender-sources step for why)."
+              rm -rf .bender
+              sleep 20
+              attempt=$((attempt + 1))
+            done
+          }
+          try() { make ig-sim-verilator BINARY=sw/tests/helloworld.spm.elf BOOTMODE=0 PRELMODE=0; }
           set +e
-          make ig-sim-verilator BINARY=sw/tests/helloworld.spm.elf BOOTMODE=0 PRELMODE=0
+          retry try
           result=$?
           set -e
           if [ "$result" -eq 0 ]; then
