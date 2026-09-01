@@ -138,7 +138,7 @@ Container `newt-eda`; runner `ubuntu-latest` (or an 8-core larger runner if sim 
 
 | Job | What | ~time |
 | --- | --- | --- |
-| `lint` | `bender check`; `verible-verilog-lint` + `verilator --lint-only` on changed RTL | ~2 min |
+| `lint` | `bender sources` (was listed as `bender check` here originally — that command doesn't exist in any bender version, found via a real CI failure, see `ci-fast-lane` tasks.md 2.1); `verible-verilog-lint` + `verilator --lint-only` on changed RTL | ~2 min |
 | `sw` | build test binaries incl. SHA KAT programs (riscv64 gcc) | ~3 min |
 | `sim-unit` | coprocessor TB — full NIST KAT set | 5–15 min |
 | `sim-soc` | Verilator: Cheshire boot + one KAT through the new instructions | 15–40 min |

@@ -5,7 +5,7 @@ Every push and PR today runs zero automated checks against RTL, software, or syn
 ## What Changes
 
 - Add `.github/workflows/ci.yml`: triggers on every PR and push, runs in the `newt-eda` container on `ubuntu-latest`, with five jobs matching `docs/infra-plan.md`'s Phase 3 table:
-  - `lint` — `bender check` + `verible-verilog-lint` + `verilator --lint-only` on changed RTL. **Real, blocking from day one.**
+  - `lint` — `bender sources` (dependency graph resolves/is consistent) + `verible-verilog-lint` + `verilator --lint-only` on changed RTL. **Real, blocking from day one.**
   - `sw` — build the existing test binaries (`make ig-sw-all`, riscv64 gcc). **Real, blocking from day one.**
   - `sim-unit` — coprocessor unit testbench against the NIST KAT set. **Stub**: no coprocessor RTL exists yet (Phase 7 not started); the job runs, prints why it has nothing to do, and exits 0 (non-gating) rather than being silently absent from the workflow.
   - `sim-soc` — Verilator SoC boot + a KAT test through the new instructions. **Stub**: gated on the still-open JTAG-DM blocker from Phase 2; the job attempts `make ig-sim-verilator` against the existing green-light test and reports the known-blocked outcome without failing the run.

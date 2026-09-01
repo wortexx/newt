@@ -16,10 +16,10 @@ The system SHALL run a CI workflow on every push to any branch and on every pull
 - **THEN** the CI workflow runs the same job set as it would for a PR
 
 ### Requirement: Lint job blocks on real findings
-The system SHALL run a `lint` job that checks `bender check`, `verible-verilog-lint`, and `verilator --lint-only` against changed RTL, and SHALL fail the job (non-zero exit) if any of those report an error-level finding.
+The system SHALL run a `lint` job that checks `bender sources` (dependency graph resolution), `verible-verilog-lint`, and `verilator --lint-only` against changed RTL, and SHALL fail the job (non-zero exit) if any of those report an error-level finding.
 
 #### Scenario: Clean RTL change
-- **WHEN** a PR's changed RTL passes `bender check`, `verible-verilog-lint`, and `verilator --lint-only` with no errors
+- **WHEN** a PR's changed RTL passes `bender sources`, `verible-verilog-lint`, and `verilator --lint-only` with no errors
 - **THEN** the `lint` job exits 0
 
 #### Scenario: RTL change introduces a lint error

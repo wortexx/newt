@@ -34,8 +34,14 @@ jobs:
       - name: Allow git to operate on the checked-out tree
         run: git config --global --add safe.directory '*'
 
-      - name: bender check
-        run: bender check
+      # bender has no `check` subcommand in any version (verified against
+      # both the image's pinned 0.27.4 and a newer 0.32.0 - `bender check`
+      # was a stale claim already sitting in docs/infra-plan.md's Phase 3
+      # table before this change, never actually run against real bender).
+      # `bender sources` is the closest real equivalent: it fully resolves
+      # Bender.yml/Bender.lock and errors on a genuine inconsistency.
+      - name: bender sources (dependency graph resolves and is consistent)
+        run: bender sources > /dev/null
 
       - name: Determine changed RTL files
         id: changed
