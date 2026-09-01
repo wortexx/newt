@@ -23,6 +23,19 @@ on:
     branches: [main]
   pull_request:
 
+# GitHub Actions' default `run:` shell for a container job is plain `sh`
+# (dash in newt-eda, since it's Ubuntu-based) unless told otherwise - not
+# bash, even though bash is present in the image. Several steps below use
+# bash-only syntax (`mapfile`, arrays, `<<<` here-strings); under dash
+# those fail with a syntax error rather than just misbehaving. This went
+# undetected through every prior test push because every one of them had
+# zero changed `.sv` files, so the one step that actually hit this
+# (verilator --lint-only) was always skipped - only surfaced on the first
+# push that changed real RTL.
+defaults:
+  run:
+    shell: bash
+
 jobs:
   lint:
     runs-on: ubuntu-latest
@@ -109,16 +122,45 @@ jobs:
           # include dirs/defines to resolve `include`s and package
           # typedefs, so pull those from the same bender-generated script
           # verilator.mk itself will eventually use, rather than hand
-          # maintaining a second copy.
-          bender script verilator -t rtl -t asic -t ihp13 -t cva6 -t cv64a6_imafdcsclic_sv39 > /tmp/verilator-flags.f
-          mapfile -t FLAGS < <(grep -E '^\+incdir|^\+define' /tmp/verilator-flags.f | sort -u)
+          # maintaining a second copy. A file that `import`s a package
+          # (near-universal in this codebase) additionally needs that
+          # package's own source compiled alongside it - an include path
+          # alone does not resolve a SystemVerilog `import`, unlike
+          # `` `include `` - so pass every `*_pkg.sv` file from the same
+          # generated list too (found and fixed via a real CI failure on
+          # the first push that actually changed RTL: every prior test
+          # push had zero changed .sv files, so this step's own body had
+          # never actually executed before - see this commit's message).
+          retry() {
+            local attempt=1 max=3
+            until "$@"; do
+              if [ "$attempt" -ge "$max" ]; then
+                echo "::error::giving up after $max attempts: $*"
+                return 1
+              fi
+              echo "Attempt $attempt/$max failed - retrying with a clean .bender/ in 20s (see the lint job's bender-sources step for why)."
+              rm -rf .bender
+              sleep 20
+              attempt=$((attempt + 1))
+            done
+          }
+          try() { bender script verilator -t rtl -t asic -t ihp13 -t cva6 -t cv64a6_imafdcsclic_sv39 > /tmp/verilator-flist.f; }
+          retry try
+
+          mapfile -t FLAGS < <(grep -E '^\+incdir|^\+define' /tmp/verilator-flist.f | sort -u)
+          mapfile -t PKG_FILES < <(grep -E '_pkg\.sv$' /tmp/verilator-flist.f | sort -u)
 
           status=0
           while IFS= read -r f; do
             [ -z "$f" ] && continue
             [ -f "$f" ] || continue # skip files deleted in this diff
+            PKG_ARGS=()
+            for p in "${PKG_FILES[@]}"; do
+              [ "$p" = "$f" ] && continue # don't pass the linted file twice if it's itself a _pkg.sv
+              PKG_ARGS+=("$p")
+            done
             echo "::group::verilator --lint-only $f"
-            verilator --lint-only -Wall "${FLAGS[@]}" "$f" || status=1
+            verilator --lint-only -Wall "${FLAGS[@]}" "${PKG_ARGS[@]}" "$f" || status=1
             echo "::endgroup::"
           done <<< "${{ steps.changed.outputs.files }}"
           exit $status
