@@ -43,9 +43,18 @@ source ${openroad_dir}/scripts/reports.tcl
 # skips chip.tcl's nonfree-PDK (`../../nonfree/or_init_tech.tcl`) branch:
 # that path is for local runs against a proprietary PDK the CI flow never
 # has, so the staged flow always uses the open PDK init.
+#
+# All of `pdk_dir` (read) and `dont_use_cells`/`ctsBuf`/`ctsBufRoot`/
+# `iocorner`/`iofill` (set by init_tech.tcl) must be declared `global` here
+# - unlike chip.tcl's original top-level `source`, this one runs inside a
+# proc, and a bare `source` inside a proc executes the sourced file's code
+# in that proc's *local* scope. Without these declarations, init_tech.tcl
+# fails immediately (`can't read "pdk_dir": no such variable` - found via
+# task 2.4's real bring-up run) and, if it didn't, its outputs would vanish
+# the moment this proc returned instead of surviving as real globals.
 # -----------------------------------------------------------------------
 proc pnr_init_tech {} {
-    global openroad_dir
+    global openroad_dir pdk_dir dont_use_cells ctsBuf ctsBufRoot iocorner iofill
     source ${openroad_dir}/scripts/init_tech.tcl
 }
 
