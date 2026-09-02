@@ -140,6 +140,22 @@ jobs:
       # not fail the job (design.md D4 - STA is measurement, not a
       # synth-lane gate) but IS surfaced loudly via the metrics script's
       # own warning.
+      # A third, pre-existing cwd inconsistency (found via a real run, task
+      # 3.3): opensta_timings.tcl's `read_sdc ../openroad/src/basilisk.sdc`
+      # needs cwd target/ihp13/yosys (above), but basilisk.sdc's own
+      # internal `source src/basilisk_instances.sdc` line was written for
+      # cwd target/ihp13/openroad - that's how chip.tcl actually invokes it
+      # (`read_sdc src/basilisk.sdc`, from openroad.mk's own directory).
+      # These two cwd requirements are mutually exclusive for a single
+      # process, and nothing in this repo appears to have ever exercised
+      # run-sta standalone before this change to have caught it. Not fixed
+      # by editing basilisk.sdc/opensta_timings.tcl (out of this change's
+      # scope - the flow's own scripts are invoked as-is, see proposal.md);
+      # instead, a CI-only symlink makes the existing convention
+      # resolvable without changing what either script does.
+      - name: Workaround - symlink basilisk_instances.sdc for run-sta's cwd
+        run: ln -sf ../../openroad/src/basilisk_instances.sdc target/ihp13/yosys/src/basilisk_instances.sdc
+
       - name: Static timing analysis (make -C target/ihp13/yosys run-sta)
         run: |
           make -C target/ihp13/yosys -f yosys.mk run-sta RTL_NAME=basilisk PICKLE_OUT=../pickle/out | tee target/ihp13/yosys/reports/sta_output.txt || \
