@@ -116,6 +116,20 @@ set mpgOffset 20; # chosen to properly connect to power pads
 ##########################################################################
 proc sram_power { name macro } {
     global mprWidth mprSpacing mprOffsetX mprOffsetY mpgWidth mpgSpacing mpgOffset
+    # Not every macro type this proc is called for is actually used by every
+    # design config (e.g. this design has zero RM_IHPSG13_1P_64x64/512x64/
+    # 1024x64_c2_bm_bist instances) - defining a macro power grid for a
+    # macro with no instances still computes a stripe pitch from the
+    # macro's bare geometry, which can be smaller than a routing layer's
+    # minimum pitch (found via OpenROAD 2c56926's PDN generator: "Pitch
+    # 11.36 is too small for TopMetal1, must be at least 26.0" on the
+    # 64x64 macro, which OpenROAD's own preceding "No instances found for
+    # grid" warning already signals nothing needs powering here). Skip
+    # rather than let a stricter pitch check crash flow on an unused macro.
+    if {[llength [get_cells -filter "ref_name == $macro"]] == 0} {
+        utl::report "Skipping power grid for $macro: no instances of this macro in the design"
+        return
+    }
     # Macro Grid and Rings
     define_pdn_grid -macro -cells $macro -name ${name}_grid -orient "R0 R180 MY MX" \
         -grid_over_boundary -voltage_domains {CORE} \
@@ -156,6 +170,11 @@ proc sram_power { name macro } {
 proc sram_power_rotated { name macro } {
     global mprWidth mprSpacing mprOffsetX mprOffsetY mpgWidth mpgSpacing mpgOffset
     global floor_leftX floor_rightX coreArea_leftX
+    # Same zero-instance guard as sram_power - see its comment for why.
+    if {[llength [get_cells -filter "ref_name == $macro"]] == 0} {
+        utl::report "Skipping power grid for $macro: no instances of this macro in the design"
+        return
+    }
     # Macro Grid and Rings
     define_pdn_grid -macro -cells $macro -name ${name}_rot_grid -orient "R90 R270 MXR90" \
         -grid_over_boundary -voltage_domains {CORE} \
