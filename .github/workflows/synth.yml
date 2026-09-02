@@ -1,0 +1,160 @@
+# CI synth lane — docs/infra-plan.md Phase 4.
+#
+# Runs the full pickle-to-netlist yosys synthesis flow (`ig-hw-all` ->
+# `pickle-all` -> `synth-all` -> `run-sta`), unlike ci.yml's fast lane which
+# never touches synthesis. This is expensive (~2.5-3h, ~30GB RAM peak) so it
+# does NOT run on every push/PR - see the `on:` triggers below. It fails only
+# on a flow failure or a yosys CHECK problem; a metric drifting from the
+# checked-in baseline is reported in the run summary, not a failure, and this
+# job is NOT a required status check on `main` (see
+# openspec/changes/ci-synth-lane/specs/ci-pipeline/spec.md for the full
+# contract, and design.md for the decisions behind this file).
+#
+# Runner: `self-hosted-synth` (a manually provisioned Azure VM -
+# Standard_E16ds_v5 / swedencentral - see design.md D1/D1a/D1b). This is a
+# real scope change from the original plan: GitHub-hosted "larger runners"
+# turned out to require a Team/Enterprise org plan, unavailable on this
+# personal-account repo (task 1.1). Two consequences worth knowing before you
+# touch this file:
+#
+#   1. VM lifecycle is MANUAL for now (design.md D1a) - the VM is stopped by
+#      hand when not in use, with a 10:00 UTC daily auto-shutdown as a
+#      backstop against a forgotten VM (never a full month of idle billing,
+#      at most about a day). Real on-demand cost is $1.216/hour for the VM
+#      class alone (~$888/mo if it *were* left running 24/7 - it deliberately
+#      isn't). The practical upshot: the nightly cron trigger below will only
+#      actually produce a run on nights the VM happens to be up. That's a
+#      known, accepted gap until Phase 6 automates VM start/stop - not a bug
+#      in this workflow. `workflow_dispatch` and label-triggered runs are
+#      unaffected (they're inherently attended - you start the VM to use
+#      them).
+#   2. This runner sits on a PUBLIC repo. A pull request from a fork must
+#      never auto-execute here (see the `if:` condition on the `pull_request`
+#      trigger below, plus the repo's "Require approval for all external
+#      contributors" setting under Settings -> Actions -> General, both
+#      required layers of design.md D1b's fork-PR gate).
+name: CI Synth Lane
+
+on:
+  schedule:
+    - cron: '30 2 * * *' # 02:30 UTC nightly; see note (1) above re: VM lifecycle
+  workflow_dispatch:
+  pull_request:
+    types: [labeled, synchronize, reopened]
+
+# A superseded run of a ~3h job is pure wasted VM time (there's only one
+# runner, so a second run just queues behind the first anyway) - cancel it.
+# Nightly and PR refs land in separate concurrency groups so they never
+# cancel each other.
+concurrency:
+  group: synth-${{ github.ref }}
+  cancel-in-progress: true
+
+# Same rationale as ci.yml: the container job's default `run:` shell is plain
+# `sh`, not bash, and steps below use bash-only syntax.
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  synth:
+    # Only run the pull_request trigger when: the PR carries `full-synth`,
+    # AND its head is a branch of this repo, not a fork (design.md D1b layer
+    # 2 - the repo's "require approval for external contributors" setting,
+    # set by hand under Settings -> Actions -> General, is layer 1; a fork PR
+    # is blocked by BOTH layers independently). schedule/workflow_dispatch
+    # runs are unaffected by this condition (github.event.pull_request is
+    # unset for those events).
+    if: >-
+      github.event_name != 'pull_request' ||
+      (contains(github.event.pull_request.labels.*.name, 'full-synth') &&
+       github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: [self-hosted, self-hosted-synth]
+    container: ghcr.io/wortexx/newt-eda:dev
+    timeout-minutes: 350 # bounds a hung run so it doesn't tie up the one VM indefinitely
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Same fix as ci.yml: the container job's user doesn't own the
+      # runner-checked-out tree, so git (and bender, which shells out to it)
+      # refuses to touch it.
+      - name: Allow git to operate on the checked-out tree
+        run: git config --global --add safe.directory '*'
+
+      # Same retry rationale as ci.yml's bender-sources step: a fresh
+      # dependency checkout intermittently drops the buildroot.net submodule
+      # clone. `ig-hw-all` is the first target here that triggers it.
+      - name: Generate hardware config (make ig-hw-all)
+        run: |
+          retry() {
+            local attempt=1 max=3
+            until "$@"; do
+              if [ "$attempt" -ge "$max" ]; then
+                echo "::error::giving up after $max attempts: $*"
+                return 1
+              fi
+              echo "Attempt $attempt/$max failed - retrying with a clean .bender/ in 20s (see ci.yml's lint job bender-sources step for why)."
+              rm -rf .bender
+              sleep 20
+              attempt=$((attempt + 1))
+            done
+          }
+          try() { make ig-hw-all; }
+          retry try
+
+      # synth-all does NOT trigger a pickle rebuild (docs/infra-plan.md
+      # Appendix B item 2) - must run explicitly before synth-all.
+      - name: Pickle RTL (make pickle-all)
+        run: make pickle-all
+
+      # Monolithic synth-all, never run-yosys-hier: the hierarchical flow is
+      # broken on this design (docs/infra-plan.md Appendix B item 2).
+      - name: Synthesize (make synth-all)
+        run: make synth-all
+
+      # run-sta needs cwd target/ihp13/yosys: opensta_timings.tcl's
+      # `read_sdc ../openroad/src/basilisk.sdc` is relative to the caller's
+      # cwd (design.md D4, verified in-container task 1.2). RTL_NAME=basilisk
+      # must be passed explicitly - this standalone `make -f yosys.mk` call
+      # does not go through iguana.mk (which is where RTL_NAME=basilisk is
+      # set for the ig-hw-all/pickle-all/synth-all steps above), so without
+      # it yosys.mk falls back to its own default (RTL_NAME=TOP_DESIGN=
+      # iguana_chip) and looks for the wrong netlist entirely. Captures
+      # stdout for synth_metrics.py to parse; a failure here does not fail
+      # the job (design.md D4 - STA is measurement, not a synth-lane gate)
+      # but IS surfaced loudly via the metrics script's own warning.
+      - name: Static timing analysis (make -C target/ihp13/yosys run-sta)
+        run: |
+          make -C target/ihp13/yosys -f yosys.mk run-sta RTL_NAME=basilisk | tee target/ihp13/yosys/reports/sta_output.txt || \
+            echo "::warning::run-sta failed or reported no timing paths - WNS will show unavailable in the summary"
+
+      - name: Metrics summary (cell count / area / DFF count / WNS vs baseline)
+        run: |
+          python3 target/ihp13/yosys/scripts/synth_metrics.py \
+            --area target/ihp13/yosys/reports/basilisk_area.rpt \
+            --check target/ihp13/yosys/reports/basilisk_synth.rpt \
+            --sta target/ihp13/yosys/reports/sta_output.txt \
+            --baseline target/ihp13/yosys/synth-baseline.json
+
+      # Netlist only on a successful synth (nothing to upload otherwise).
+      - name: Upload netlist
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: basilisk-netlist
+          path: target/ihp13/yosys/out/basilisk.yosys.v
+          retention-days: 30
+
+      # Reports/logs always, even on failure - they're the diagnostic trail.
+      - name: Upload reports and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: synth-reports
+          path: |
+            target/ihp13/yosys/reports/
+            target/ihp13/yosys/*.log
+          retention-days: 30
+          if-no-files-found: warn

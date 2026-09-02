@@ -1,0 +1,9 @@
+{
+  "cells": 714166,
+  "chip_area_um2": 17156844.69,
+  "dffs": 89258,
+  "wns_ps": -2500,
+  "source": "Phase 1 newt-eda adoption gate (openspec/changes/archive/2026-08-30-newt-eda-tooling-image)",
+  "date": "2026-08-29",
+  "image": "ghcr.io/wortexx/newt-eda:2026-08-29-8d13fe0"
+}
