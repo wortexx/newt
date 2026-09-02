@@ -43,9 +43,14 @@ import sys
 
 CELLS_RE = re.compile(r"Number of cells:\s*(\d+)")
 AREA_RE = re.compile(r"Chip area for module '[^']*':\s*([\d.]+)")
+TOP_AREA_RE = re.compile(r"Chip area for top module '[^']*':\s*([\d.]+)")
 CELL_ROW_RE = re.compile(r"^\s{2,}(\S+)\s+(\d+)\s*$")
 CHECK_RE = re.compile(r"Found and reported (\d+) problems?\.")
 SLACK_RE = re.compile(r"^\s*(-?[\d.]+)\s+slack\s+\((?:MET|VIOLATED)\)\s*$", re.MULTILINE)
+
+# yosys `stat` on a hierarchical design prints this marker immediately
+# before its final top-level rollup (see parse_area_report).
+DESIGN_HIERARCHY_MARKER = "=== design hierarchy ==="
 
 # Cells counted as flip-flops for the DFF metric. Matches the Phase 1
 # adoption-gate's counting method: any mapped cell whose name starts with
@@ -67,8 +72,29 @@ def read_report(path, label):
 
 
 def parse_area_report(text):
-    cells_matches = CELLS_RE.findall(text)
-    area_matches = AREA_RE.findall(text)
+    # On a hierarchical design, `stat -top <top>` prints one `=== <module>
+    # ===` block per submodule (each with its own "Number of cells:" and
+    # per-cell-type breakdown) BEFORE a final "=== design hierarchy ==="
+    # rollup with the true top-level totals. Scanning the whole file would
+    # double- (or many-times-) count every cell that also appears in its own
+    # submodule's block - caught against a real synth-lane run (task 3.3):
+    # DFF count came out ~2x actual because of exactly this. Restrict to
+    # text at-or-after the last "=== design hierarchy ===" marker, which
+    # holds the true final tallies; a flat/single-module report (no
+    # hierarchy section at all - e.g. this script's own fixture tests)
+    # has no such marker, so the whole text is used as before.
+    idx = text.rfind(DESIGN_HIERARCHY_MARKER)
+    scope = text[idx:] if idx != -1 else text
+
+    # yosys prints "Chip area for top module '...'" for the hierarchy
+    # rollup's line specifically, vs. plain "Chip area for module '...'"
+    # for every per-submodule block (and for a flat design with no
+    # hierarchy section). Prefer the "top module" wording when present so
+    # a hierarchical report can't accidentally match a submodule's line
+    # even if the marker-based scoping above were ever bypassed.
+    top_area_matches = TOP_AREA_RE.findall(scope)
+    area_matches = top_area_matches or AREA_RE.findall(scope)
+    cells_matches = CELLS_RE.findall(scope)
     if not cells_matches or not area_matches:
         raise ReportError(
             "area report did not contain both a cell count and a chip area line"
@@ -77,7 +103,7 @@ def parse_area_report(text):
     chip_area = float(area_matches[-1])
 
     dffs = 0
-    for line in text.splitlines():
+    for line in scope.splitlines():
         m = CELL_ROW_RE.match(line)
         if m and m.group(1).lower().startswith(DFF_PREFIX):
             dffs += int(m.group(2))

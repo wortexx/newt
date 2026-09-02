@@ -116,18 +116,33 @@ jobs:
 
       # run-sta needs cwd target/ihp13/yosys: opensta_timings.tcl's
       # `read_sdc ../openroad/src/basilisk.sdc` is relative to the caller's
-      # cwd (design.md D4, verified in-container task 1.2). RTL_NAME=basilisk
-      # must be passed explicitly - this standalone `make -f yosys.mk` call
-      # does not go through iguana.mk (which is where RTL_NAME=basilisk is
-      # set for the ig-hw-all/pickle-all/synth-all steps above), so without
-      # it yosys.mk falls back to its own default (RTL_NAME=TOP_DESIGN=
-      # iguana_chip) and looks for the wrong netlist entirely. Captures
-      # stdout for synth_metrics.py to parse; a failure here does not fail
-      # the job (design.md D4 - STA is measurement, not a synth-lane gate)
-      # but IS surfaced loudly via the metrics script's own warning.
+      # cwd (design.md D4). Two variables must be passed explicitly because
+      # this standalone `make -f yosys.mk` call does not go through
+      # iguana.mk (the include chain the ig-hw-all/pickle-all/synth-all
+      # steps above run through, where these are normally set):
+      #   - RTL_NAME=basilisk: without it, yosys.mk's own default
+      #     (RTL_NAME=TOP_DESIGN=iguana_chip) applies and it looks for the
+      #     wrong netlist entirely.
+      #   - PICKLE_OUT=../pickle/out (relative to the -C cwd, i.e.
+      #     target/ihp13/pickle/out): only ever defined in pickle.mk, which
+      #     this standalone invocation never includes. Without it,
+      #     yosys.mk's `SV2V_FILE := $(PICKLE_OUT)/$(RTL_NAME).sv2v.v` -
+      #     one of run-sta's prerequisites via $(NETLIST) - resolves to the
+      #     empty-PICKLE_OUT path `/basilisk.sv2v.v`, and make fails with
+      #     "No rule to make target '/basilisk.sv2v.v'" before ever running
+      #     the sta binary. Found via a real end-to-end run (task 3.3) that
+      #     silently produced zero timing output instead of erroring loudly
+      #     - task 1.2's in-container STA check never exercised this
+      #     because it pointed read_sdc at a file in the same directory,
+      #     not the real relative path, so this prerequisite-resolution gap
+      #     went unnoticed until the actual full-chain run.
+      # Captures stdout for synth_metrics.py to parse; a failure here does
+      # not fail the job (design.md D4 - STA is measurement, not a
+      # synth-lane gate) but IS surfaced loudly via the metrics script's
+      # own warning.
       - name: Static timing analysis (make -C target/ihp13/yosys run-sta)
         run: |
-          make -C target/ihp13/yosys -f yosys.mk run-sta RTL_NAME=basilisk | tee target/ihp13/yosys/reports/sta_output.txt || \
+          make -C target/ihp13/yosys -f yosys.mk run-sta RTL_NAME=basilisk PICKLE_OUT=../pickle/out | tee target/ihp13/yosys/reports/sta_output.txt || \
             echo "::warning::run-sta failed or reported no timing paths - WNS will show unavailable in the summary"
 
       - name: Metrics summary (cell count / area / DFF count / WNS vs baseline)
