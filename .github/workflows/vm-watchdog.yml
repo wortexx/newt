@@ -1,0 +1,93 @@
+# VM idle-deallocate watchdog — docs/infra-plan.md Phase 5/6,
+# openspec/changes/ci-pnr-lane/design.md D6.
+#
+# Replaces the fixed-time (10:00 UTC) Azure auto-shutdown that used to be
+# the only cost backstop on the shared self-hosted-synth VM - that
+# mechanism deallocated the VM regardless of what was running on it and
+# had already cancelled one in-flight synth-lane run (see synth.yml's
+# header and openspec/changes/archive/2026-09-02-ci-synth-lane/design.md
+# D1a). This workflow only ever deallocates a VM that genuinely has
+# nothing running or queued against it - the auto-shutdown is removed once
+# this has been observed doing its job correctly (tasks.md 4.1/5.1).
+#
+# Also sweeps a VM started by hand for a manual synth-lane run: previously
+# that relied entirely on the human remembering to stop it (or the blunt
+# auto-shutdown); now it gets turned off automatically once idle.
+name: VM Idle Watchdog
+
+on:
+  schedule:
+    - cron: '0 * * * *' # hourly
+  workflow_dispatch:
+
+concurrency:
+  group: vm-watchdog
+  cancel-in-progress: false
+
+jobs:
+  watchdog:
+    runs-on: ubuntu-latest
+    environment: azure
+    permissions:
+      id-token: write
+      contents: read
+      actions: read
+    env:
+      AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      AZURE_RESOURCE_GROUP: newt-synth-lane-rg
+      AZURE_VM_NAME: newt-synth-runner
+    steps:
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Check VM power state
+        id: vmstate
+        run: |
+          state=$(az vm get-instance-view \
+            --resource-group "${{ env.AZURE_RESOURCE_GROUP }}" \
+            --name "${{ env.AZURE_VM_NAME }}" \
+            --query "instanceView.statuses[?starts_with(code, 'PowerState/')].code" \
+            -o tsv)
+          echo "power_state=$state" >> "$GITHUB_OUTPUT"
+          echo "VM power state: $state"
+
+      - name: Check whether anything is running or queued
+        id: activity
+        if: steps.vmstate.outputs.power_state == 'PowerState/running'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          busy=$(gh api "repos/${{ github.repository }}/actions/runners" --paginate \
+            --jq '.runners[] | select(.labels[].name == "self-hosted-synth") | .busy' | grep -c true || true)
+          synth_active=$(gh run list --repo "${{ github.repository }}" --workflow=synth.yml \
+            --json status --jq '[.[] | select(.status == "in_progress" or .status == "queued")] | length')
+          pnr_active=$(gh run list --repo "${{ github.repository }}" --workflow=pnr.yml \
+            --json status --jq '[.[] | select(.status == "in_progress" or .status == "queued")] | length')
+
+          echo "runner busy=${busy:-0}, synth.yml active=${synth_active}, pnr.yml active=${pnr_active}"
+          if [ "${busy:-0}" -gt 0 ] || [ "${synth_active}" -gt 0 ] || [ "${pnr_active}" -gt 0 ]; then
+            echo "idle=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "idle=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Deallocate idle VM
+        if: steps.vmstate.outputs.power_state == 'PowerState/running' && steps.activity.outputs.idle == 'true'
+        run: |
+          echo "VM is running and idle - deallocating."
+          az vm deallocate --resource-group "${{ env.AZURE_RESOURCE_GROUP }}" --name "${{ env.AZURE_VM_NAME }}"
+
+      - name: Nothing to do
+        if: steps.vmstate.outputs.power_state != 'PowerState/running'
+        run: |
+          echo "VM is not running (state: ${{ steps.vmstate.outputs.power_state }}) - nothing to deallocate."
+
+      - name: VM busy, leaving it up
+        if: steps.vmstate.outputs.power_state == 'PowerState/running' && steps.activity.outputs.idle == 'false'
+        run: echo "VM is running and something is active or queued on the runner - leaving it up."

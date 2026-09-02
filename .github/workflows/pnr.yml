@@ -1,0 +1,266 @@
+# CI P&R lane — docs/infra-plan.md Phase 5.
+#
+# Runs the unattended, staged OpenROAD place-and-route flow
+# (target/ihp13/openroad/run_pnr.sh + scripts/pnr/*.tcl - see
+# openspec/changes/ci-pnr-lane/specs/pnr-flow/spec.md for the flow's own
+# contract) against a freshly synthesized netlist. Unlike synth.yml, this
+# lane owns the full VM lifecycle: it starts the self-hosted Azure VM
+# itself and deallocates it when done, rather than assuming a human left it
+# running (openspec/changes/ci-pnr-lane/design.md D5/D6).
+#
+# Triggers deliberately exclude `pull_request` entirely - the fork-PR
+# execution risk synth.yml has to gate with two layers (its design D1b)
+# doesn't exist here at all, because no PR event can ever reach this
+# workflow.
+#
+# Success/failure follows target/ihp13/openroad/run_pnr.sh's own exit
+# code: 0 iff every stage through global route (the PNR_GATE default,
+# `grt`) completed - detailed route (`drt`) and everything after it is
+# best-effort and never flips this job's status (specs/ci-pipeline: "P&R
+# lane job status follows the flow's gate and never gates merges"). This
+# job is NOT a required status check on `main`.
+name: CI P&R Lane
+
+on:
+  schedule:
+    - cron: '0 18 * * 5' # Fridays 18:00 UTC - the run owns the weekend (design.md Open Questions; tune freely, doesn't change specs/approach)
+  workflow_dispatch:
+  push:
+    tags: ['**']
+
+# One group for the whole workflow (not per-ref, unlike synth.yml): a
+# superseded run of a multi-day P&R job would throw away real paid Azure
+# compute, not just wasted CI minutes, so a second trigger queues behind
+# the first instead of cancelling it (design D5).
+concurrency:
+  group: pnr
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  # Populated by task 1.1's manual Azure setup (openspec/changes/ci-pnr-lane
+  # runbook) as repository/environment variables - not secrets, these are
+  # just identifiers; the actual authentication is OIDC (no client secret
+  # anywhere in this workflow). AZURE_STORAGE_ACCOUNT is task 1.3's
+  # storage account name.
+  AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+  AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+  AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+  AZURE_RESOURCE_GROUP: newt-synth-lane-rg
+  AZURE_VM_NAME: newt-synth-runner
+  AZURE_STORAGE_ACCOUNT: ${{ vars.AZURE_STORAGE_ACCOUNT }}
+  AZURE_CHECKPOINT_CONTAINER: pnr-checkpoints
+
+jobs:
+  # ---------------------------------------------------------------------
+  # Start the VM. GH-hosted: this job never touches the self-hosted
+  # runner, so it can run even while the VM is deallocated.
+  # ---------------------------------------------------------------------
+  start:
+    runs-on: ubuntu-latest
+    environment: azure
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Start VM (idempotent if already running)
+        run: az vm start --resource-group "${{ env.AZURE_RESOURCE_GROUP }}" --name "${{ env.AZURE_VM_NAME }}"
+
+  # ---------------------------------------------------------------------
+  # The P&R run itself. Self-synthesizes (design D7) rather than trusting
+  # a prior synth-lane artifact, so it's correct-by-construction for
+  # whatever ref triggered this run (a tag or a manual dispatch ref the
+  # nightly synth lane may never have built).
+  # ---------------------------------------------------------------------
+  pnr:
+    needs: start
+    runs-on: [self-hosted, self-hosted-synth]
+    container: ghcr.io/wortexx/newt-eda:dev
+    timeout-minutes: 2880 # ~48h ceiling (design D5) - bounds a hung run; detailed_route's own iteration budget (PNR_DRT_END_ITER) is the primary backstop
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Same fix as ci.yml/synth.yml: the container job's user doesn't own
+      # the runner-checked-out tree.
+      - name: Allow git to operate on the checked-out tree
+        run: git config --global --add safe.directory '*'
+
+      # Previous weekly run's checkpoints are already in Blob storage by
+      # the time this one starts (upload-checkpoints job, below) - clear
+      # local save/reports so a stale run's ~20GB of checkpoints doesn't
+      # eat into the ~200GB/run disk budget (docs/infra-plan.md Appendix A;
+      # design.md Risks).
+      - name: Clean previous run's local save/reports
+        run: rm -rf target/ihp13/openroad/save target/ihp13/openroad/reports
+
+      # Same retry rationale as ci.yml/synth.yml: a fresh dependency
+      # checkout intermittently drops the buildroot.net submodule clone.
+      - name: Generate hardware config (make ig-hw-all)
+        run: |
+          retry() {
+            local attempt=1 max=3
+            until "$@"; do
+              if [ "$attempt" -ge "$max" ]; then
+                echo "::error::giving up after $max attempts: $*"
+                return 1
+              fi
+              echo "Attempt $attempt/$max failed - retrying with a clean .bender/ in 20s."
+              rm -rf .bender
+              sleep 20
+              attempt=$((attempt + 1))
+            done
+          }
+          try() { make ig-hw-all; }
+          retry try
+
+      - name: Pickle RTL (make pickle-all)
+        run: make pickle-all
+
+      - name: Synthesize (make synth-all)
+        run: make synth-all
+
+      - name: Place and route (make -C target/ihp13/openroad run-pnr)
+        run: make -C target/ihp13/openroad run-pnr
+
+      - name: Stage-status summary
+        if: always()
+        run: |
+          STATUS_LOG=target/ihp13/openroad/save/pnr_status.log
+          {
+            echo "### P&R stage status"
+            echo
+            echo "| Stage | Status | Detail |"
+            echo "| --- | --- | --- |"
+            if [ -f "$STATUS_LOG" ]; then
+              while read -r stage status detail; do
+                echo "| $stage | $status | $detail |"
+              done < "$STATUS_LOG"
+            else
+              echo "| (none) | no status log found | run_pnr.sh may not have started |"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload DEF
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: basilisk-pnr-def
+          path: target/ihp13/openroad/out/basilisk.final.def
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Upload reports and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pnr-reports
+          path: |
+            target/ihp13/openroad/reports/
+            target/ihp13/openroad/save/pnr_status.log
+          retention-days: 30
+          if-no-files-found: warn
+
+  # ---------------------------------------------------------------------
+  # Upload stage checkpoints to Azure Blob. Deliberately no `container:` -
+  # newt-eda:dev doesn't ship (and shouldn't ship) the az CLI, and the
+  # self-hosted runner's own workspace is host-visible regardless of which
+  # job/container wrote to it (design D5).
+  # ---------------------------------------------------------------------
+  upload-checkpoints:
+    needs: pnr
+    if: always()
+    runs-on: [self-hosted, self-hosted-synth]
+    environment: azure
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Upload checkpoints
+        run: |
+          SAVE_DIR="${GITHUB_WORKSPACE}/target/ihp13/openroad/save"
+          if [ ! -d "$SAVE_DIR" ] || [ -z "$(find "$SAVE_DIR" -maxdepth 1 -name '*.zip' -print -quit)" ]; then
+            echo "No checkpoint .zip files found under $SAVE_DIR - nothing to upload (pnr job may have failed before floorplan)."
+            exit 0
+          fi
+          az storage blob upload-batch \
+            --account-name "${{ env.AZURE_STORAGE_ACCOUNT }}" \
+            --auth-mode login \
+            --destination "${{ env.AZURE_CHECKPOINT_CONTAINER }}/${{ github.run_id }}" \
+            --source "$SAVE_DIR" \
+            --pattern "*.zip"
+
+  # ---------------------------------------------------------------------
+  # Guarded deallocate (design D6): only powers off the VM if nothing else
+  # is running or queued against it, so a synth-lane run sharing the
+  # runner is never cut off mid-flight. Deliberately no --no-wait: the
+  # spec requires deallocation failure to be loudly visible, which needs
+  # this command to actually block on the result rather than fire-and-
+  # forget the Azure operation.
+  # ---------------------------------------------------------------------
+  stop:
+    needs: [pnr, upload-checkpoints]
+    if: always()
+    runs-on: ubuntu-latest
+    environment: azure
+    permissions:
+      id-token: write
+      contents: read
+      actions: read
+    steps:
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Check whether the runner is still needed
+        id: guard
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          busy=$(gh api "repos/${{ github.repository }}/actions/runners" --paginate \
+            --jq '.runners[] | select(.labels[].name == "self-hosted-synth") | .busy' | grep -c true || true)
+
+          # Exclude this workflow's own current run - it's necessarily
+          # still "in_progress" as a whole (this very stop job is one of
+          # its jobs) until after this job finishes, which would otherwise
+          # make the guard block on itself forever.
+          synth_active=$(gh run list --repo "${{ github.repository }}" --workflow=synth.yml \
+            --json status --jq '[.[] | select(.status == "in_progress" or .status == "queued")] | length')
+          pnr_active=$(gh run list --repo "${{ github.repository }}" --workflow=pnr.yml \
+            --json status,databaseId --jq "[.[] | select((.status == \"in_progress\" or .status == \"queued\") and .databaseId != ${{ github.run_id }})] | length")
+
+          echo "runner busy=${busy:-0}, synth.yml active=${synth_active}, other pnr.yml active=${pnr_active}"
+          if [ "${busy:-0}" -gt 0 ] || [ "${synth_active}" -gt 0 ] || [ "${pnr_active}" -gt 0 ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Deallocate VM
+        if: steps.guard.outputs.skip == 'false'
+        run: az vm deallocate --resource-group "${{ env.AZURE_RESOURCE_GROUP }}" --name "${{ env.AZURE_VM_NAME }}"
+
+      - name: Leave VM up for the other job
+        if: steps.guard.outputs.skip == 'true'
+        run: echo "Another job is running or queued on the shared runner - leaving the VM up. The hourly vm-watchdog.yml will deallocate it once everything is idle."

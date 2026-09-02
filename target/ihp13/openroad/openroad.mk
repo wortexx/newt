@@ -57,4 +57,26 @@ or-run-snapshot:
 	        $(subst $(IG_ROOT)/,,$(OPENROAD_DIR)/openroad.mk) \
 	        $(subst $(IG_ROOT)/,,$(OPENROAD_DIR)/scripts)
 
-PHONY: run-openroad backend-all or-run-snapshot
+# Unattended, resumable P&R flow for CI (docs/infra-plan.md Phase 5;
+# openspec/changes/ci-pnr-lane/design.md D1) - one openroad -exit process
+# per stage (scripts/pnr/*.tcl), driven by run_pnr.sh, instead of
+# run-openroad's single long-lived -gui session. Exits 0 iff every stage
+# through PNR_GATE (default: grt, i.e. global route - see specs/pnr-flow)
+# completed; see run_pnr.sh's own header for every env var it reads
+# (PNR_GATE, PNR_SKIP_GRT_REPAIR, PNR_DRT_END_ITER, PNR_STAGE_TIMEOUT,
+# PNR_TIMEOUT_<STAGE>, PNR_DRY_RUN).
+run-pnr:
+	mkdir -p $(SAVE)
+	mkdir -p $(REPORTS)
+	cd $(OPENROAD_DIR) && \
+	NETLIST="$(NETLIST)" \
+	TOP_DESIGN="$(TOP_DESIGN)" \
+	PROJ_NAME="$(PROJ_NAME)" \
+	SAVE="$(SAVE)" \
+	REPORTS="$(REPORTS)" \
+	HYPER_CONF="$(HYPER_CONF)" \
+	L1CACHE_WAYS="$(L1CACHE_WAYS)" \
+	PDK="$(TARGET_DIR)/pdk" \
+	./run_pnr.sh
+
+PHONY: run-openroad backend-all or-run-snapshot run-pnr
