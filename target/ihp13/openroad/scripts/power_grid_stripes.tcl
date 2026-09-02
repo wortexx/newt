@@ -295,7 +295,15 @@ add_pdn_connect -grid {core_grid} -layers {TopMetal2 Metal1}
 # add_pdn_connect -grid {core_grid} -layers {TopMetal2 Metal4}
 # add_pdn_connect -grid {core_grid} -layers {TopMetal2 TopMetal1}
 # Power-ring to standardcell rails
-add_pdn_connect -grid {core_grid} -layers {Metal3 Metal1}
+# core_grid has no Metal3 shapes of its own either - its only ring is on
+# TopMetal1/TopMetal2 (above); the commented-out Metal2/Metal3 ring near
+# the top of this file ("messes up the vias in the power-ring") confirms
+# that was already tried and abandoned before this change touched
+# anything. Metal3 only exists inside each macro's own grid. Same
+# PDN-011x "Cannot find shapes to connect to" pattern as the Metal2/Metal4
+# cases above (here: PDN-0113, task 2.4 real bring-up); commented out for
+# the same reason.
+# add_pdn_connect -grid {core_grid} -layers {Metal3 Metal1}
 # Same dead-Metal2-connect reasoning as above.
 # add_pdn_connect -grid {core_grid} -layers {Metal3 Metal2}
 
