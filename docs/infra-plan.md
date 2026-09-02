@@ -180,16 +180,54 @@ Container `newt-eda`; runner `ubuntu-latest` (or an 8-core larger runner if sim 
       required check until it graduates via a dedicated follow-up, never automatically.
       Full planning record: `openspec/changes/ci-fast-lane/`.
 
-## Phase 4 — CI synth lane
+## Phase 4 — CI synth lane  ✅ done (2026-09-02)
 
-Triggers: nightly + `workflow_dispatch` + label `full-synth`.
+Triggers: nightly + `workflow_dispatch` + label `full-synth`. Full planning + implementation
+record: `openspec/changes/ci-synth-lane/` (not yet archived).
 
-- [ ] `make ig-hw-all && make pickle-all && make synth-all` → upload netlist + reports.
-- [ ] Post summary: cell count, area, DFF count, WNS vs baseline.
-- [ ] Run on a **GitHub large runner** (64 GB / 16-core, fits the 6 h cap) first — no infra.
-      Move to the self-hosted VM only if the large runner proves insufficient.
+- [x] `make ig-hw-all && make pickle-all && make synth-all` → upload netlist + reports.
+      `.github/workflows/synth.yml`. Verified end-to-end across four real runs (~2.5h each);
+      flow, artifact uploads, and metrics summary all confirmed working on the actual
+      self-hosted VM.
+- [x] Post summary: cell count, area, DFF count, WNS vs baseline.
+      `target/ihp13/yosys/scripts/synth_metrics.py` + `target/ihp13/yosys/synth-baseline.json`
+      (seeded from the Phase 1 adoption-gate numbers). Cell count, chip area, and DFF count
+      all confirmed matching baseline exactly (genuine near-zero drift) on real hardware.
+      **WNS does not populate** — `basilisk.sdc`'s `*ddr_rcv_clk_o*` cell-pattern doesn't match
+      this netlist (pre-existing content bug, not this change's scope to fix); the lane
+      degrades gracefully (WNS shows "unavailable", job still exits 0) rather than failing.
+      Tracked as deferred follow-up — see the change's design.md Risks table.
+- [x] **Superseded during implementation:** the plan's "GitHub large runner first" assumption
+      turned out non-viable, not just unproven — GitHub's hosted larger-runners feature
+      requires a Team/Enterprise **organization** plan, unavailable to a personal-account repo
+      at any tier (confirmed via `gh api`, not merely untried). Went straight to pulling
+      Phase 5/6's self-hosted Azure VM forward (see Phase 5 below) rather than attempting the
+      large-runner path first.
+- [x] **Found and fixed along the way** (all in `.github/workflows/synth.yml` /
+      `synth_metrics.py`, none in the flow itself): `synth_metrics.py` was double-counting
+      cells/DFFs and mis-parsing chip area on this hierarchical design (yosys `stat` prints a
+      per-submodule block before its real top-level rollup); the standalone `run-sta`
+      invocation was missing `RTL_NAME=basilisk` and `PICKLE_OUT=../pickle/out` (both only set
+      via the full `iguana.mk`/`pickle.mk` chain, which this standalone `make -f yosys.mk` call
+      doesn't go through); and `basilisk.sdc`'s internal `source src/basilisk_instances.sdc`
+      needed a CI-only symlink to resolve given `opensta_timings.tcl`'s own cwd requirement.
+      Full root-cause/fix/verification detail in the change's `tasks.md` (task 3.3).
 
 ## Phase 5 — CI P&R lane (self-hosted Azure agent)
+
+**Partially pulled forward (2026-09-02) as part of Phase 4** — see `openspec/changes/ci-synth-lane/`
+design.md D1/D1a/D1b. One VM already exists (`newt-synth-runner`, `newt-synth-lane-rg`,
+`swedencentral`, `Standard_E16ds_v5`) with Docker and a registered GitHub Actions runner
+(label `self-hosted-synth`). **Not** pulled forward: Terraform/Bicep IaC, the OIDC federated
+credential, the Packer golden image, or the `start`/`stop` job pair below — VM lifecycle is
+still fully manual (stop/start by hand, with a 10:00 UTC daily auto-shutdown backstop; real
+on-demand cost is $1.216/hour, ~$888/mo if left always-on — notably higher than this phase's
+original $50–150/mo estimate, which assumed the spot/deallocate automation below already
+existed). **Known operational gotcha:** the auto-shutdown fires at a fixed time regardless of
+what's running — a `workflow_dispatch`/labeled-PR run started too close to it gets cancelled
+mid-flight, not just the nightly cron protected by the buffer math below. When this phase's
+own `start`/`stop` automation lands, it should absorb (or explicitly supersede) today's manual
+VM and its auto-shutdown backstop rather than stand up a second one.
 
 Triggers: weekly + `workflow_dispatch` + tags/releases.
 
