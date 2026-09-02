@@ -273,12 +273,21 @@ add_pdn_stripe -grid {core_grid} -layer {TopMetal2} -width $tpg2Width \
 # M1 is declared vertical but tracks still horizontal
 # vertical TopMetal2 to below horizonals (M1 has horizontal power tracks)
 add_pdn_connect -grid {core_grid} -layers {TopMetal2 Metal1}
-add_pdn_connect -grid {core_grid} -layers {TopMetal2 Metal2}
+# Metal2 carries no PDN shapes anywhere in this grid (the only standard-cell
+# rail generation in this file - the -followpins stripe above - is on
+# Metal1, not Metal2), so this connect has always been a no-op; OpenROAD
+# 2c56926's PDN generator hard-errors on it instead of the older version's
+# apparent silent tolerance (PDN-0112 "Cannot find shapes to connect to on
+# Metal2" - found via task 2.4's real bring-up). Commented out rather than
+# deleted, matching this file's existing convention for connects it doesn't
+# use (see the TopMetal2/TopMetal1 line below).
+# add_pdn_connect -grid {core_grid} -layers {TopMetal2 Metal2}
 add_pdn_connect -grid {core_grid} -layers {TopMetal2 Metal4}
 # add_pdn_connect -grid {core_grid} -layers {TopMetal2 TopMetal1}
 # Power-ring to standardcell rails
 add_pdn_connect -grid {core_grid} -layers {Metal3 Metal1}
-add_pdn_connect -grid {core_grid} -layers {Metal3 Metal2}
+# Same dead-Metal2-connect reasoning as above.
+# add_pdn_connect -grid {core_grid} -layers {Metal3 Metal2}
 
 
 ##########################################################################
