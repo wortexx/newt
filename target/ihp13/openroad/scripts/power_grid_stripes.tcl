@@ -282,7 +282,17 @@ add_pdn_connect -grid {core_grid} -layers {TopMetal2 Metal1}
 # deleted, matching this file's existing convention for connects it doesn't
 # use (see the TopMetal2/TopMetal1 line below).
 # add_pdn_connect -grid {core_grid} -layers {TopMetal2 Metal2}
-add_pdn_connect -grid {core_grid} -layers {TopMetal2 Metal4}
+# Metal4 shapes do exist in this design - but only inside each macro's own
+# grid (the Metal3/Metal4 ring in sram_power/sram_power_rotated's
+# add_pdn_ring calls), never in core_grid's own scope; add_pdn_connect only
+# looks at shapes within the named grid. Macro-to-core connectivity already
+# happens where the per-macro rings and core_grid's stripes physically
+# overlap on the shared TopMetal1/TopMetal2 layers (each macro grid already
+# connects its own ring down to Metal4 within its own scope). Same
+# PDN-0112 "Cannot find shapes to connect to" as the Metal2 case above,
+# found the same way (task 2.4 real bring-up); commented out for the same
+# reason - this connect had nothing in core_grid to act on.
+# add_pdn_connect -grid {core_grid} -layers {TopMetal2 Metal4}
 # add_pdn_connect -grid {core_grid} -layers {TopMetal2 TopMetal1}
 # Power-ring to standardcell rails
 add_pdn_connect -grid {core_grid} -layers {Metal3 Metal1}
