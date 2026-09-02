@@ -84,7 +84,7 @@ set haloBlockT         1.0
 utl::report "Rotated Floorplan"
 initialize_floorplan -die_area "0 0 $chipW $chipH" \
                      -core_area "$coreMargin $coreMargin [expr $chipW-$coreMargin] [expr $chipH-$coreMargin]" \
-                     -sites "CoreSite"
+                     -site "CoreSite"
 
 # ToDo: get sites from stdcell lef as union of all regex-matches "^\s*SITE\s+([0-9a-zA-Z_]+)\s*;\s*$"
 
