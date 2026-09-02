@@ -1,0 +1,4 @@
+self-hosted-runner:
+  # Labels on the self-hosted synth-lane runner (design.md D1, task 1.1b).
+  labels:
+    - self-hosted-synth
