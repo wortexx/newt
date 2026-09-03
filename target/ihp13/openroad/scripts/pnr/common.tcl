@@ -77,52 +77,18 @@ proc pnr_read_design {} {
 # route) must call this after loading its checkpoint - not just the first
 # stage, unlike chip.tcl's single `read_sdc` call near its top.
 #
-# Resolved risk (was: design.md Risks / ci-synth-lane's D4 addendum):
-# basilisk_instances.sdc's `*ddr_rcv_clk_o*` cell pattern was found not to
-# match anything when read_sdc ran against a netlist in the yosys/STA-only
-# context. Confirmed via task 2.4's real bring-up: against the real
-# iguana_chip P&R netlist, this pattern DOES match a real cell (the
-# serial-link RX clock register) - read_sdc completes cleanly here, no
-# fix needed.
-#
-# Also applies pnr_fixup_sram_max_capacitance (below) - a PDK liberty
-# content bug, not something read_sdc itself needs, but applied at the
-# same point every stage already re-establishes SDC-level state.
+# Known risk (design.md Risks, carried over from ci-synth-lane's D4
+# addendum): basilisk_instances.sdc's `*ddr_rcv_clk_o*` cell pattern was
+# found not to match anything when read_sdc ran against a netlist in the
+# yosys/STA-only context. Whether it matches here, against the real
+# iguana_chip P&R netlist (not the NO_HYPERBUS Verilator DUT and not
+# whatever context the ci-synth-lane run used), is unverified - this is
+# exactly what task 2.4's real bring-up run resolves. If it errors here,
+# fixing it becomes in-scope per design's Risks table (task 5.3).
 # -----------------------------------------------------------------------
 proc pnr_read_constraints {} {
     utl::report "Read constraints"
     read_sdc src/basilisk.sdc
-    pnr_fixup_sram_max_capacitance
-}
-
-# -----------------------------------------------------------------------
-# pnr_fixup_sram_max_capacitance: SDC-level workaround for a genuine PDK
-# liberty content bug (docs/infra-plan.md / design.md Risks; found via
-# task 2.4's real bring-up). Every SRAM macro's A_DOUT output bus declares
-# `max_capacitance : "6.4e-14"` - as picofarads (this library's own
-# capacitive_load_unit), 14 orders of magnitude too small (a min buffer's
-# own input cap is ~0.001pF) - which trips OpenROAD 2c56926's resizer
-# (RSZ-0169) during repair_design/repair_timing. Confirmed against a newer
-# upstream PDK release where the same field reads `0.064` (physically
-# sensible; matches a units-scale bug in our pinned commit exactly:
-# 6.4e-14 Farads == 0.064 picofarads).
-#
-# Deliberately NOT fixed by bumping the PDK (tried during this same
-# bring-up - see design.md Risks: the newer PDK's tech LEF changed several
-# routing layers' track pitch, e.g. TopMetal2 2.28um -> 3.28um, which
-# broke this design's hand-tuned floorplan/power-grid geometry constants
-# in power_grid_stripes.tcl - PDN-0185, a real physical-design re-tuning
-# problem well beyond this change's OpenROAD-API-compat scope) and NOT
-# fixed by editing the vendored PDK file (third-party content). Overridden
-# here instead: an SDC-level `set_max_capacitance` on the actual
-# instantiated pins takes precedence over the library-derived value in
-# OpenSTA's constraint resolution, so this needs no image/PDK change.
-# -----------------------------------------------------------------------
-proc pnr_fixup_sram_max_capacitance {} {
-    set dout_pins [get_pins -hierarchical -filter "name =~ *A_DOUT*"]
-    if {[llength $dout_pins] > 0} {
-        set_max_capacitance 0.064 $dout_pins
-    }
 }
 
 # -----------------------------------------------------------------------
