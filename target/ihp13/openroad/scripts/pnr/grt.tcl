@@ -23,10 +23,23 @@ set err [catch {
     pnr_apply_routing_layers
 
     utl::report "Global route"
+    # -verbose added (task 2.4 real bring-up): the first unattended attempt
+    # ran the full PNR_TIMEOUT_GRT=14400s (4h) default at ~99.9% CPU with no
+    # sign of hanging, then got killed by the timeout wrapper with zero
+    # visibility into per-iteration congestion progress - global_route
+    # wasn't printing anything between "Global route" and either finishing
+    # or being killed. This design is congestion-bound (63-65% utilization;
+    # docs/infra-plan.md already accepts this), so -congestion_iterations 80
+    # -allow_congestion (unchanged from chip.tcl, which had no external
+    # timeout to race against) may simply need more than 4h wall time here -
+    # -verbose gives real per-iteration telemetry to judge that, instead of
+    # guessing blind before adjusting either the timeout or the iteration
+    # count further.
     global_route -guide_file ${report_dir}/${proj_name}_route.guide \
         -congestion_report_file ${report_dir}/${proj_name}_congestion.rpt \
         -congestion_iterations 80 \
-        -allow_congestion
+        -allow_congestion \
+        -verbose
     # default params but -allow_congestion
     # it goes on even if it didn't find a solution (may be able to fix afterwards)
 
