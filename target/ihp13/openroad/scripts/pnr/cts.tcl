@@ -26,7 +26,16 @@ set err [catch {
     repair_clock_inverters
 
     utl::report "Clock Tree Synthesis"
+    # -signal added alongside chip.tcl's original -clock re-set (task 2.4
+    # real bring-up, RSZ-0089 "Could not find a resistance value for any
+    # corner"): chip.tcl's single continuous process already had -signal
+    # wire_rc active from its own pre-remove_buffers section and never
+    # needed to re-set it here; this fresh per-stage process does, since
+    # it's the first thing in this process that runs repair_timing (below,
+    # via "Repair setup") and needs a resistance/capacitance model to
+    # evaluate buffer max wire length.
     set_wire_rc -clock -layer Metal4
+    set_wire_rc -signal -layer Metal4
     clock_tree_synthesis -buf_list $ctsBuf -root_buf $ctsBufRoot \
                          -sink_clustering_enable \
                          -obstruction_aware

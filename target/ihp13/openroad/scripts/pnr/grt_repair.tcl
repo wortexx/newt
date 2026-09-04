@@ -35,6 +35,15 @@ set err [catch {
         save_checkpoint ${proj_name}.grt_repaired
     } else {
         grt::set_verbose 0
+        # estimate_parasitics before the first repair_design/repair_timing
+        # call in this fresh process (task 2.4 real bring-up, same RSZ-0089
+        # class as cts.tcl's fix): chip.tcl's continuous process already
+        # had global-routing-based parasitics active here, carried over
+        # from the immediately preceding GRT section's own
+        # estimate_parasitics -global_routing call (matches grt.tcl); this
+        # process needs its own, since grt.tcl's checkpoint round-trips
+        # physical DB + netlist, not the STA engine's parasitics estimate.
+        estimate_parasitics -global_routing
         # Repair design using global route parasitics
         utl::report "Perform buffer insertion..."
         repair_design -verbose
