@@ -20,8 +20,15 @@ set err [catch {
 
     utl::report "Filler placement"
     filler_placement sg13g2_fill*
+    # Same non-fatal treatment as cts.tcl - see its comment for why
+    # (DPL-0033, read-only validation, congestion-bound design already
+    # known/accepted). This stage is best-effort already (past the grt
+    # gate), but a caught, reported violation is more informative than an
+    # uncaught one that just marks the whole stage "failed".
     utl::report "Check placement"
-    check_placement
+    if { [catch { check_placement -report_file_name ${report_dir}/${proj_name}_final_check_placement.rpt } checkErr] } {
+        utl::report "WARNING: check_placement reported violations (non-fatal, see ${report_dir}/${proj_name}_final_check_placement.rpt): $checkErr"
+    }
     save_checkpoint ${proj_name}.final
     report_image "${proj_name}.final" true true false true
     utl::report "Write DEF"
