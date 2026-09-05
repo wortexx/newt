@@ -23,25 +23,29 @@ set err [catch {
     pnr_apply_routing_layers
 
     utl::report "Global route"
-    # -verbose added (task 2.4 real bring-up): the first unattended attempt
-    # ran the full PNR_TIMEOUT_GRT=14400s (4h) default at ~99.9% CPU with no
-    # sign of hanging, then got killed by the timeout wrapper with zero
-    # visibility into per-iteration congestion progress - global_route
-    # wasn't printing anything between "Global route" and either finishing
-    # or being killed. This design is congestion-bound (63-65% utilization;
-    # docs/infra-plan.md already accepts this), so -congestion_iterations 80
+    # -congestion_iterations 80->20, -verbose kept (task 2.4 real bring-up,
+    # second data point): the first unattended attempt ran the full
+    # PNR_TIMEOUT_GRT=14400s (4h) default at ~99.9% CPU with zero visibility
+    # into progress and got killed. Adding -verbose (kept from that attempt)
+    # revealed why on the retry (PNR_TIMEOUT_GRT=28800s/8h, also killed):
+    # ~6h51m of initial routing/NDR-disable work before the "extra
+    # iteration" congestion loop even starts, then each of the 80 requested
+    # iterations itself took 9-23min (~15min avg, GRT-0102 "Start extra
+    # iteration N/80" log lines) - extrapolated, 80 iterations is a ~27h+
+    # total run, not the few-hour budget either timeout attempt gave it.
     # -allow_congestion (unchanged from chip.tcl, which had no external
-    # timeout to race against) may simply need more than 4h wall time here -
-    # -verbose gives real per-iteration telemetry to judge that, instead of
-    # guessing blind before adjusting either the timeout or the iteration
-    # count further.
+    # timeout to race against and could just let this run for a day) means
+    # it can still stop early and accept an imperfect solution, so capping
+    # the iteration count doesn't risk a worse-than-nothing result, just a
+    # more-congested one for drt.tcl (already best-effort, already
+    # congestion-bound by design.md/docs) to deal with downstream - it caps
+    # this gate stage to a viable ~11-13h (7h setup + 20*~15min), run under
+    # PNR_TIMEOUT_GRT=57600 (16h) for margin.
     global_route -guide_file ${report_dir}/${proj_name}_route.guide \
         -congestion_report_file ${report_dir}/${proj_name}_congestion.rpt \
-        -congestion_iterations 80 \
+        -congestion_iterations 20 \
         -allow_congestion \
         -verbose
-    # default params but -allow_congestion
-    # it goes on even if it didn't find a solution (may be able to fix afterwards)
 
     utl::report "Estimate parasitics"
     estimate_parasitics -global_routing
