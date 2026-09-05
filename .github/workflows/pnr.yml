@@ -139,7 +139,20 @@ jobs:
         # congestion iteration - see grt.tcl's own comment and
         # docs/pnr-pipeline.md). 57600s (16h) matches the margin used there
         # for -congestion_iterations 20 (~11-13h expected).
-        run: PNR_TIMEOUT_GRT=57600 make -C target/ihp13/openroad -f openroad.mk run-pnr
+        #
+        # PROJ_NAME=basilisk: the "Synthesize" step above runs `make
+        # synth-all` from the repo root, which includes iguana.mk - that's
+        # what sets PROJ_NAME to basilisk (TOP_DESIGN iguana_chip is the
+        # actual top module; basilisk is this project's name for it) and
+        # is why synth-all's own netlist is out/basilisk.yosys.v. This step
+        # instead runs openroad.mk directly (`-C ... -f openroad.mk`),
+        # bypassing the root Makefile/iguana.mk entirely, so without this
+        # override it falls back to openroad.mk's own bare default
+        # (PROJ_NAME ?= TOP_DESIGN = iguana_chip) and looks for
+        # out/iguana_chip.yosys.v - a file that was never produced. Every
+        # manual bring-up invocation all through task 2.4 passed this
+        # explicitly; only the workflow step itself was missing it.
+        run: PNR_TIMEOUT_GRT=57600 make -C target/ihp13/openroad -f openroad.mk run-pnr PROJ_NAME=basilisk
 
       - name: Stage-status summary
         if: always()
