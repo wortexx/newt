@@ -10,7 +10,7 @@ that workflow invokes on it.
 | Job | Runs on | What it does |
 |---|---|---|
 | `start` | `ubuntu-latest` | OIDC login to Azure, starts the self-hosted VM (idempotent — no-op if already running). |
-| `pnr` | self-hosted VM | Checks out the repo, generates the hardware config, pickles RTL, runs `make synth-all` then `make -C target/ihp13/openroad run-pnr` (the 9-stage flow below), builds a stage-status summary from `pnr_status.log`, uploads the final DEF and the reports/logs as workflow artifacts. |
+| `pnr` | self-hosted VM | Checks out the repo, generates the hardware config, pickles RTL, runs `make synth-all` (cached — see below) then `make -C target/ihp13/openroad -f openroad.mk run-pnr PROJ_NAME=basilisk` (the 9-stage flow below), builds a stage-status summary from `pnr_status.log`, uploads the final DEF and the reports/logs as workflow artifacts. |
 | `upload-checkpoints` | self-hosted VM | Pushes `.zip` checkpoints to the `pnr-checkpoints` blob container (task 1.3) so a later run can resume without redoing synth+P&R from scratch. |
 | `stop` | `ubuntu-latest` | Checks whether the runner is still needed (busy, or another `pnr.yml`/`synth.yml` run queued) before deallocating the VM — the coexistence guard. |
 
@@ -81,3 +81,20 @@ blanket `PNR_STAGE_TIMEOUT`): `floorplan` 1h, `pre_place` 30m, `gpl` 4h,
   iterations is a ~27h+ total run. Cut to `-congestion_iterations 20`
   (~11–13h total) as a result; `PNR_TIMEOUT_GRT` correspondingly raised to
   16h (`57600`) for margin.
+- `pnr.yml`'s "Place and route" step had two real, previously-invisible
+  bugs, each only surfacing on the first real end-to-end run (task 3.2):
+  missing `-f openroad.mk` (there's no default `Makefile` in
+  `target/ihp13/openroad/`, so this failed instantly with "No rule to make
+  target 'run-pnr'") and missing `PROJ_NAME=basilisk` (the step bypasses
+  the root `Makefile`/`iguana.mk` — the only place `PROJ_NAME` actually
+  gets set to `basilisk` instead of `openroad.mk`'s bare `iguana_chip`
+  default — so it looked for a netlist file that was never produced).
+  `actionlint` can't catch either class of bug; both needed a real run to
+  surface. Every manual bring-up invocation all through task 2.4 had both
+  right; only the workflow step didn't.
+- `synth-all` (~3h on this design) is cached in `pnr.yml`, keyed on
+  `pickle-all`'s already-flattened single-file RTL output
+  (`target/ihp13/pickle/out/*.sv2v.v`) plus the yosys synthesis scripts —
+  added after three P&R-only-bug retries in a row each re-paid that ~3h
+  for byte-identical output. A genuinely different commit's RTL/scripts
+  still misses and resynthesizes.
