@@ -132,7 +132,14 @@ jobs:
         run: make synth-all
 
       - name: Place and route (make -C target/ihp13/openroad run-pnr)
-        run: make -C target/ihp13/openroad run-pnr
+        # PNR_TIMEOUT_GRT: run_pnr.sh's own 14400s (4h) default is nowhere
+        # near enough for this design's grt stage (task 2.4 real bring-up,
+        # two full timeout-killed attempts at 4h then 8h before -verbose
+        # telemetry showed ~7h of initial routing plus ~15min per
+        # congestion iteration - see grt.tcl's own comment and
+        # docs/pnr-pipeline.md). 57600s (16h) matches the margin used there
+        # for -congestion_iterations 20 (~11-13h expected).
+        run: PNR_TIMEOUT_GRT=57600 make -C target/ihp13/openroad run-pnr
 
       - name: Stage-status summary
         if: always()
