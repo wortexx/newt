@@ -128,7 +128,29 @@ jobs:
       - name: Pickle RTL (make pickle-all)
         run: make pickle-all
 
+      # synth-all is the expensive step here (~3h on this design) but its
+      # output only depends on the RTL and the yosys synthesis scripts -
+      # not on anything in the P&R step below. Without this, every retry of
+      # a P&R-only bug (task 3.2's real bring-up hit three in a row) pays
+      # the full ~3h synth cost again for byte-identical output. Keyed on
+      # pickle-all's own output (target/ihp13/pickle/out/*.sv2v.v, the
+      # already-flattened single-file RTL - bender/morty/svase resolved
+      # across whatever submodules this project pulls in, so this is far
+      # more robust than trying to hash the raw multi-repo source tree
+      # directly) plus the yosys synthesis scripts themselves. A different
+      # commit's RTL or script changes still correctly miss and resynthesize
+      # - this doesn't weaken design D7's "self-contained, correct for
+      # whatever ref triggered this run" guarantee, it just skips genuinely
+      # redundant reruns of the same inputs.
+      - name: Cache synth-all output
+        id: synth-cache
+        uses: actions/cache@v4
+        with:
+          path: target/ihp13/yosys/out
+          key: synth-${{ hashFiles('target/ihp13/pickle/out/**', 'target/ihp13/yosys/scripts/**') }}
+
       - name: Synthesize (make synth-all)
+        if: steps.synth-cache.outputs.cache-hit != 'true'
         run: make synth-all
 
       - name: Place and route (make -C target/ihp13/openroad run-pnr)
