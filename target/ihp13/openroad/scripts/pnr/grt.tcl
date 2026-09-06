@@ -23,27 +23,36 @@ set err [catch {
     pnr_apply_routing_layers
 
     utl::report "Global route"
-    # -congestion_iterations 80->20, -verbose kept (task 2.4 real bring-up,
-    # second data point): the first unattended attempt ran the full
-    # PNR_TIMEOUT_GRT=14400s (4h) default at ~99.9% CPU with zero visibility
-    # into progress and got killed. Adding -verbose (kept from that attempt)
-    # revealed why on the retry (PNR_TIMEOUT_GRT=28800s/8h, also killed):
-    # ~6h51m of initial routing/NDR-disable work before the "extra
-    # iteration" congestion loop even starts, then each of the 80 requested
-    # iterations itself took 9-23min (~15min avg, GRT-0102 "Start extra
-    # iteration N/80" log lines) - extrapolated, 80 iterations is a ~27h+
-    # total run, not the few-hour budget either timeout attempt gave it.
-    # -allow_congestion (unchanged from chip.tcl, which had no external
-    # timeout to race against and could just let this run for a day) means
-    # it can still stop early and accept an imperfect solution, so capping
-    # the iteration count doesn't risk a worse-than-nothing result, just a
-    # more-congested one for drt.tcl (already best-effort, already
-    # congestion-bound by design.md/docs) to deal with downstream - it caps
-    # this gate stage to a viable ~11-13h (7h setup + 20*~15min), run under
-    # PNR_TIMEOUT_GRT=57600 (16h) for margin.
+    # -congestion_iterations 80->20->14, -verbose kept (task 2.4/3.2 real
+    # bring-up, third data point): the first two unattended attempts ran
+    # their full timeouts (4h, then 8h) with zero progress visibility.
+    # Adding -verbose showed why: ~7h of initial routing before the "extra
+    # iteration" congestion loop starts, then ~15min/iteration on average -
+    # extrapolated, the original 80 was a ~27h+ total run, so it was cut to
+    # 20 (~11-13h expected).
+    #
+    # The first real pnr.yml run at 20 iterations (PNR_TIMEOUT_GRT=57600,
+    # 16h) still timed out - but the real per-iteration log data (GRT-0102
+    # lines, no timestamps between them) showed iterations 1-14 all
+    # completed back-to-back with zero congestion-repair work logged
+    # (trivial), then iteration 15 itself triggered a cascade of "Disabled
+    # NDR" (GRT-0273) warnings across 63+ clock nets that never finished -
+    # "Start extra iteration 16/20" never appeared even after ~10h+ inside
+    # iteration 15 alone. This isn't generic slowness a bigger timeout
+    # would fix - it's iteration 15 specifically (at whatever congestion
+    # state exists after 14 real rounds) hitting a relaxation cascade with
+    # no observed sign of terminating. Cut to 14 to stop before ever
+    # entering it, rather than gambling more VM time on a step that never
+    # completed once. -allow_congestion (unchanged from chip.tcl, which had
+    # no external timeout to race against) means stopping at 14 accepts
+    # whatever congestion remains rather than erroring - a more-congested
+    # result for drt.tcl (already best-effort, already congestion-bound by
+    # design.md/docs) to deal with downstream, not a worse-than-nothing one.
+    # PNR_TIMEOUT_GRT stays 57600 (16h) - plenty of margin now that the
+    # pathological iteration is excluded.
     global_route -guide_file ${report_dir}/${proj_name}_route.guide \
         -congestion_report_file ${report_dir}/${proj_name}_congestion.rpt \
-        -congestion_iterations 20 \
+        -congestion_iterations 14 \
         -allow_congestion \
         -verbose
 

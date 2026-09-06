@@ -43,7 +43,7 @@ doing anything else.
 | 3 | `gpl` | `gpl2` | **Gate** | Global placement, two passes. Pass 1 (routability-driven) gives rough parasitics; `repair_design`/`repair_timing -repair_tns 70` clean up setup violations on that rough placement; pass 2 (routability + timing-driven) is the placement that actually carries forward. Only stage besides `drt` that calls `set_thread_count` (up to 32 threads, capped by the VM's core count). |
 | 4 | `dpl` | `dpl` | **Gate** | Detailed (legalized) placement + mirror optimization. Single-threaded. |
 | 5 | `cts` | `cts` | **Gate** | Clock tree synthesis. Lifts clock dont-touch (only stage that does — clock nets are protected everywhere else), repairs clock inverters and post-CTS wire length, legalizes, then `repair_timing -setup -repair_tns 90` to fix the setup violations CTS itself introduces. `check_placement` is caught/non-fatal here (thousands of buffer-overlap warnings after repair are diagnostic-only, don't block progress). |
-| 6 | `grt` | `grt` | **Gate — the actual gate** (`PNR_GATE` default) | Global route: `global_route -congestion_iterations 20 -allow_congestion -verbose`. This is the stage the whole flow is judged on — `run_pnr.sh` exits non-zero if this fails, regardless of the best-effort stages after it. The long pole by far: single-threaded, congestion-bound at ~63–65% utilization, ~7h of initial routing before the congestion "extra iteration" loop even starts, then ~15min/iteration (measured via `-verbose`'s `GRT-0102` lines) — `-congestion_iterations` was cut from `chip.tcl`'s original 80 (a ~27h+ total run) down to 20 (~11–13h) once that per-iteration cost was actually measured. |
+| 6 | `grt` | `grt` | **Gate — the actual gate** (`PNR_GATE` default) | Global route: `global_route -congestion_iterations 14 -allow_congestion -verbose`. This is the stage the whole flow is judged on — `run_pnr.sh` exits non-zero if this fails, regardless of the best-effort stages after it. The long pole by far: single-threaded, congestion-bound at ~63–65% utilization. `-congestion_iterations` was cut from `chip.tcl`'s original 80, to 20, to 14 across three real timeout failures — the last cut wasn't about average per-iteration cost but a specific finding: iterations 1–14 complete trivially, then iteration 15 itself triggers a clock-net NDR-relaxation cascade with no observed sign of ever terminating (10+ hours, no completion). See Notes. |
 | 7 | `grt_repair` | `grt_repaired` | Best-effort | Post-route timing repair using global-route-based parasitics: buffer insertion, incremental global route, `repair_timing -repair_tns 20 -max_buffer_percent 15` (bounded down from chip.tcl's original 100 — that looped effectively forever on this design). `PNR_SKIP_GRT_REPAIR=1` skips the work but still re-saves the checkpoint under the uniform name `drt.tcl` expects. |
 | 8 | `drt` | `drt` | Best-effort | Antenna repair, then detailed routing (`detailed_route`, multi-threaded like `gpl`). `-droute_end_iter` (default 40, override via `PNR_DRT_END_ITER`) bounds the iteration budget — a manual run needed stopping after 700k→516k DRC violations over 2 iterations without converging, so this is deliberately capped rather than left open-ended. |
 | 9 | `final` | `final` | Best-effort | Filler cell placement, a non-fatal `check_placement`, then writes `out/<proj>.final.def` — the artifact the workflow uploads. |
@@ -81,6 +81,18 @@ blanket `PNR_STAGE_TIMEOUT`): `floorplan` 1h, `pre_place` 30m, `gpl` 4h,
   iterations is a ~27h+ total run. Cut to `-congestion_iterations 20`
   (~11–13h total) as a result; `PNR_TIMEOUT_GRT` correspondingly raised to
   16h (`57600`) for margin.
+- The first real `pnr.yml` run at `-congestion_iterations 20` (16h
+  timeout) *still* timed out, and the real log data changed the diagnosis:
+  iterations 1–14 all completed back-to-back with zero congestion-repair
+  work logged (no `GRT-0273` lines at all), then iteration 15 itself
+  triggered a cascade of "Disabled NDR" warnings across 63+ clock nets that
+  never finished — "Start extra iteration 16/20" never appeared even after
+  10+ hours inside iteration 15 alone. Not generic slowness a bigger
+  timeout would fix — iteration 15 specifically (at whatever congestion
+  state exists after 14 real rounds) hitting a relaxation cascade with no
+  observed sign of terminating. Cut to `-congestion_iterations 14` to stop
+  before ever entering it, rather than gambling more VM time on a step
+  that never completed once.
 - `pnr.yml`'s "Place and route" step had two real, previously-invisible
   bugs, each only surfacing on the first real end-to-end run (task 3.2):
   missing `-f openroad.mk` (there's no default `Makefile` in
