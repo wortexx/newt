@@ -156,11 +156,26 @@ jobs:
       - name: Place and route (make -C target/ihp13/openroad run-pnr)
         # PNR_TIMEOUT_GRT: run_pnr.sh's own 14400s (4h) default is nowhere
         # near enough for this design's grt stage (task 2.4 real bring-up,
-        # two full timeout-killed attempts at 4h then 8h before -verbose
-        # telemetry showed ~7h of initial routing plus ~15min per
-        # congestion iteration - see grt.tcl's own comment and
-        # docs/pnr-pipeline.md). 57600s (16h) matches the margin used there
-        # for -congestion_iterations 20 (~11-13h expected).
+        # three full timeout-killed attempts at 4h, 8h, then 16h before
+        # -verbose telemetry pinpointed the actual cause: iteration 15
+        # itself triggers a clock-net NDR-relaxation cascade with no
+        # observed sign of terminating - see grt.tcl's own comment and
+        # docs/pnr-pipeline.md). -congestion_iterations is now 14 to stop
+        # before ever entering it; 57600s (16h) keeps the same margin used
+        # for the earlier 20-iteration attempt, comfortably generous now
+        # that the pathological iteration is excluded.
+        #
+        # PNR_TIMEOUT_GRT_REPAIR: grt_repair.tcl's own 21600s (6h) default
+        # was never going to be enough once its global_route calls were
+        # actually bounded/fixed to run for real (2026-09-06 audit, tasks.md
+        # 2.4 - this stage had never once executed before that audit, so its
+        # own chip.tcl-inherited bugs, including a missing -allow_congestion
+        # that would hard-error on this design's known-congested state,
+        # went unnoticed). Up to three chained bounded global_route calls
+        # per run; 57600s (16h) matches grt.tcl's own margin as a starting
+        # budget - revisit once a real run actually reaches this stage and
+        # produces timing data, the same way grt.tcl's own numbers were
+        # only ever set from real measurements, not guesses.
         #
         # PROJ_NAME=basilisk: the "Synthesize" step above runs `make
         # synth-all` from the repo root, which includes iguana.mk - that's
@@ -174,7 +189,7 @@ jobs:
         # out/iguana_chip.yosys.v - a file that was never produced. Every
         # manual bring-up invocation all through task 2.4 passed this
         # explicitly; only the workflow step itself was missing it.
-        run: PNR_TIMEOUT_GRT=57600 make -C target/ihp13/openroad -f openroad.mk run-pnr PROJ_NAME=basilisk
+        run: PNR_TIMEOUT_GRT=57600 PNR_TIMEOUT_GRT_REPAIR=57600 make -C target/ihp13/openroad -f openroad.mk run-pnr PROJ_NAME=basilisk
 
       - name: Stage-status summary
         if: always()

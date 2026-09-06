@@ -18,6 +18,18 @@
 # and simply re-saves the grt checkpoint under the grt_repaired name so
 # drt.tcl has a single, uniform checkpoint name to load regardless of
 # whether this stage ran for real.
+#
+# Every global_route call below is bounded the same way grt.tcl's gate-
+# stage call is (-congestion_iterations 14 -allow_congestion -verbose;
+# see grt.tcl's own comment for the full story) - found via a 2026-09-06
+# API/behavioral audit (tasks.md 2.4) while this script had never actually
+# executed: the plain full-route call ("GRT (2)") was inherited from
+# chip.tcl verbatim at -congestion_iterations 80 with no -allow_congestion
+# at all - a hard GRT error on any leftover overflow, guaranteed on a
+# design that only cleared the gate stage BY accepting congestion. Left
+# unfixed, a green run (gate already cleared, so run_pnr.sh's own exit
+# code is unaffected) would produce no detailed route and no final DEF -
+# the artifact the specs require - while silently reporting success.
 
 source [file join [file dirname [info script]] common.tcl]
 
@@ -34,7 +46,6 @@ set err [catch {
         utl::report "PNR_SKIP_GRT_REPAIR=1: skipping post-route timing repair"
         save_checkpoint ${proj_name}.grt_repaired
     } else {
-        grt::set_verbose 0
         # estimate_parasitics before the first repair_design/repair_timing
         # call in this fresh process (task 2.4 real bring-up, same RSZ-0089
         # class as cts.tcl's fix): chip.tcl's continuous process already
@@ -50,13 +61,15 @@ set err [catch {
 
         utl::report "GRT incremental..."
         # Run to get modified net by DPL
-        global_route -start_incremental
+        global_route -start_incremental -verbose
         # Running DPL to fix overlapped instances
         detailed_placement
         # Route only the modified net by DPL
         global_route -end_incremental \
                     -congestion_report_file ${report_dir}/congestion_repaired_initial.rpt \
                     -guide_file ${report_dir}/${proj_name}_route.guide \
+                    -congestion_iterations 14 \
+                    -allow_congestion \
                     -verbose
         report_metrics "${proj_name}.grt_repaired_initial"
         save_checkpoint ${proj_name}.grt_repaired_initial
@@ -77,16 +90,20 @@ set err [catch {
         detailed_placement
         global_route -guide_file ${report_dir}/${proj_name}_route.guide \
             -congestion_report_file ${report_dir}/${proj_name}_congestion.rpt \
-            -congestion_iterations 80
+            -congestion_iterations 14 \
+            -allow_congestion \
+            -verbose
         estimate_parasitics -global_routing
         repair_timing -skip_pin_swap -hold -hold_margin 0.1 -verbose -repair_tns 20 -max_buffer_percent 15
-        global_route -start_incremental
+        global_route -start_incremental -verbose
         # Running DPL to fix overlapped instances
         detailed_placement
         # Route only the modified net by DPL
         global_route -end_incremental \
                     -congestion_report_file ${report_dir}/congestion_repaired_initial.rpt \
                     -guide_file ${report_dir}/${proj_name}_route.guide \
+                    -congestion_iterations 14 \
+                    -allow_congestion \
                     -verbose
         report_metrics "${proj_name}.grt_repaired"
         save_checkpoint ${proj_name}.grt_repaired
