@@ -108,9 +108,32 @@ run_stage_once() {
     local stage="$1" logfile="${REPORTS}/pnr_${1}.log" timeout_s
     timeout_s="$(stage_timeout "$stage")"
     echo "::group::pnr stage ${stage} (timeout ${timeout_s}s)"
+    # openroad's own -log already writes this stage's complete output to
+    # ${logfile} for the artifact upload; the gawk pipe below adds wall-
+    # clock timestamps on top of that (useful for per-iteration timing
+    # diagnosis - see grt.tcl's own comment history) but its output goes
+    # to ${logfile}.timestamped now, NOT to this script's stdout.
+    #
+    # It used to go to stdout, which the CI workflow streams live into
+    # the GitHub Actions job log. task 2.4 bring-up (pnr-bringup-5, run
+    # 34127033481) hit a real self-hosted-runner failure from that: -verbose
+    # global_route in grt.tcl dumped ~5,472 individual net names in under
+    # 50ms, the runner's live log-streaming channel choked on the burst,
+    # and GitHub declared "the self-hosted runner lost communication with
+    # the server" ~10h later - even though the underlying openroad process
+    # kept running fine on the VM and grt itself succeeded in the meantime
+    # (confirmed only by reading ${logfile} directly off the VM's disk,
+    # never via anything GitHub received). Every progress check this whole
+    # bring-up effort has done went through reading these -log files
+    # directly (az vm run-command), never the Actions UI's live tail - so
+    # dropping the stdout mirror costs no monitoring capability and removes
+    # the failure mode outright, without touching any OpenROAD-side
+    # behavior (-verbose stays; still fully diagnosable via the
+    # .timestamped file, which "Upload reports and logs" already picks up).
     QT_QPA_PLATFORM=offscreen timeout "${timeout_s}" openroad -exit \
         "${PNR_SCRIPTS_DIR}/${stage}.tcl" -log "${logfile}" \
-        2>&1 | TZ=UTC gawk '{ print strftime("[%Y-%m-%d %H:%M %Z]"), $0 }'
+        2>&1 | TZ=UTC gawk '{ print strftime("[%Y-%m-%d %H:%M %Z]"), $0 }' \
+        >> "${logfile}.timestamped"
     local rc=${PIPESTATUS[0]}
     echo "::endgroup::"
     return "$rc"

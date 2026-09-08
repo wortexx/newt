@@ -110,3 +110,22 @@ blanket `PNR_STAGE_TIMEOUT`): `floorplan` 1h, `pre_place` 30m, `gpl` 4h,
   added after three P&R-only-bug retries in a row each re-paid that ~3h
   for byte-identical output. A genuinely different commit's RTL/scripts
   still misses and resynthesizes.
+- `pnr-bringup-5` (run 34127033481) reached `grt ok` a second time (14/14
+  iterations, clean) — confirmed only by reading `pnr_status.log` directly
+  off the VM's disk — but the overall GitHub Actions job was still declared
+  `failure`, ~10h after its last log line, with GitHub's own annotation:
+  "the self-hosted runner lost communication with the server". Root cause:
+  `run_pnr.sh`'s `run_stage_once` piped every stage's full stdout (already
+  captured separately to `reports/pnr_<stage>.log` via openroad's own
+  `-log`) a second time into the Actions job's *live* log stream via
+  `gawk`. `grt.tcl`'s `-verbose global_route` dumped ~5,472 individual net
+  names in under 50ms; the runner's live-streaming channel choked on that
+  burst and the connection never came back, even though the underlying
+  `openroad` process kept running fine and `grt` itself completed
+  successfully hours later. **Fix**: `run_stage_once` now redirects the
+  gawk-timestamped copy into `${logfile}.timestamped` (still uploaded via
+  "Upload reports and logs", which already grabs the whole `reports/`
+  directory) instead of mirroring it to stdout/the Actions log — every
+  progress check this bring-up effort has done went through reading these
+  `-log` files off the VM directly, never the Actions UI's live tail, so
+  this costs no visibility and removes the failure mode outright.
