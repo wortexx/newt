@@ -9,6 +9,8 @@ context: |
   the real flow for silicon-realistic PPA numbers. See docs/custom-isa-extension.md
   (thesis plan) and docs/infra-plan.md (CI/infra plan, living document).
 
+  Copyright 2026 Kyiv School of Economics.
+
   Tech stack:
   - RTL: SystemVerilog in hw/; deps managed by Bender (cheshire, cva6, axi,
     hyperbus, register_interface), pinned in Bender.yml/Bender.lock

@@ -44,7 +44,7 @@ doing anything else.
 | 4 | `dpl` | `dpl` | **Gate** | Detailed (legalized) placement + mirror optimization. Single-threaded. |
 | 5 | `cts` | `cts` | **Gate** | Clock tree synthesis. Lifts clock dont-touch (only stage that does — clock nets are protected everywhere else), repairs clock inverters and post-CTS wire length, legalizes, then `repair_timing -setup -repair_tns 90` to fix the setup violations CTS itself introduces. `check_placement` is caught/non-fatal here (thousands of buffer-overlap warnings after repair are diagnostic-only, don't block progress). |
 | 6 | `grt` | `grt` | **Gate — the actual gate** (`PNR_GATE` default) | Global route: `global_route -congestion_iterations 14 -allow_congestion -verbose`. This is the stage the whole flow is judged on — `run_pnr.sh` exits non-zero if this fails, regardless of the best-effort stages after it. The long pole by far: single-threaded, congestion-bound at ~63–65% utilization. `-congestion_iterations` was cut from `chip.tcl`'s original 80, to 20, to 14 across three real timeout failures — the last cut wasn't about average per-iteration cost but a specific finding: iterations 1–14 complete trivially, then iteration 15 itself triggers a clock-net NDR-relaxation cascade with no observed sign of ever terminating (10+ hours, no completion). See Notes. |
-| 7 | `grt_repair` | `grt_repaired` | Best-effort | Post-route timing repair using global-route-based parasitics: buffer insertion, incremental global route, `repair_timing -repair_tns 20 -max_buffer_percent 15` (bounded down from chip.tcl's original 100 — that looped effectively forever on this design). `PNR_SKIP_GRT_REPAIR=1` skips the work but still re-saves the checkpoint under the uniform name `drt.tcl` expects. |
+| 7 | `grt_repair` | `grt_repaired` | Best-effort | Post-route timing repair using global-route-based parasitics: buffer insertion, incremental global route, `repair_timing -repair_tns 20 -max_buffer_percent 15` (bounded down from chip.tcl's original 100 — that looped effectively forever on this design). `PNR_SKIP_GRT_REPAIR=1` skips the work but still re-saves the checkpoint under the uniform name `drt.tcl` expects. **Currently skipped in `pnr.yml`** — even with its `global_route` calls bounded the same way `grt.tcl`'s are, real data (`pnr-bringup-6`) shows it still doesn't converge within 16h (see Notes); skipping lets `drt`/`final` actually run and produce a DEF while grt_repair's own timeout/tuning is revisited separately. |
 | 8 | `drt` | `drt` | Best-effort | Antenna repair, then detailed routing (`detailed_route`, multi-threaded like `gpl`). `-droute_end_iter` (default 40, override via `PNR_DRT_END_ITER`) bounds the iteration budget — a manual run needed stopping after 700k→516k DRC violations over 2 iterations without converging, so this is deliberately capped rather than left open-ended. |
 | 9 | `final` | `final` | Best-effort | Filler cell placement, a non-fatal `check_placement`, then writes `out/<proj>.final.def` — the artifact the workflow uploads. |
 
@@ -129,3 +129,22 @@ blanket `PNR_STAGE_TIMEOUT`): `floorplan` 1h, `pre_place` 30m, `gpl` 4h,
   progress check this bring-up effort has done went through reading these
   `-log` files off the VM directly, never the Actions UI's live tail, so
   this costs no visibility and removes the failure mode outright.
+- `pnr-bringup-6` (run 34224904566) is the **first `pnr.yml` run ever to
+  complete with a clean GitHub Actions verdict** — `start`/`pnr`/
+  `upload-checkpoints`/`stop` all `success`, no runner-communication-loss
+  failure, confirming the fix above holds under the real ~27h workload it
+  was built for (including `grt.tcl`'s own `-verbose` burst). But
+  `pnr_status.log` tells the fuller story: `grt_repair failed exit=124
+  attempts=1` — it hit its `PNR_TIMEOUT_GRT_REPAIR=57600` (16h) ceiling
+  exactly, even with its `global_route` calls already bounded the same way
+  as `grt.tcl`'s. `drt`/`final` were skipped as `predecessor-failed`, so no
+  `out/basilisk.final.def` was produced — `run_pnr.sh` still exits 0
+  (`grt_repair` is best-effort, design D4), so GitHub's `success` verdict
+  doesn't mean a DEF exists. Root cause is structural, not a residual bug:
+  `grt_repair.tcl` chains three route/repair phases (an incremental round,
+  a full "GRT (2)" re-route comparable in cost to `grt.tcl`'s own ~9h pass,
+  then another incremental round) — 2–3x `grt.tcl`'s own budget. Decision:
+  rather than guess at a bigger timeout blind, `pnr.yml` now passes
+  `PNR_SKIP_GRT_REPAIR=1` to get `drt`/`final` actually exercised and
+  producing a real DEF off `grt`'s own checkpoint first; `grt_repair`'s own
+  timeout/tuning is deliberately deferred until after that.

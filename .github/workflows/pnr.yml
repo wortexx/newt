@@ -165,17 +165,29 @@ jobs:
         # for the earlier 20-iteration attempt, comfortably generous now
         # that the pathological iteration is excluded.
         #
-        # PNR_TIMEOUT_GRT_REPAIR: grt_repair.tcl's own 21600s (6h) default
-        # was never going to be enough once its global_route calls were
-        # actually bounded/fixed to run for real (2026-09-06 audit, tasks.md
-        # 2.4 - this stage had never once executed before that audit, so its
-        # own chip.tcl-inherited bugs, including a missing -allow_congestion
-        # that would hard-error on this design's known-congested state,
-        # went unnoticed). Up to three chained bounded global_route calls
-        # per run; 57600s (16h) matches grt.tcl's own margin as a starting
-        # budget - revisit once a real run actually reaches this stage and
-        # produces timing data, the same way grt.tcl's own numbers were
-        # only ever set from real measurements, not guesses.
+        # PNR_TIMEOUT_GRT_REPAIR / PNR_SKIP_GRT_REPAIR: grt_repair.tcl's own
+        # 21600s (6h) default was never going to be enough once its
+        # global_route calls were actually bounded/fixed to run for real
+        # (2026-09-06 audit, tasks.md 2.4 - this stage had never once
+        # executed before that audit). Raised to 57600s (16h, matching
+        # grt.tcl's own margin) as a starting budget - but pnr-bringup-6
+        # (run 34224904566, the first run to ever complete with a clean
+        # GitHub Actions verdict - confirming the runner-communication-loss
+        # fix above works end-to-end) still hit that 16h ceiling exactly
+        # (pnr_status.log: "grt_repair failed exit=124"), so drt/final were
+        # skipped as predecessor-failed and no DEF was produced. Real
+        # finding: grt_repair.tcl chains three route/repair phases
+        # (incremental round, a full "GRT (2)" re-route comparable in cost
+        # to grt.tcl's own ~9h pass, then another incremental round) - 2-3x
+        # grt.tcl's own budget, not a bug in the 14-iteration bounding
+        # itself. Rather than guess at a bigger timeout blind, skip
+        # grt_repair for now (PNR_SKIP_GRT_REPAIR=1 - grt_repair.tcl's own
+        # skip path just re-saves the grt checkpoint under the uniform
+        # grt_repaired name drt.tcl expects, so drt/final can finally run
+        # and produce a real out/basilisk.final.def off grt's own
+        # timing/congestion) to get the whole pipeline exercised end-to-end
+        # first; come back to tuning grt_repair's timeout/convergence once
+        # drt and final are themselves real-run-verified.
         #
         # PROJ_NAME=basilisk: the "Synthesize" step above runs `make
         # synth-all` from the repo root, which includes iguana.mk - that's
@@ -189,7 +201,7 @@ jobs:
         # out/iguana_chip.yosys.v - a file that was never produced. Every
         # manual bring-up invocation all through task 2.4 passed this
         # explicitly; only the workflow step itself was missing it.
-        run: PNR_TIMEOUT_GRT=57600 PNR_TIMEOUT_GRT_REPAIR=57600 make -C target/ihp13/openroad -f openroad.mk run-pnr PROJ_NAME=basilisk
+        run: PNR_TIMEOUT_GRT=57600 PNR_TIMEOUT_GRT_REPAIR=57600 PNR_SKIP_GRT_REPAIR=1 make -C target/ihp13/openroad -f openroad.mk run-pnr PROJ_NAME=basilisk
 
       - name: Stage-status summary
         if: always()
