@@ -172,6 +172,59 @@ deallocate → `az disk update --size-gb <n>` → start cycle) is the
 lower-risk fix — it doesn't touch the already-registered runner's config,
 unlike remapping `_work` to `/mnt`. See design.md's Risks table.
 
+## 3.2 — Stop unattended-upgrades from killing long runs (2026-09-11)
+
+Applied after `pnr-bringup-8` was killed 74 min into a ~30 h run. Root cause,
+from `journalctl -b -1` on the VM: `apt-daily-upgrade.service` upgraded
+`libc6` at 06:48:21, and `needrestart` then restarted every service linking
+the new libc — including the GitHub Actions runner:
+
+```
+06:48:27 systemd[1]: Stopping actions.runner.wortexx-newt.newt-synth-runner.service
+06:48:27 runsvc.sh[975]: Shutting down runner listener
+```
+
+which surfaces in Actions as `The runner has received a shutdown signal`.
+Docker and containerd were restarted in the same sweep, so the job's own
+container was exposed too. `apt-daily-upgrade.timer` fires daily and P&R
+runs take 24–30 h, so **every** run crosses at least one window — this is
+almost certainly also what produced `pnr-bringup-5`'s "lost communication
+with the server" on 2026-09-08.
+
+User decision: apply **both** mitigations. Run via
+`az vm run-command invoke ... --command-id RunShellScript` (no SSH on this
+VM). Note Run Command executes scripts with `sh` (dash), not bash — `set -o
+pipefail` fails there.
+
+```bash
+# 1. No automatic package upgrades on the runner VM.
+#    apt-daily.timer is deliberately left enabled: it only refreshes package
+#    lists and pre-downloads, it never installs and never restarts services.
+systemctl disable --now apt-daily-upgrade.timer
+
+# 2. Even a hand-run apt upgrade must never auto-restart the runner or the
+#    container runtime underneath a live job.
+mkdir -p /etc/needrestart/conf.d
+cat > /etc/needrestart/conf.d/99-ci-runner.conf <<'CONF'
+$nrconf{override_rc}{qr(^actions\.runner\.)} = 0;
+$nrconf{override_rc}{qr(^docker\.)} = 0;
+$nrconf{override_rc}{qr(^containerd\.)} = 0;
+CONF
+```
+
+Verified immediately after applying: `systemctl is-enabled
+apt-daily-upgrade.timer` → `disabled`, `is-active` → `inactive`, and it no
+longer appears in `systemctl list-timers 'apt-daily*'`; `needrestart -r l`
+exits 0 (config parses); the runner service stayed `active` and the
+in-flight `pnr-bringup-9` job container (`newt-eda:dev`) was undisturbed.
+
+**Consequence to carry into Phase 6:** this VM no longer patches itself.
+Security updates are now a deliberate act — apply them while the VM is idle
+(`apt-get update && apt-get upgrade`, then restart the runner by hand), or
+better, bake them into the Packer golden image Phase 6 plans. Both changes
+are reversible: `systemctl enable --now apt-daily-upgrade.timer` and
+`rm /etc/needrestart/conf.d/99-ci-runner.conf`.
+
 ## Resource summary for Phase 6 IaC
 
 | Resource | Name | Notes |
@@ -184,3 +237,5 @@ unlike remapping `_work` to `/mnt`. See design.md's Risks table.
 | Storage account | `newtpnrcheckpoints` | `swedencentral`, `Standard_LRS`, `StorageV2`, Cool tier, public blob access disabled, TLS1.2 min |
 | Container | `pnr-checkpoints` | 30-day delete lifecycle rule on `blockBlob` under `pnr-checkpoints/` prefix |
 | VM host package | `azure-cli` 2.90.0 | installed on `newt-synth-runner` via Run Command (no SSH available) |
+| VM host config | `apt-daily-upgrade.timer` disabled | unattended-upgrades restarted the runner mid-job and killed `pnr-bringup-8`; see section 3.2 |
+| VM host config | `/etc/needrestart/conf.d/99-ci-runner.conf` | blocks auto-restart of `actions.runner.*`, `docker.*`, `containerd.*`; see section 3.2 |
