@@ -104,12 +104,34 @@ blanket `PNR_STAGE_TIMEOUT`): `floorplan` 1h, `pre_place` 30m, `gpl` 4h,
   `actionlint` can't catch either class of bug; both needed a real run to
   surface. Every manual bring-up invocation all through task 2.4 had both
   right; only the workflow step didn't.
-- `synth-all` (~3h on this design) is cached in `pnr.yml`, keyed on
-  `pickle-all`'s already-flattened single-file RTL output
-  (`target/ihp13/pickle/out/*.sv2v.v`) plus the yosys synthesis scripts —
-  added after three P&R-only-bug retries in a row each re-paid that ~3h
-  for byte-identical output. A genuinely different commit's RTL/scripts
-  still misses and resynthesizes.
+- `synth-all` (~3h on this design) is cached in `pnr.yml` — added after
+  three P&R-only-bug retries in a row each re-paid that ~3h for
+  byte-identical output. **The original `actions/cache` implementation of
+  this never produced a single hit** (found 2026-09-11, after eight runs),
+  for two independent reasons: (1) Actions caches are scoped per ref, and
+  because every bring-up run is triggered by a fresh tag — itself a
+  workaround for `workflow_dispatch` not being registered until this
+  branch merges — each run could only read caches written by its own tag
+  or by the default branch, never by a sibling tag; (2) the key hashed
+  *generated* pickle output, which isn't byte-reproducible (`pnr-bringup-6`
+  → `-7` changed no RTL at all, yet the key moved). Both are fixed: the
+  cache now lives on the VM's OS disk (mounted into the job container as
+  `/synth-cache`, outside the git working tree that `actions/checkout`
+  wipes, and on the disk that survives this lane's own deallocate cycle),
+  and the key is a SHA-256 over `git rev-parse HEAD:<path>` tree hashes of
+  every tracked input that can change the netlist (`Bender.{yml,lock}`,
+  `hw/`, `target/ihp13/{yosys,pickle,pdk,src}`, `Makefile`, `iguana.mk`,
+  `tools.mk`) plus the yosys version string. Git tree hashes are
+  content-addressed, so the key is stable whenever the inputs are — it is
+  identical across `pnr-bringup-4` through `-8`, every one of which paid
+  full synthesis — and submodule pins come along for free, since a
+  submodule appears in its parent tree as its commit SHA (this is what
+  puts the PDK's liberty files in the key). The yosys version is included
+  because the image tag (`:dev`) is mutable. Entries are marked
+  `.complete` only after the copy finishes, so a run interrupted mid-write
+  — this lane's known failure mode — can't be mistaken for a usable entry;
+  the newest 5 are kept, and every cache write failure degrades to a
+  warning rather than failing the run.
 - `pnr-bringup-5` (run 34127033481) reached `grt ok` a second time (14/14
   iterations, clean) — confirmed only by reading `pnr_status.log` directly
   off the VM's disk — but the overall GitHub Actions job was still declared

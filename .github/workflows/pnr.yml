@@ -85,7 +85,17 @@ jobs:
   pnr:
     needs: start
     runs-on: [self-hosted, self-hosted-synth]
-    container: ghcr.io/wortexx/newt-eda:dev
+    container:
+      image: ghcr.io/wortexx/newt-eda:dev
+      # Mounts the VM-local synth cache (see the "Compute synth cache key"
+      # step below for why it can't be an actions/cache). The host path is
+      # on the OS disk, which survives this lane's own deallocate cycle -
+      # unlike /mnt, Azure's ephemeral temp disk. Docker creates the host
+      # directory on first use, so this needs no VM provisioning step.
+      volumes:
+        - /home/newt/synth-cache:/synth-cache
+    env:
+      SYNTH_CACHE_DIR: /synth-cache
     timeout-minutes: 2880 # ~48h ceiling (design D5) - bounds a hung run; detailed_route's own iteration budget (PNR_DRT_END_ITER) is the primary backstop
     steps:
       - uses: actions/checkout@v4
@@ -129,29 +139,136 @@ jobs:
         run: make pickle-all
 
       # synth-all is the expensive step here (~3h on this design) but its
-      # output only depends on the RTL and the yosys synthesis scripts -
-      # not on anything in the P&R step below. Without this, every retry of
-      # a P&R-only bug (task 3.2's real bring-up hit three in a row) pays
-      # the full ~3h synth cost again for byte-identical output. Keyed on
-      # pickle-all's own output (target/ihp13/pickle/out/*.sv2v.v, the
-      # already-flattened single-file RTL - bender/morty/svase resolved
-      # across whatever submodules this project pulls in, so this is far
-      # more robust than trying to hash the raw multi-repo source tree
-      # directly) plus the yosys synthesis scripts themselves. A different
-      # commit's RTL or script changes still correctly miss and resynthesize
-      # - this doesn't weaken design D7's "self-contained, correct for
-      # whatever ref triggered this run" guarantee, it just skips genuinely
-      # redundant reruns of the same inputs.
-      - name: Cache synth-all output
+      # output only depends on the RTL and the synthesis inputs - not on
+      # anything in the P&R step below. Without a cache, every retry of a
+      # P&R-only bug (task 3.2's bring-up hit five in a row) pays the full
+      # ~3h again for byte-identical output.
+      #
+      # This replaces an actions/cache@v4 step that never produced a single
+      # hit in any run (tasks.md 3.1, fourth addendum), for two independent
+      # reasons:
+      #
+      #  1. Actions caches are scoped per ref. Every run of this workflow is
+      #     triggered by a fresh tag (itself a workaround for workflow_dispatch
+      #     not being registered until this branch merges - see tasks.md 3.2),
+      #     and a run can only read caches written by its own ref or by the
+      #     repository's default branch - never by a sibling tag. So each run
+      #     wrote a cache into its own dead-end scope.
+      #  2. The old key hashed *generated* pickle output, which is not
+      #     byte-reproducible across runs: pnr-bringup-6 -> -7 changed no RTL
+      #     at all, yet the key moved, and every run since has produced a
+      #     fresh key.
+      #
+      # Both are fixed here. The key is derived from `git rev-parse HEAD:<path>`
+      # tree hashes of every *tracked input* that can change the netlist -
+      # content-addressed by git, so it is identical whenever those inputs are
+      # (verified retroactively: this key is the same for pnr-bringup-4 through
+      # 8, all of which paid full synthesis). Submodule pins are captured for
+      # free, since a submodule appears in its parent tree as its commit SHA -
+      # that is what makes target/ihp13/pdk (the liberty files ABC and
+      # DFFLIBMAP consume) part of the key. The yosys version string is mixed
+      # in as well, because the container image tag (`:dev`) is mutable and a
+      # rebuilt image with a different yosys must not reuse an old netlist.
+      #
+      # The cache itself lives on the VM's OS disk, outside the git working
+      # tree - actions/checkout wipes untracked files in the workspace, and the
+      # OS disk (unlike /mnt) survives this lane's own deallocate cycle. It is
+      # mounted into the job container via the `volumes:` entry above. A cache
+      # failure never fails the run: every write path below degrades to a
+      # warning.
+      - name: Compute synth cache key
+        id: synth-key
+        run: |
+          set -euo pipefail
+          # Every tracked path whose content can change the synthesized
+          # netlist. Over-inclusion only costs a redundant resynthesis;
+          # under-inclusion would serve a stale netlist and quietly break
+          # design D7's "correct for whatever ref triggered this run".
+          paths=(
+            Bender.yml Bender.lock hw
+            target/ihp13/yosys target/ihp13/pickle
+            target/ihp13/pdk target/ihp13/src
+            Makefile iguana.mk tools.mk
+          )
+          inputs="$RUNNER_TEMP/synth-key-inputs.txt"
+          : > "$inputs"
+          for path in "${paths[@]}"; do
+            # Fail loudly rather than letting a failed rev-parse (a renamed
+            # or deleted path) contribute an empty field: that would silently
+            # drop an input from the key and could collide two different
+            # source states onto one cache entry.
+            if ! tree_hash="$(git rev-parse "HEAD:$path")"; then
+              echo "::error::cannot hash '$path' - update the paths list in this step"
+              exit 1
+            fi
+            printf '%s %s\n' "$path" "$tree_hash" >> "$inputs"
+          done
+          printf 'yosys %s\n' "$(yosys -V 2>/dev/null || echo unknown)" >> "$inputs"
+          echo "Synth cache key inputs:"
+          cat "$inputs"
+          key="synth-$(sha256sum "$inputs" | cut -c1-32)"
+          echo "key=$key" >> "$GITHUB_OUTPUT"
+          echo "Synth cache key: $key"
+
+      - name: Restore synth output from the VM-local cache
         id: synth-cache
-        uses: actions/cache@v4
-        with:
-          path: target/ihp13/yosys/out
-          key: synth-${{ hashFiles('target/ihp13/pickle/out/**', 'target/ihp13/yosys/scripts/**') }}
+        run: |
+          set -uo pipefail
+          entry="$SYNTH_CACHE_DIR/${{ steps.synth-key.outputs.key }}"
+          if [ -f "$entry/.complete" ]; then
+            mkdir -p target/ihp13/yosys/out
+            if cp -a "$entry/." target/ihp13/yosys/out/; then
+              rm -f target/ihp13/yosys/out/.complete
+              echo "hit=true" >> "$GITHUB_OUTPUT"
+              echo "Cache hit: restored $(du -sh "$entry" | cut -f1) from $entry"
+            else
+              echo "::warning::restore from $entry failed - will synthesize"
+              echo "hit=false" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            echo "hit=false" >> "$GITHUB_OUTPUT"
+            echo "Cache miss for $entry - will synthesize."
+          fi
 
       - name: Synthesize (make synth-all)
-        if: steps.synth-cache.outputs.cache-hit != 'true'
+        if: steps.synth-cache.outputs.hit != 'true'
         run: make synth-all
+
+      # Only reached when synth-all actually ran and succeeded (a failed
+      # synth fails the job before this step). The .complete marker is
+      # written last so an interrupted copy - the VM vanishing mid-write is
+      # exactly this lane's known failure mode - can never be mistaken for a
+      # usable entry on the next run.
+      - name: Save synth output to the VM-local cache
+        if: steps.synth-cache.outputs.hit != 'true'
+        run: |
+          set -uo pipefail
+          entry="$SYNTH_CACHE_DIR/${{ steps.synth-key.outputs.key }}"
+          rm -rf "$entry"
+          if ! mkdir -p "$entry"; then
+            echo "::warning::cannot create $entry - skipping cache save"
+            exit 0
+          fi
+          if cp -a target/ihp13/yosys/out/. "$entry/"; then
+            touch "$entry/.complete"
+            echo "Cached $(du -sh "$entry" | cut -f1) to $entry"
+          else
+            echo "::warning::cache save failed - removing partial entry"
+            rm -rf "$entry"
+            exit 0
+          fi
+          # Keep the cache bounded: the VM's OS disk has ~111GB free and is
+          # shared with Docker's image cache and the runner workspace
+          # (tasks.md 1.4). Newest 5 entries is a few hundred MB at most.
+          keep=5
+          mapfile -t stale < <(find "$SYNTH_CACHE_DIR" -mindepth 1 -maxdepth 1 -type d \
+            -name 'synth-*' -printf '%T@ %p\n' 2>/dev/null \
+            | sort -rn | tail -n +$((keep + 1)) | cut -d' ' -f2-)
+          for dir in "${stale[@]:-}"; do
+            [ -n "$dir" ] || continue
+            echo "Pruning old cache entry: $dir"
+            rm -rf "$dir"
+          done
 
       - name: Place and route (make -C target/ihp13/openroad run-pnr)
         # PNR_TIMEOUT_GRT: run_pnr.sh's own 14400s (4h) default is nowhere
