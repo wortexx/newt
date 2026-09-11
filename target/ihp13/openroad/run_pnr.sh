@@ -23,6 +23,9 @@
 #                           global route"). Must name a stage below.
 #   PNR_SKIP_GRT_REPAIR    Passed through to grt_repair.tcl (design D2).
 #   PNR_DRT_END_ITER       Passed through to drt.tcl's -droute_end_iter.
+#   PNR_SKIP_ANTENNA_REPAIR Passed through to drt.tcl: skip repair_antennas
+#                           (hung ~14h unlogged on this over-capacity design
+#                           in run 34389061373; see drt.tcl's comment).
 #   PNR_STAGE_TIMEOUT      Per-stage wall-clock timeout in seconds for any
 #                           stage without its own override below.
 #                           Default: 21600 (6h).

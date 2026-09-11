@@ -19,6 +19,18 @@
 # PNR_DRT_END_ITER overrides the iteration budget (default matches
 # chip.tcl's original 40; lower it for a bounded CI run per design D4 -
 # the exact value is tuned during task 2.4's real bring-up).
+#
+# PNR_SKIP_ANTENNA_REPAIR=1 skips repair_antennas entirely. Run
+# 34389061373 (pnr-bringup-7, 2026-09-10) never reached detailed_route:
+# repair_antennas inserted 47,980 diodes into a design whose global-route
+# demand is 101% of capacity (Metal3 at 115%), the diode legalization did
+# not converge (20,728 violations left after 1h26), and the subsequent
+# post-insertion incremental reroute then hung single-threaded and silent
+# for ~14h until the stage's 16h timeout killed it - so `final` was
+# skipped and no DEF was produced. Antenna repair is a manufacturing
+# signoff concern, not a PPA one, so CI skips it; a cheaper middle ground
+# to try later is `repair_antennas -jumper_only` (layer-hopping jumpers,
+# no cell insertion/legalization/reroute).
 
 source [file join [file dirname [info script]] common.tcl]
 
@@ -27,6 +39,8 @@ if { [info exists ::env(PNR_DRT_END_ITER)] } {
     set droute_end_iter $::env(PNR_DRT_END_ITER)
 }
 
+set skip_antenna [expr {[info exists ::env(PNR_SKIP_ANTENNA_REPAIR)] && $::env(PNR_SKIP_ANTENNA_REPAIR) eq "1"}]
+
 set err [catch {
     pnr_load ${proj_name}.grt_repaired
 
@@ -34,11 +48,14 @@ set err [catch {
     pnr_set_dont_use
     pnr_apply_routing_layers
 
-    # Requires LEF cell with class 'CORE ANTENNACELL', otherwise you need to give a cell
-    repair_antennas
+    if { $skip_antenna } {
+        utl::report "PNR_SKIP_ANTENNA_REPAIR=1: skipping antenna repair"
+    } else {
+        # Requires LEF cell with class 'CORE ANTENNACELL', otherwise you need to give a cell
+        repair_antennas
+    }
 
     utl::report "Detailed route"
-    set_thread_count $threads
     detailed_route -output_drc ${report_dir}/${proj_name}_route_drc.rpt \
                    -bottom_routing_layer Metal2 \
                    -top_routing_layer TopMetal1 \
@@ -75,6 +92,6 @@ if { $err } {
     utl::report "ERROR in drt stage (best-effort, non-fatal to the flow): $errMsg"
     exit 1
 } else {
-    pnr_status drt ok "droute_end_iter=$droute_end_iter $drc_detail"
+    pnr_status drt ok "droute_end_iter=$droute_end_iter antenna=[expr {$skip_antenna ? "skipped" : "repaired"}] $drc_detail"
     exit 0
 }

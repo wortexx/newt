@@ -189,6 +189,27 @@ jobs:
         # first; come back to tuning grt_repair's timeout/convergence once
         # drt and final are themselves real-run-verified.
         #
+        # PNR_SKIP_ANTENNA_REPAIR: run 34389061373 (pnr-bringup-7, the
+        # first fully green start->pnr->upload->stop run) still produced
+        # no DEF: drt's 16h budget was eaten entirely by repair_antennas,
+        # which never reached detailed_route at all - 47,980 diodes
+        # inserted into a design routing at 101% of global capacity
+        # (Metal3 115%), diode legalization not converging (20,728
+        # violations after 1h26), then a single-threaded post-insertion
+        # reroute hung ~14h with zero log output until timeout (exit 124).
+        # Antenna repair is manufacturing signoff, not PPA - skip it in CI
+        # (see drt.tcl's comment for the -jumper_only middle ground).
+        #
+        # PNR_DRT_END_ITER=8: design D4's 8-16 band, low end. The stock 40
+        # iterations can't converge on this congestion-bound design, and
+        # only an iteration budget detailed_route reaches *by itself* ends
+        # the stage cleanly (checkpoint saved, final runs, DEF produced) -
+        # hitting the 16h timeout instead loses everything, as every drt
+        # attempt so far has demonstrated. No 16-vCPU per-iteration timing
+        # data exists yet (detailed_route has never actually started in a
+        # real run); tune once the first run survives repair_antennas'
+        # removal from the path.
+        #
         # PROJ_NAME=basilisk: the "Synthesize" step above runs `make
         # synth-all` from the repo root, which includes iguana.mk - that's
         # what sets PROJ_NAME to basilisk (TOP_DESIGN iguana_chip is the
@@ -201,7 +222,7 @@ jobs:
         # out/iguana_chip.yosys.v - a file that was never produced. Every
         # manual bring-up invocation all through task 2.4 passed this
         # explicitly; only the workflow step itself was missing it.
-        run: PNR_TIMEOUT_GRT=57600 PNR_TIMEOUT_GRT_REPAIR=57600 PNR_SKIP_GRT_REPAIR=1 make -C target/ihp13/openroad -f openroad.mk run-pnr PROJ_NAME=basilisk
+        run: PNR_TIMEOUT_GRT=57600 PNR_TIMEOUT_GRT_REPAIR=57600 PNR_SKIP_GRT_REPAIR=1 PNR_SKIP_ANTENNA_REPAIR=1 PNR_DRT_END_ITER=8 make -C target/ihp13/openroad -f openroad.mk run-pnr PROJ_NAME=basilisk
 
       - name: Stage-status summary
         if: always()
