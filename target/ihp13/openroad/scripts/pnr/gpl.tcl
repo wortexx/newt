@@ -22,8 +22,6 @@ set err [catch {
     set clock_nets [pnr_set_clock_dont_touch]
     pnr_set_dont_use
 
-    set_thread_count $threads
-
     set GPL_ARGS {  -density 0.65
                     -routability_driven
                     -routability_check_overflow 0.40

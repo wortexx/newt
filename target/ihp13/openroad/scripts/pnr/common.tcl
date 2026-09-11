@@ -33,8 +33,25 @@ set openroad_dir  [file dirname $scripts_dir]
 set step_by_step_debug 0
 set threads 32
 
+# OpenROAD's per-process default is 1 thread (`threads_ = 1` in
+# OpenRoad.cc), and set_thread_count is what feeds STA and the global
+# router their thread budgets. chip.tcl set this once globally (line 93)
+# for its single long-lived process; the staged port initially carried the
+# call into only gpl.tcl and drt.tcl, so every other stage - including
+# cts's repair_timing and the whole grt stage - silently ran
+# single-threaded (found 2026-09-11 via run 34389061373's logs: exactly
+# one ORD-0030 "Using 16 thread(s)" line across all eight stages, matching
+# the VM's ~7% CPU telemetry). Same re-derive-per-process class as
+# set_wire_rc/estimate_parasitics above. Values above the hardware thread
+# count are clamped by OpenROAD itself, so 32 on a 16-vCPU host is fine.
+# (The call sits below the source lines so the tclsh substitute check -
+# tasks.md 2.1/2.2 - still parses checkpoint.tcl/reports.tcl before
+# hitting its first OpenROAD-only command.)
+
 source ${openroad_dir}/scripts/checkpoint.tcl
 source ${openroad_dir}/scripts/reports.tcl
+
+set_thread_count $threads
 
 # -----------------------------------------------------------------------
 # pnr_init_tech: read liberty/LEF and define the dont_use_cells/ctsBuf/
