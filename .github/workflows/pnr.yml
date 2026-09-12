@@ -512,6 +512,20 @@ jobs:
             else
               echo "| (none) | no status log found | run_pnr.sh may not have started |"
             fi
+            # State the DEF outcome explicitly (specs/ci-pipeline: "Run exits 0
+            # without a routed design"). Detailed routing is best-effort, so a
+            # missing DEF is a legitimate result of a successful run - but it
+            # must be reported, not left for the reader to infer from the
+            # stage table.
+            echo
+            DEF=target/ihp13/openroad/out/basilisk.final.def
+            if [ -f "$DEF" ]; then
+              echo "**Routed design:** \`$(basename "$DEF")\` published ($(du -h "$DEF" | cut -f1))."
+            else
+              blocker="$(awk '$2 == "failed" { print $1; exit }' "$STATUS_LOG" 2>/dev/null)"
+              echo "**Routed design:** none produced${blocker:+ - first failing stage was \`$blocker\`}."
+              echo "Detailed routing is best-effort (success is gated through global route), so this does not fail the run."
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload DEF

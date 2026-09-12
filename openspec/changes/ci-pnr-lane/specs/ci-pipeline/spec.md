@@ -79,12 +79,19 @@ Because the P&R and synth lanes share one runner VM, the system SHALL serialize 
 
 ### Requirement: P&R lane publishes routing outputs and preserves checkpoints
 
-The lane SHALL upload the routed design (DEF) and the flow's reports and logs as workflow artifacts with bounded retention — reports and logs even when the run fails — and SHALL upload the flow's stage checkpoints to Azure Blob storage governed by a ~30-day lifecycle expiry, so a failed or stopped run can be resumed or diagnosed without re-running days of flow.
+The lane SHALL upload the flow's reports and logs as workflow artifacts with bounded retention — even when the run fails — SHALL upload the routed design (DEF) whenever detailed routing produces one, and SHALL upload the flow's stage checkpoints to Azure Blob storage governed by a ~30-day lifecycle expiry, so a failed or stopped run can be resumed or diagnosed without re-running days of flow.
+
+A DEF is published conditionally rather than on every successful run because detailed routing is best-effort by design (see `pnr-flow`: success is gated through global route). A run can therefore legitimately exit 0 without a routed design — on a congestion-bound design that is an expected measurement result, not a lane failure — and the absence of a DEF SHALL be reported rather than silently producing an empty artifact or failing the run.
 
 #### Scenario: Successful run publishes outputs
 
-- **WHEN** a P&R run exits 0
+- **WHEN** a P&R run exits 0 and detailed routing produced a routed design
 - **THEN** the DEF and reports are downloadable as workflow artifacts and the run's checkpoints exist in Blob storage
+
+#### Scenario: Run exits 0 without a routed design
+
+- **WHEN** a P&R run exits 0 because global route completed, but detailed routing did not produce a routed design
+- **THEN** the reports and checkpoints are still published, the run's summary states that no DEF was produced and which stage prevented it, and the run is not marked failed
 
 #### Scenario: Failed run still publishes diagnostics
 
