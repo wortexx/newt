@@ -225,6 +225,39 @@ better, bake them into the Packer golden image Phase 6 plans. Both changes
 are reversible: `systemctl enable --now apt-daily-upgrade.timer` and
 `rm /etc/needrestart/conf.d/99-ci-runner.conf`.
 
+## Resuming a run from a previous run's checkpoints (added 2026-09-12)
+
+`run_pnr.sh` already skips any stage whose checkpoint zip is present
+(design D1), so resuming is purely a matter of putting the zips back before
+P&R starts. Two pieces make that possible in CI: `upload-checkpoints` has
+always pushed them to `pnr-checkpoints/<run_id>/`, and a
+`restore-checkpoints` job now pulls them back down.
+
+To resume, point the lane at the run whose checkpoints you want:
+
+```bash
+# Tag-triggered runs cannot take a workflow_dispatch input until this branch
+# merges (see tasks.md 3.2), so the run ID travels in a repository variable.
+gh variable set PNR_RESUME_FROM_RUN --body <run_id>
+git tag pnr-bringup-N && git push origin pnr-bringup-N
+
+# IMPORTANT: clear it once the run finishes, or every later run resumes from
+# the same stale checkpoints.
+gh variable delete PNR_RESUME_FROM_RUN
+```
+
+Post-merge, prefer the `resume_from_run` workflow_dispatch input, which
+needs no cleanup.
+
+Safety: checkpoints hold the physical database for one specific synthesis
+result, so grafting them onto a different netlist would silently produce a
+layout for a design that was never synthesized. Each upload now carries a
+`synth-key.txt` marker naming the netlist it came from, and the restore step
+**refuses** to proceed if that marker disagrees with the current run's synth
+cache key. Runs from before 2026-09-12 have no marker; the restore warns and
+proceeds on the caller's assertion, so only resume from those when you know
+the RTL and synthesis inputs are unchanged.
+
 ## Resource summary for Phase 6 IaC
 
 | Resource | Name | Notes |

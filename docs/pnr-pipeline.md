@@ -10,6 +10,7 @@ that workflow invokes on it.
 | Job | Runs on | What it does |
 |---|---|---|
 | `start` | `ubuntu-latest` | OIDC login to Azure, starts the self-hosted VM (idempotent — no-op if already running). |
+| `restore-checkpoints` | self-hosted VM (no container) | Only does work when `PNR_RESUME_FROM_RUN` (repository variable) or the `resume_from_run` dispatch input names a previous run: downloads that run's checkpoints from Blob into `/home/newt/pnr-restore/<run_id>` — outside the workspace, which `actions/checkout` would `git clean -ffdx`. Runs outside the job container because az CLI lives on the VM host, and design D8 gives the `pnr` job no Azure access. |
 | `pnr` | self-hosted VM | Checks out the repo, generates the hardware config, pickles RTL, runs `make synth-all` (cached — see below) then `make -C target/ihp13/openroad -f openroad.mk run-pnr PROJ_NAME=basilisk` (the 9-stage flow below), builds a stage-status summary from `pnr_status.log`, uploads the final DEF and the reports/logs as workflow artifacts. |
 | `upload-checkpoints` | self-hosted VM | Pushes `.zip` checkpoints to the `pnr-checkpoints` blob container (task 1.3) so a later run can resume without redoing synth+P&R from scratch. |
 | `stop` | `ubuntu-latest` | Checks whether the runner is still needed (busy, or another `pnr.yml`/`synth.yml` run queued) before deallocating the VM — the coexistence guard. |
