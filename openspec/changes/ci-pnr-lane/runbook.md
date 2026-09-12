@@ -236,18 +236,22 @@ always pushed them to `pnr-checkpoints/<run_id>/`, and a
 To resume, point the lane at the run whose checkpoints you want:
 
 ```bash
-# Tag-triggered runs cannot take a workflow_dispatch input until this branch
-# merges (see tasks.md 3.2), so the run ID travels in a repository variable.
-gh variable set PNR_RESUME_FROM_RUN --body <run_id>
-git tag pnr-bringup-N && git push origin pnr-bringup-N
+# The run ID lives in a tracked file, so it travels with the tag.
+echo <run_id> > .github/pnr-resume-from
+git commit -am "resume from <run_id>" && git tag pnr-bringup-N
+git push origin ci-pnr-lane pnr-bringup-N
 
-# IMPORTANT: clear it once the run finishes, or every later run resumes from
-# the same stale checkpoints.
-gh variable delete PNR_RESUME_FROM_RUN
+# Afterwards, delete the file so later runs go back to the full flow:
+git rm .github/pnr-resume-from && git commit -m "back to full runs"
 ```
 
-Post-merge, prefer the `resume_from_run` workflow_dispatch input, which
-needs no cleanup.
+A tracked file rather than a repository variable for two reasons: setting
+repository variables needs permissions the CI token doesn't have, and a
+committed run ID shows up in the tag's own diff instead of lingering
+invisibly in repo settings, where it would silently resume every later run.
+`PNR_RESUME_FROM_RUN` (repository variable) and the `resume_from_run`
+workflow_dispatch input both still take precedence over the file if set —
+prefer the dispatch input post-merge, since it needs no cleanup at all.
 
 Safety: checkpoints hold the physical database for one specific synthesis
 result, so grafting them onto a different netlist would silently produce a

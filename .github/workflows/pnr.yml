@@ -59,13 +59,20 @@ env:
   AZURE_STORAGE_ACCOUNT: ${{ vars.AZURE_STORAGE_ACCOUNT }}
   AZURE_CHECKPOINT_CONTAINER: pnr-checkpoints
   # Resume support (design D1: "rerunning the driver skips stages whose
-  # checkpoint already exists"). Set either the workflow_dispatch input or the
-  # PNR_RESUME_FROM_RUN repository variable to a previous run's ID to restore
-  # that run's checkpoints before P&R, so the driver starts at the first stage
-  # that has no checkpoint. The repository variable exists because
-  # workflow_dispatch is not registered for this workflow until the branch
-  # merges (see tasks.md 3.2), and tag-triggered runs have no other way to
-  # pass a parameter. Empty in both = ordinary fresh run.
+  # checkpoint already exists"). Naming a previous run restores its
+  # checkpoints before P&R, so the driver starts at the first stage that has
+  # no checkpoint. Three sources, highest precedence first: the
+  # workflow_dispatch input; a PNR_RESUME_FROM_RUN repository variable; and a
+  # tracked `.github/pnr-resume-from` file holding just the run ID.
+  #
+  # The file exists because neither of the other two is usable for the
+  # tag-triggered bring-up runs this lane currently relies on:
+  # workflow_dispatch isn't registered until this branch merges (tasks.md
+  # 3.2), and setting a repository variable needs permissions the CI token
+  # doesn't have. It also turns out to be the safer default - the run ID is
+  # committed, so it shows up in the tag's diff and can't linger invisibly
+  # the way a forgotten repository variable would. Delete the file to go back
+  # to full runs.
   PNR_RESUME_FROM_RUN: ${{ github.event.inputs.resume_from_run || vars.PNR_RESUME_FROM_RUN }}
   # Host directory the restore job stages checkpoints into. Outside the git
   # working tree on purpose: actions/checkout runs `git clean -ffdx`, which
@@ -112,18 +119,35 @@ jobs:
     permissions:
       id-token: write
       contents: read
+    outputs:
+      resume_run: ${{ steps.resolve.outputs.resume_run }}
     steps:
-      - name: Report resume mode
+      # Read the marker straight from the API rather than checking the repo
+      # out: this job runs as the runner user, while the pnr job runs as root
+      # inside the container, so an actions/checkout here would try to
+      # `git clean -ffdx` root-owned leftovers and fail.
+      - name: Resolve resume source
+        id: resolve
         run: |
-          if [ -z "${PNR_RESUME_FROM_RUN}" ]; then
+          set -uo pipefail
+          resume="${PNR_RESUME_FROM_RUN}"
+          if [ -z "$resume" ]; then
+            resume="$(curl -sfL \
+              -H "Authorization: Bearer ${{ github.token }}" \
+              -H "Accept: application/vnd.github.raw" \
+              "${{ github.api_url }}/repos/${{ github.repository }}/contents/.github/pnr-resume-from?ref=${{ github.sha }}" \
+              | tr -d '[:space:]')" || resume=""
+          fi
+          echo "resume_run=$resume" >> "$GITHUB_OUTPUT"
+          if [ -z "$resume" ]; then
             echo "No resume requested - the pnr job will run the full flow from floorplan."
           else
-            echo "::warning::RESUME MODE: restoring checkpoints from run ${PNR_RESUME_FROM_RUN}."
+            echo "::warning::RESUME MODE: restoring checkpoints from run ${resume}."
             echo "Stages with a restored checkpoint will be SKIPPED, not re-run."
           fi
 
       - name: Azure login (OIDC)
-        if: env.PNR_RESUME_FROM_RUN != ''
+        if: steps.resolve.outputs.resume_run != ''
         uses: azure/login@v2
         with:
           client-id: ${{ env.AZURE_CLIENT_ID }}
@@ -131,27 +155,29 @@ jobs:
           subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
 
       - name: Download checkpoints from Blob
-        if: env.PNR_RESUME_FROM_RUN != ''
+        if: steps.resolve.outputs.resume_run != ''
+        env:
+          RESUME_RUN: ${{ steps.resolve.outputs.resume_run }}
         run: |
           set -euo pipefail
-          dest="${PNR_RESTORE_HOST_DIR}/${PNR_RESUME_FROM_RUN}"
+          dest="${PNR_RESTORE_HOST_DIR}/${RESUME_RUN}"
           rm -rf "$dest"
           mkdir -p "$dest"
           az storage blob download-batch \
             --account-name "${{ env.AZURE_STORAGE_ACCOUNT }}" \
             --auth-mode login \
             --source "${{ env.AZURE_CHECKPOINT_CONTAINER }}" \
-            --pattern "${PNR_RESUME_FROM_RUN}/*" \
+            --pattern "${RESUME_RUN}/*" \
             --destination "$dest" >/dev/null
           # download-batch recreates the blob prefix as a subdirectory; flatten
           # it so the pnr job sees the .zip files directly under $dest.
-          if [ -d "$dest/${PNR_RESUME_FROM_RUN}" ]; then
-            mv "$dest/${PNR_RESUME_FROM_RUN}"/* "$dest"/
-            rmdir "$dest/${PNR_RESUME_FROM_RUN}"
+          if [ -d "$dest/${RESUME_RUN}" ]; then
+            mv "$dest/${RESUME_RUN}"/* "$dest"/
+            rmdir "$dest/${RESUME_RUN}"
           fi
           count=$(find "$dest" -maxdepth 1 -name '*.zip' | wc -l)
           if [ "$count" -eq 0 ]; then
-            echo "::error::no checkpoint .zip files found for run ${PNR_RESUME_FROM_RUN}"
+            echo "::error::no checkpoint .zip files found for run ${RESUME_RUN}"
             exit 1
           fi
           echo "Staged $count checkpoint(s) into $dest:"
@@ -367,11 +393,13 @@ jobs:
       # checkpoint zip is present, so restoring them here is the whole
       # mechanism - no driver change needed. This also exercises the resume
       # path that task 2.5 requires.
-      - name: Restore checkpoints to resume (only when PNR_RESUME_FROM_RUN is set)
-        if: env.PNR_RESUME_FROM_RUN != ''
+      - name: Restore checkpoints to resume (only when a resume run is named)
+        if: needs.restore-checkpoints.outputs.resume_run != ''
+        env:
+          RESUME_RUN: ${{ needs.restore-checkpoints.outputs.resume_run }}
         run: |
           set -euo pipefail
-          src="${PNR_RESTORE_DIR}/${PNR_RESUME_FROM_RUN}"
+          src="${PNR_RESTORE_DIR}/${RESUME_RUN}"
           if [ ! -d "$src" ]; then
             echo "::error::${src} is missing - the restore-checkpoints job should have staged it"
             exit 1
@@ -390,11 +418,11 @@ jobs:
             fi
             echo "Netlist identity matches ($current) - safe to resume."
           else
-            echo "::warning::run ${PNR_RESUME_FROM_RUN} predates netlist-identity marking, so the match cannot be verified automatically. Proceeding on the caller's assertion that the netlist is unchanged."
+            echo "::warning::run ${RESUME_RUN} predates netlist-identity marking, so the match cannot be verified automatically. Proceeding on the caller's assertion that the netlist is unchanged."
           fi
           mkdir -p target/ihp13/openroad/save
           cp -a "$src"/*.zip target/ihp13/openroad/save/
-          echo "Restored checkpoints - these stages will be SKIPPED by the driver:"
+          echo "Restored checkpoints from run ${RESUME_RUN} - these stages will be SKIPPED by the driver:"
           for z in target/ihp13/openroad/save/*.zip; do echo "  $(basename "$z")"; done
 
       - name: Place and route (make -C target/ihp13/openroad run-pnr)
