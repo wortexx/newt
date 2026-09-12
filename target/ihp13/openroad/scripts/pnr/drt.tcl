@@ -56,9 +56,17 @@ set err [catch {
     }
 
     utl::report "Detailed route"
+    # -bottom_routing_layer/-top_routing_layer (as chip.tcl passes them)
+    # are a hard error on OpenROAD 2c56926: DRT-0509/0510, "deprecated, use
+    # set_routing_layers command instead". They are still listed in
+    # detailed_route's define_cmd_args and still parsed into its keys array,
+    # which is exactly why the 2026-09-06 API audit passed them - reading the
+    # declared argument list is not enough, the proc body is the real
+    # contract. The layer restriction they used to express is already applied
+    # by pnr_apply_routing_layers above (set_routing_layers -signal
+    # Metal2-TopMetal1 -clock Metal2-TopMetal1), so dropping them here is
+    # behaviour-preserving and is what the error message itself prescribes.
     detailed_route -output_drc ${report_dir}/${proj_name}_route_drc.rpt \
-                   -bottom_routing_layer Metal2 \
-                   -top_routing_layer TopMetal1 \
                    -droute_end_iter $droute_end_iter \
                    -drc_report_iter_step 5 \
                    -clean_patches \
