@@ -264,6 +264,12 @@ the RTL and synthesis inputs are unchanged.
 
 ## Resource summary for Phase 6 IaC
 
+> **Superseded.** Phase 6 landed: these resources are now declared in Bicep under
+> [`infra/azure/`](../../../../infra/azure/), and
+> [`infra/azure/README.md`](../../../../infra/azure/README.md) is the authoritative
+> description of the CI's Azure footprint. The table below is kept as the record of
+> how they were originally built by hand — read it as history, not as current state.
+
 | Resource | Name | Notes |
 | --- | --- | --- |
 | Managed identity | `newt-ci-identity` | `clientId 60617f62-7e05-45b3-9ebf-8e79025b6548`, `principalId 6e5681a6-e861-476f-a091-72d01bb57531` |

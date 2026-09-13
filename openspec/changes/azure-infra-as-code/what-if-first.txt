@@ -1,0 +1,71 @@
+what-if against newt-synth-lane-rg - azure-infra-as-code task 2.1
+captured 2026-09-13
+
+Run over the ARM REST API as a long-running operation. `az deployment group
+what-if` has a hard 300s read timeout and never returns for this template;
+the same request as an LRO completes in ~19s.
+
+Preview of the corrected template, after three deployment attempts failed on
+PropertyChangeNotAllowed (securityType, ssh.publicKeys, diskSizeGB - see
+design.md Risks). Everything except the VM applied on the first attempt, so
+the single remaining Create is the VM-dependent role assignment.
+
+counts: Create=1, Ignore=2, Modify=3, NoChange=10
+
+NO Delete and NO Replace at resource level.
+
+--- Create (1) ---
+  Microsoft.Compute/virtualMachines/newt-synth-runner/providers/Microsoft.Authorization/roleAssignments/b4966e61-1726-5751-8461-69e19760457c
+
+--- Modify (3) ---
+  Microsoft.Compute/virtualMachines/newt-synth-runner
+      identity: Create
+      properties.storageProfile.osDisk.managedDisk.storageAccountType: NoEffect
+  Microsoft.Network/networkInterfaces/newt-synth-runnerVMNic
+      kind: Delete
+      properties.allowPort25Out: Delete
+      properties.ipConfigurations: Array
+      properties.ipConfigurations[0].properties.primary: NoEffect
+  Microsoft.Storage/storageAccounts/newtpnrcheckpoints/blobServices/default/containers/pnr-checkpoints/providers/Microsoft.Authorization/roleAssignments/29a22fda-aa9c-54fc-9551-316ed7221f5e
+      properties.principalId: Modify
+      properties.principalType: NoEffect
+
+--- NoChange (10) ---
+  Microsoft.Consumption/budgets/budget-newt-synth-lane-rg-monthly
+  Microsoft.KeyVault/vaults/newt-ci-kv
+  Microsoft.ManagedIdentity/userAssignedIdentities/newt-ci-identity
+  Microsoft.ManagedIdentity/userAssignedIdentities/newt-ci-identity/federatedIdentityCredentials/gh-actions-azure-env
+  Microsoft.Network/networkSecurityGroups/newt-synth-runnerNSG
+  Microsoft.Network/publicIPAddresses/newt-synth-runnerPublicIP
+  Microsoft.Network/virtualNetworks/newt-synth-runnerVNET
+  Microsoft.Storage/storageAccounts/newtpnrcheckpoints
+  Microsoft.Storage/storageAccounts/newtpnrcheckpoints/blobServices/default/containers/pnr-checkpoints
+  Microsoft.Storage/storageAccounts/newtpnrcheckpoints/managementPolicies/default
+
+--- Ignore (2) ---
+  Microsoft.Compute/disks/newt-synth-runner_OsDisk_1_5a97c75b74fe412ca2886c3977845b74
+  Microsoft.DevTestLab/schedules/shutdown-computevm-newt-synth-runner
+
+Notes
+-----
+The VM Modify is now exactly the intended change: `identity` is the
+SystemAssigned identity being added. storageAccountType is explicitly NoEffect.
+securityProfile, diskSizeGB and customData no longer appear - all three are
+behind parameters that omit them when adopting.
+
+Every leaf the template sets on the VM was diffed against the live GET before
+this preview: 0 mismatches, and nothing sent that is absent on live. That check,
+not the preview, is what catches PropertyChangeNotAllowed.
+
+Two Modify entries are what-if artifacts no deployment can settle:
+  - NIC `kind` and `allowPort25Out` are read-only and ARM-computed; Bicep
+    rejects declaring them (BCP187 / BCP037).
+  - The blob role assignment's `principalId` comes from a runtime reference()
+    what-if cannot resolve; the stored value already equals the identity's
+    principalId (6e5681a6-e861-476f-a091-72d01bb57531), verified directly.
+Both fall under the read-only-property exemption in the azure-infrastructure
+spec's idempotence requirement.
+
+The Key Vault Secrets User assignment is absent because it lives in a nested
+module whose principalId comes from the VM identity that does not exist yet.
+Task 2.3 verifies it after deployment.

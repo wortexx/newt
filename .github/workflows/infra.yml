@@ -1,0 +1,53 @@
+# Infrastructure validation — docs/infra-plan.md Phase 6.
+#
+# Builds and lints everything under infra/ so a broken template is caught on
+# the pull request instead of at deployment time.
+#
+# This job deliberately holds NO Azure credentials: no `azure/login`, no
+# `environment:`, no `id-token` permission. Validation is purely local to the
+# checkout. Deploying (and even `what-if`, which needs Reader on the resource
+# group) is done by a human from their own `az login` — granting either to an
+# OIDC identity would widen the CI identity's scope, which
+# openspec/specs/azure-infrastructure forbids. See design D6.
+name: Infra
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'infra/**'
+      - '.github/workflows/infra.yml'
+  pull_request:
+    paths:
+      - 'infra/**'
+      - '.github/workflows/infra.yml'
+
+defaults:
+  run:
+    shell: bash
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # az auto-installs Bicep on first use; doing it explicitly keeps the
+      # failure mode (and the version in the log) obvious.
+      - name: Install Bicep CLI
+        run: az bicep install
+
+      # bicepconfig.json promotes every linter finding to an error, so a lint
+      # violation fails this step rather than scrolling past as a warning.
+      - name: Build main.bicep
+        run: az bicep build --file infra/azure/main.bicep --stdout > /dev/null
+
+      - name: Build main.bicepparam
+        run: az bicep build-params --file infra/azure/main.bicepparam --stdout > /dev/null
+
+      - name: Shellcheck provision-runner.sh
+        run: shellcheck infra/azure/provision-runner.sh
