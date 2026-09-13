@@ -536,3 +536,5 @@ output ciIdentityClientId string = deployCiIdentity ? ciIdentity!.properties.cli
 output ciIdentityPrincipalId string = deployCiIdentity ? ciIdentity!.properties.principalId : ''
 output publicIpAddress string = publicIp.properties.ipAddress
 output keyVaultUri string = deployKeyVault ? keyVault!.properties.vaultUri : ''
+
+param deliberatelyUnused string = 'boom'
