@@ -81,7 +81,10 @@ env:
   PNR_RESTORE_HOST_DIR: /home/newt/pnr-restore
   # Checkpoint base names (no project prefix, no .zip) to leave out of a
   # resume, so their stages run again. Empty for ordinary runs.
-  PNR_RESUME_EXCLUDE: ''
+  # TEMPORARY (tasks.md 2.5b verification run) - reverted right after.
+  # Keeps only floorplan/power_grid from the resumed run so pre_place
+  # actually executes and its injected failure can be retried for real.
+  PNR_RESUME_EXCLUDE: 'pre_place gpl gpl_fix gpl_repaired gpl2 dpl cts grt grt_repaired'
 
 jobs:
   # ---------------------------------------------------------------------
@@ -513,7 +516,10 @@ jobs:
         # out/iguana_chip.yosys.v - a file that was never produced. Every
         # manual bring-up invocation all through task 2.4 passed this
         # explicitly; only the workflow step itself was missing it.
-        run: PNR_TIMEOUT_GRT=57600 PNR_TIMEOUT_GRT_REPAIR=57600 PNR_SKIP_GRT_REPAIR=1 PNR_SKIP_ANTENNA_REPAIR=1 PNR_DRT_END_ITER=8 make -C target/ihp13/openroad -f openroad.mk run-pnr PROJ_NAME=basilisk
+        # TEMPORARY (tasks.md 2.5b verification run) - reverted right after.
+        # PNR_GATE=pre_place so the run legitimately exits 0 after stopping
+        # there (PNR_STOP_AFTER does not move the gate by design).
+        run: PNR_TIMEOUT_GRT=57600 PNR_TIMEOUT_GRT_REPAIR=57600 PNR_SKIP_GRT_REPAIR=1 PNR_SKIP_ANTENNA_REPAIR=1 PNR_DRT_END_ITER=8 PNR_GATE=pre_place PNR_STOP_AFTER=pre_place PNR_FAULT_INJECT_PRE_PLACE=1 make -C target/ihp13/openroad -f openroad.mk run-pnr PROJ_NAME=basilisk
 
       - name: Stage-status summary
         if: always()
