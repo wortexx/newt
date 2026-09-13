@@ -105,3 +105,25 @@ graph LR;
 5. This gives us synthesizable Verilog which is then loaded into yosys
 6. In yosys the Verilog RTL goes through various passes and is mapped to the technology cells
 7. The netlist, constraints and floorplan are loaded into OpenRoad for Place&Route
+
+## CI and infrastructure
+
+The CI lanes run on GitHub Actions, partly on a self-hosted Azure VM:
+
+| Lane | Workflow | Runs on |
+| --- | --- | --- |
+| Fast lane (lint, sw, sim stubs) | `.github/workflows/ci.yml` | GitHub-hosted |
+| Full synthesis | `.github/workflows/synth.yml` | Self-hosted Azure VM |
+| Place & route | `.github/workflows/pnr.yml` | Self-hosted Azure VM |
+| Idle-VM watchdog | `.github/workflows/vm-watchdog.yml` | GitHub-hosted |
+| Infra validation | `.github/workflows/infra.yml` | GitHub-hosted |
+
+The Azure resources behind the self-hosted lanes — the VM and its network, the
+OIDC identity, the checkpoint storage account, the Key Vault and the cost
+budget — are declared in Bicep under [`infra/azure/`](infra/azure/).
+**[`infra/azure/README.md`](infra/azure/README.md) is the authoritative
+description**: how to deploy, how to rebuild the runner host from scratch, how
+to rotate the runner registration credential, and how to check for drift.
+
+Planning and rationale live in [`docs/infra-plan.md`](docs/infra-plan.md); the
+P&R flow itself is described in [`docs/pnr-pipeline.md`](docs/pnr-pipeline.md).

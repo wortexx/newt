@@ -1,0 +1,34 @@
+#cloud-config
+# Copyright 2026 the newt project authors.
+# Licensed under the Apache License, Version 2.0, see LICENSE for details.
+# SPDX-License-Identifier: Apache-2.0
+#
+# First-boot provisioning for a runner VM - docs/infra-plan.md Phase 6, design D3.
+#
+# This file is not consumed directly: main.bicep loads it, substitutes the
+# __PLACEHOLDER__ tokens from template parameters, and passes the result as the
+# VM customData. provision-runner.sh is embedded base64-encoded rather than
+# copied inline, so the script has exactly one source of truth and no YAML
+# indentation can corrupt it.
+#
+# customData is only honoured on a first boot, so this is inert for the
+# already-built VM; converging that host uses az vm run-command instead.
+
+write_files:
+  - path: /opt/newt/provision-runner.env
+    permissions: '0600'
+    owner: root:root
+    content: |
+      KEY_VAULT_NAME=__KEY_VAULT_NAME__
+      RUNNER_NAME=__RUNNER_NAME__
+      RUNNER_LABELS=__RUNNER_LABELS__
+      GITHUB_REPO=__GITHUB_REPO__
+
+  - path: /opt/newt/provision-runner.sh
+    permissions: '0755'
+    owner: root:root
+    encoding: b64
+    content: __PROVISION_SCRIPT_B64__
+
+runcmd:
+  - [ bash, -c, "set -a; . /opt/newt/provision-runner.env; set +a; exec bash /opt/newt/provision-runner.sh" ]

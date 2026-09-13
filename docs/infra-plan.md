@@ -267,16 +267,50 @@ cost ~$15 each versus $30–38 before the threading, antenna-skip, cache and res
 
 ## Phase 6 — Azure infrastructure as code
 
-- [ ] **Terraform or Bicep**: resource group; `Standard_E16ds_v5` (created deallocated);
-      storage account; user-assigned managed identity; **OIDC federated credential**
-      (GitHub → Azure, no stored secrets); NSG; budget alert.
-- [ ] **Golden VM image** (Packer or manual capture): Ubuntu + Docker +
-      `docker pull ghcr.io/wortexx/newt-eda:dev` + Actions runner installed as a service
-      (auto-reconnects on boot). Eliminates cold-start pull cost.
-- [ ] Runner registration: GitHub App (preferred) or PAT in Key Vault.
-- [ ] Guardrails: auto-deallocate on job end; `concurrency` group of 1;
-      **spot VM for the synth lane only** (P&R stays on-demand — `detailed_route`
-      does not checkpoint mid-run, so an eviction there loses the whole phase).
+Built as **Bicep**, in `infra/azure/` — see [`infra/azure/README.md`](../infra/azure/README.md),
+which is now the authoritative description of the CI's Azure footprint. The
+archived ci-pnr-lane runbook records how these resources were originally built
+by hand and is kept only as history.
+
+- [x] **Bicep** (`infra/azure/main.bicep`, resource-group scoped, deployed
+      incrementally behind an `az deployment group what-if` preview): the VM with its
+      NIC, VNet, public IP and NSG; the `newt-ci-identity` user-assigned identity and
+      its **OIDC federated credential** (no stored secrets); both minimally-scoped role
+      assignments; the checkpoint storage account, container and 30-day lifecycle rule;
+      a Key Vault; and a budget alert. The existing hand-built resources were adopted in
+      place — nothing was recreated and the OS disk (runner registration, Docker cache,
+      synth cache) was never touched.
+- [x] Runner registration: **PAT in Key Vault**, read by the VM's own system-assigned
+      identity over IMDS and exchanged for a short-lived registration token.
+      `newt-ci-identity` deliberately gets no vault access. A GitHub App would be
+      cleaner but needs private-key handling and JWT minting for a solo repo.
+- [x] **Reproducible runner host** without a golden image: `infra/azure/cloud-init.yaml`
+      plus the idempotent `infra/azure/provision-runner.sh` bring a fresh VM to the
+      state the lanes need (Docker, az CLI, Actions runner as a service,
+      `apt-daily-upgrade.timer` disabled, needrestart override). The same script
+      converges the existing VM through Run Command.
+- [x] **Budget alert**: resource-group monthly budget, e-mail at 50/80/100 % of actual
+      spend. A notification, not an enforcement — `vm-watchdog.yml` (Phase 5) is what
+      actually bounds spend.
+- [x] Infra validation in CI: `.github/workflows/infra.yml` builds and lints the
+      templates on every PR touching `infra/**`, holding no Azure credentials.
+- [ ] **Deferred — golden VM image (Packer)**: it adds a tool, an image store and a
+      rebuild workflow, so it gets its own change rather than riding along here. The
+      provisioning script is the stepping stone: a Packer template would call the same
+      file. Cold-start pull cost stays until then.
+- [ ] **Deferred — spot VM / second VM for the synth lane**: the single shared VM stays
+      on-demand. P&R cannot use spot (`detailed_route` does not checkpoint mid-run, so an
+      eviction loses the phase), and splitting the synth lane onto its own spot VM buys
+      little while one runner serializes both lanes acceptably.
+- Auto-deallocate on job end and a `concurrency` group of 1 were delivered in Phase 5,
+  not here.
+
+**Drift and the one undeclared resource.** Incremental deployments never delete, so a
+hand-made resource simply persists; `infra/azure/README.md` documents the
+`az resource list` drift check. Exactly one live resource is deliberately *not* declared:
+the DevTestLab schedule `shutdown-computevm-newt-synth-runner`, currently disabled.
+Phase 9 deletes it once `vm-watchdog.yml` has been observed working, so that there is
+never a window with no cost backstop.
 
 ## Phase 7 — Coprocessor scaffolding  *(parallel track, not infra)*
 
@@ -426,8 +460,8 @@ the synth cache removes the ~3h resynthesis.
 | --- | --- |
 | Questa → Verilator port is hard (Cheshire TB, hyperbus / DDR models) | Start with the coprocessor unit TB; accept synth-lane-only full-SoC sim initially |
 | OpenROAD bump breaks `chip.tcl` command APIs | Budget 2–3 days in Phase 1; keep the 2024 image as fallback |
-| Golden-image drift on every tool bump | Automate capture in Packer (Phase 6) |
-| Azure cost creep | Spot for synth; deallocate always; budget alert. Est. ~$50–150/mo depending on P&R cadence |
+| Golden-image drift on every tool bump | No golden image exists — Packer is deferred out of Phase 6 to its own change. The host is instead reproduced from `infra/azure/provision-runner.sh`, which pins nothing and resolves the Actions runner release at run time, so a rebuild picks up current versions rather than drifting from a stale image. The trade-off is cold-start pull cost on every rebuild |
+| Azure cost creep | Deallocate always (Phase 5's `stop` job plus the hourly `vm-watchdog.yml`); a $150/month resource-group budget alerting at 50/80/100 % of actual spend (Phase 6). Spot was dropped — P&R cannot survive an eviction and the synth lane alone does not justify a second VM. Measured: 10 P&R bring-up runs cost ≈ $193 in VM time |
 | `detailed_route` never converges on the modified design | It is congestion-bound at 63 % util even for stock Basilisk; treat a clean route as a stretch goal, not a gate. Consider a secondary easier PDK (Sky130) for fast QoR during development |
 | Phase 1 adoption gate's ~1% cell/area delta has an unexplained residual: a ~830-module textual divergence in the pickled RTL (`sv2v.v`) between the 2024 baseline and the new image. Ruled out: bender release-asset choice (verified byte-identical `sources.json` from both `v0.27.4` assets on identical input) and the `TARGET_*` bender-version schema difference (those defines aren't referenced anywhere in the dependency tree). Not yet distinguished: pure module-reordering in morty's output vs. an actual semantic difference | Not blocking — delta is small and in the benign direction (design got smaller), 0 yosys `CHECK` problems both sides. Revisit if a future gate shows a similar or larger delta; a sort-and-diff-by-module pass on `sv2v.v`, or re-running pickle against a `bender 0.32.1`-shaped `sources.json`, would isolate it |
 | 2024 baseline's own `sources.json` was generated by a host-installed `bender 0.32.1`, not either Docker image's bundled `0.27.4` — a pre-existing baseline-generation inconsistency, discovered while investigating the row above | Note for future baseline captures: regenerate references fully in-container with the pinned tool versions, not via whatever `bender` happens to be on the host PATH |

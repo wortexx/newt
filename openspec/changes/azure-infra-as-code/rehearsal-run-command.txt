@@ -1,0 +1,149 @@
+Fresh-build rehearsal - azure-infra-as-code task 3.2, 2026-09-13
+================================================================
+
+VM newt-iac-rehearsal, Standard_D2ds_v4, in newt-iac-rehearsal-rg, built from
+infra/azure/main.bicep with provisionOnFirstBoot=true. No human touched the
+host: cloud-init ran provision-runner.sh, which read github-runner-pat from the
+real vault (newt-ci-kv, in newt-synth-lane-rg) using this VM's own
+system-assigned identity, exchanged it for a registration token, and installed
+the runner as a systemd service.
+
+  runner   newt-iac-rehearsal  id=22  online  labels=self-hosted,Linux,X64,iac-rehearsal
+  real     newt-synth-runner   id=21  untouched throughout
+  identity c0a196a6-7d04-415f-be19-51cdc200d4ec
+  vault    Key Vault Secrets User 62313258-77dc-575c-b58b-1e19680df8a9
+           (created in newt-synth-lane-rg - the orphan task 3.3 must delete)
+
+
+A. First verification pass (original script)
+--------------------------------------------
+===== 1. docker as the runner user =====
+Hello from Docker!
+
+===== 2. azure cli =====
+{
+  "azure-cli": "2.90.0",
+  "azure-cli-core": "2.90.0",
+  "azure-cli-telemetry": "1.1.0",
+
+===== 3. apt-daily-upgrade.timer =====
+is-enabled: disabled
+is-active : inactive
+apt-daily.timer (must stay enabled): enabled
+
+===== 4. needrestart override =====
+$nrconf{override_rc}{qr(^actions\.runner\.)} = 0;
+$nrconf{override_rc}{qr(^docker\.)} = 0;
+$nrconf{override_rc}{qr(^containerd\.)} = 0;
+
+===== 5. runner service =====
+  actions.runner.wortexx-newt.newt-iac-rehearsal.service loaded active running GitHub Actions Runner(wortexx-newt.newt-iac-rehearsal)
+
+===== 6. SECOND provisioning run - every step must say already satisfied =====
+[provision-runner] converging newt-iac-rehearsal for user newt
+[provision-runner] ok (already satisfied): docker is installed
+[provision-runner] ok (already satisfied): newt is in the docker group
+[provision-runner] ok (already satisfied): azure cli is installed
+[provision-runner] disabling apt-daily-upgrade.timer          <-- BUG, see below
+[provision-runner] ok (already satisfied): needrestart override /etc/needrestart/conf.d/99-ci-runner.conf is current
+[provision-runner] ok (already satisfied): runner is unpacked in /home/newt/actions-runner
+[provision-runner] ok (already satisfied): runner is already registered (/home/newt/actions-runner/.runner exists)
+[provision-runner] done
+
+
+B. The idempotence bug this rehearsal caught
+--------------------------------------------
+Step 6 above reported "disabling apt-daily-upgrade.timer" on a host where step 3
+had just shown the timer already disabled, i.e. the step was not idempotent and
+re-ran systemctl on every convergence.
+
+Cause: `systemctl is-enabled <unit>` prints the state AND exits non-zero when a
+unit is disabled. The guard was
+
+    "$(systemctl is-enabled apt-daily-upgrade.timer 2>/dev/null || echo disabled)"
+
+so the non-zero exit fired the `|| echo disabled` as well, and the value became
+the two-line string "disabled\ndisabled", which never equals "disabled".
+Demonstrated locally:
+
+    old expression -> disabled$'\n'disabled
+    new expression -> disabled
+
+Fixed by swallowing the exit code with `|| true` instead of appending a word,
+and accepting disabled / masked / absent via a case statement.
+
+Had this reached task 3.4 it would have run `systemctl disable --now` against the
+live runner host on every convergence and failed that task's "every step already
+satisfied, second invocation byte-for-byte identical" assertion.
+
+
+C. Re-verification with the fixed script
+-----------------------------------------
+===== RUN A =====
+[provision-runner] converging newt-iac-rehearsal for user newt
+[provision-runner] ok (already satisfied): docker is installed
+[provision-runner] ok (already satisfied): newt is in the docker group
+[provision-runner] ok (already satisfied): azure cli is installed
+[provision-runner] ok (already satisfied): apt-daily-upgrade.timer is disabled
+[provision-runner] ok (already satisfied): needrestart override /etc/needrestart/conf.d/99-ci-runner.conf is current
+[provision-runner] ok (already satisfied): runner is unpacked in /home/newt/actions-runner
+[provision-runner] ok (already satisfied): runner is already registered (/home/newt/actions-runner/.runner exists)
+[provision-runner] done
+
+===== RUN B (must be byte-for-byte identical to RUN A) =====
+[provision-runner] converging newt-iac-rehearsal for user newt
+[provision-runner] ok (already satisfied): docker is installed
+[provision-runner] ok (already satisfied): newt is in the docker group
+[provision-runner] ok (already satisfied): azure cli is installed
+[provision-runner] ok (already satisfied): apt-daily-upgrade.timer is disabled
+[provision-runner] ok (already satisfied): needrestart override /etc/needrestart/conf.d/99-ci-runner.conf is current
+[provision-runner] ok (already satisfied): runner is unpacked in /home/newt/actions-runner
+[provision-runner] ok (already satisfied): runner is already registered (/home/newt/actions-runner/.runner exists)
+[provision-runner] done
+
+===== runner still up? =====
+active
+
+RUN A and RUN B are identical, every step reports already satisfied, and the
+runner service stayed active across both.
+
+
+D. Convergence of the live host (task 3.4), 2026-09-13
+-------------------------------------------------------
+Run against newt-synth-runner with RUNNER_NAME unset.
+
+===== BEFORE =====
+active
+timer: disabled
+
+===== RUN A =====
+[provision-runner] converging newt-synth-runner for user newt
+[provision-runner] ok (already satisfied): docker is installed
+[provision-runner] ok (already satisfied): newt is in the docker group
+[provision-runner] ok (already satisfied): azure cli is installed
+[provision-runner] ok (already satisfied): apt-daily-upgrade.timer is disabled
+[provision-runner] writing needrestart override /etc/needrestart/conf.d/99-ci-runner.conf
+[provision-runner] ok (already satisfied): runner is unpacked in /home/newt/actions-runner
+[provision-runner] ok (already satisfied): runner is already registered (/home/newt/actions-runner/.runner exists)
+[provision-runner] done
+
+===== RUN B (must be byte-for-byte identical to RUN A) =====
+[provision-runner] converging newt-synth-runner for user newt
+[provision-runner] ok (already satisfied): docker is installed
+[provision-runner] ok (already satisfied): newt is in the docker group
+[provision-runner] ok (already satisfied): azure cli is installed
+[provision-runner] ok (already satisfied): apt-daily-upgrade.timer is disabled
+[provision-runner] ok (already satisfied): needrestart override /etc/needrestart/conf.d/99-ci-runner.conf is current
+[provision-runner] ok (already satisfied): runner is unpacked in /home/newt/actions-runner
+[provision-runner] ok (already satisfied): runner is already registered (/home/newt/actions-runner/.runner exists)
+[provision-runner] done
+
+===== AFTER =====
+active
+timer: disabled
+docker cache preserved: 2 images
+synth cache: 121M       /home/newt/synth-cache
+
+RUN A is NOT identical to RUN B: the first pass rewrote the needrestart
+override, so the task's "every step already satisfied, no changes made"
+assertion did not hold on the first invocation. See tasks.md 3.4.

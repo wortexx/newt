@@ -1,0 +1,61 @@
+what-if against newt-synth-lane-rg AFTER adoption
+azure-infra-as-code tasks 2.3 / 3.1, captured 2026-09-13
+
+Taken with KV_ADMIN_PRINCIPAL_ID exported, i.e. the full declared graph
+including the human operator's Key Vault Secrets Officer grant.
+
+counts: Ignore=2, Modify=3, NoChange=12
+
+ZERO Create, ZERO Delete, ZERO Replace. Redeploying changes nothing.
+
+--- Modify (3) ---
+  Microsoft.Compute/virtualMachines/newt-synth-runner/providers/Microsoft.Authorization/roleAssignments/b4966e61-1726-5751-8461-69e19760457c
+      properties.principalId: Modify
+      properties.principalType: NoEffect
+  Microsoft.Network/networkInterfaces/newt-synth-runnerVMNic
+      kind: Delete
+      properties.allowPort25Out: Delete
+      properties.ipConfigurations: Array
+      properties.ipConfigurations[0].properties.primary: NoEffect
+  Microsoft.Storage/storageAccounts/newtpnrcheckpoints/blobServices/default/containers/pnr-checkpoints/providers/Microsoft.Authorization/roleAssignments/29a22fda-aa9c-54fc-9551-316ed7221f5e
+      properties.principalId: Modify
+      properties.principalType: NoEffect
+
+--- NoChange (12) ---
+  Microsoft.Compute/virtualMachines/newt-synth-runner
+      properties.storageProfile.osDisk.managedDisk.storageAccountType: NoEffect
+  Microsoft.Consumption/budgets/budget-newt-synth-lane-rg-monthly
+  Microsoft.KeyVault/vaults/newt-ci-kv
+  Microsoft.KeyVault/vaults/newt-ci-kv/providers/Microsoft.Authorization/roleAssignments/fa18f1fd-6adc-596e-8b44-39f0b21abcf4
+      properties.principalType: NoEffect
+  Microsoft.ManagedIdentity/userAssignedIdentities/newt-ci-identity
+  Microsoft.ManagedIdentity/userAssignedIdentities/newt-ci-identity/federatedIdentityCredentials/gh-actions-azure-env
+  Microsoft.Network/networkSecurityGroups/newt-synth-runnerNSG
+  Microsoft.Network/publicIPAddresses/newt-synth-runnerPublicIP
+  Microsoft.Network/virtualNetworks/newt-synth-runnerVNET
+  Microsoft.Storage/storageAccounts/newtpnrcheckpoints
+  Microsoft.Storage/storageAccounts/newtpnrcheckpoints/blobServices/default/containers/pnr-checkpoints
+  Microsoft.Storage/storageAccounts/newtpnrcheckpoints/managementPolicies/default
+
+--- Ignore (2) ---
+  Microsoft.Compute/disks/newt-synth-runner_OsDisk_1_5a97c75b74fe412ca2886c3977845b74
+  Microsoft.DevTestLab/schedules/shutdown-computevm-newt-synth-runner
+
+The three Modify entries are the artifacts the azure-infrastructure spec
+exempts, not drift:
+
+  Both CI role assignments - properties.principalId: Modify
+    Supplied from a runtime reference() on newt-ci-identity that what-if
+    cannot resolve. Both stored assignments already carry principalId
+    6e5681a6-e861-476f-a091-72d01bb57531, verified with az role assignment
+    list. Note the two Key Vault assignments do NOT show this, because their
+    principalIds are a literal parameter and a direct vm.identity reference.
+
+  NIC - kind, properties.allowPort25Out: Delete
+    Read-only and ARM-computed; Bicep rejects declaring them (BCP187/BCP037).
+
+Vault access at this point is exactly two assignments, both under
+deterministic guid() names:
+  70dfbdd7-2eb5-5f6a-bad5-8f88cfd32a76  Key Vault Secrets User    VM identity
+  fa18f1fd-6adc-596e-8b44-39f0b21abcf4  Key Vault Secrets Officer operator
+newt-ci-identity has none.
