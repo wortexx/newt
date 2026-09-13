@@ -48,6 +48,10 @@ Phase 0  ──►  Phase 1 (newt-eda image) ─┐
              Phase 2 (Verilator flow)  ─┴─►  Phase 3 (fast CI) ──► Phase 4 (synth CI) ──► Phase 5+6 (P&R + Azure)
                                                                 └►  Phase 7 (coprocessor RTL, ongoing, parallel)
                                                                 └►  Phase 8 (svase→yosys-slang, exploratory, parallel)
+
+Phase 5+6  ──►  Phase 9  (post-merge CI verification — gated on `ci-pnr-lane` landing)
+Phase 10 (Actions version upgrade)  — independent maintenance, any time
+Phase 11 (backend routability)      — design work; gates a detail-routed DEF, nothing else
 ```
 
 **Do Phase 2 first among the technical work** — it is the long pole; everything meaningful
@@ -295,6 +299,104 @@ Three options, in increasing order of payoff and effort:
       archived, unmaintained upstream.
 - No critical-path dependency on this phase; `svase f5f5290` stays pinned and untouched
   everywhere else until this is prototyped and decided.
+
+---
+
+## Phase 9 — Post-merge CI verification  *(unblocks only once `ci-pnr-lane` lands on `main`)*
+
+Several P&R-lane acceptance items are **not** verifiable from a feature branch, for one
+GitHub-side reason: a workflow's `schedule` and `workflow_dispatch` triggers are only
+registered once the workflow file exists on the repository's **default branch**. Tag pushes
+are exempt (any ref's push evaluates the workflows in that ref's tree), which is why the whole
+bring-up ran off `pnr-bringup-*` tags. So these are deferred by sequencing, not by difficulty:
+
+- [ ] Real `workflow_dispatch` run of `pnr.yml` (the bring-up used tag pushes throughout —
+      `gh workflow run pnr.yml` 404s pre-merge, and `pnr.yml` doesn't even appear in
+      `gh workflow list`). Confirms the `resume_from_run` input path, which has never run.
+- [ ] `vm-watchdog.yml`'s hourly cron actually firing, and one observed correct
+      idle-deallocate. It has never executed once — `gh run list --workflow=vm-watchdog.yml`
+      404s for the same reason.
+- [ ] **Only after** that observation: delete the Azure fixed auto-shutdown (currently
+      `status: Disabled` by hand, not removed) and enable the weekly `pnr.yml` cron. Never
+      leave a window with no cost backstop at all.
+- [ ] Re-enable the `CI Synth Lane` schedule (`gh workflow enable`) — disabled during
+      bring-up so its nightly runs stopped competing for the single runner.
+- [ ] Coexistence guard under a **real** overlap: with a P&R run active, trigger a synth-lane
+      dispatch so a run queues, and confirm `pnr.yml`'s `stop` job skips deallocation with a
+      clear log line and the queued synth job then runs. Deferred here because it wants both
+      lanes' schedules live, which is only true post-merge. (The other half of that check is
+      already settled: `main` has **no branch protection at all**, so no P&R job can possibly
+      be a required status check — worth deciding separately whether `main` should have
+      protection, which is a repository-policy question, not a P&R one.)
+- [ ] Update `synth.yml`'s header comment and this document's Phase 5 section to the
+      post-watchdog reality: VM deallocated by default, started by `pnr.yml`, watchdog
+      cleans up, fixed auto-shutdown gone.
+
+## Phase 10 — GitHub Actions version upgrade  *(maintenance, deadline-driven)*
+
+Every action pinned across `ci.yml` / `synth.yml` / `pnr.yml` / `docker-image.yml` declares
+the **Node 20** runtime, which GitHub deprecated. Runners have defaulted to Node 24 since
+2026-06-16 and **already force these actions onto it** (that is the warning in every run log);
+Node 20 is removed entirely on **2026-09-23**. Nothing in this repo breaks on that date — the
+forcing is what we already run on, and we never set the `ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION`
+opt-out — but every action here is several majors behind, and each has a Node 24 release:
+
+| action | pinned | latest | uses |
+| --- | --- | --- | --- |
+| `actions/checkout` | v4 (x8) | v7.0.1 | node20 → node24 |
+| `actions/upload-artifact` | v4 (x4) | v7.0.1 | node20 → node24 |
+| `azure/login` | v2 (x5) | v3.1.0 | node20 → node24 |
+| `docker/build-push-action` | v6 (x6) | v7.3.0 | node20 → node24 |
+| `docker/setup-buildx-action` | v3 | v4.3.0 | node20 → node24 |
+| `docker/login-action` | v3 | v4.6.0 | node20 → node24 |
+
+- [ ] Upgrade one action at a time, letting the per-PR fast lane validate `checkout` and
+      `upload-artifact` first — it runs on every push and costs nothing.
+- [ ] Watch for real breaking changes across three majors: `fetch-depth: 0` behaviour,
+      `if-no-files-found` semantics, artifact immutability.
+- [ ] Leave `azure/login` for last: its failure mode is a VM that won't start, which costs a
+      whole P&R run to discover.
+- Not folded into `ci-pnr-lane`: a workflow regression there surfaces only *after* ~3h of
+  synthesis, exactly how the `-f openroad.mk`, `PROJ_NAME` and `PNR_TIMEOUT_GRT` bugs were
+  each found.
+
+## Phase 11 — Backend routability  *(design work, not infra — the real P&R blocker)*
+
+The P&R lane now runs end to end unattended, but **the design as placed and globally routed
+cannot be detail-routed**. `pnr-bringup-10` got `detailed_route` to completion for the first
+time: ~27 min of pin access, then **12h03m on iteration 0 alone**, finishing with
+**22,419,919 violations**, and post-processing failed with `[ERROR DRT-0206]
+checkConnectivity error` (a reset net left unconnected). The iteration budget was never the
+constraint — iteration 1 was never reached — so no `drt` tuning fixes this.
+
+The cause is upstream and already visible in `grt`'s own final congestion report: demand at
+**101.17% of total routing capacity, Metal3 at 115.27%**, accepted only because
+`global_route` runs with `-allow_congestion`. Global routing hands detailed routing a
+solution that does not physically fit.
+
+Candidate levers, roughly cheapest first — none yet tried:
+
+- [ ] **Relax our own layer adjustments.** `pnr_apply_routing_layers` removes 30% of M2/M3
+      capacity (`set_global_routing_layer_adjustment Metal2-Metal3 0.30`) and 20% of
+      TopMetal1 — and Metal3 is the worst-congested layer. This looks self-inflicted and is a
+      one-line experiment.
+- [ ] **Restore `grt` congestion iterations.** Stock `chip.tcl` uses 80; we cut to 14 purely
+      to fit a timeout, with a comment explicitly accepting "a more-congested result for drt
+      to deal with". Not a straight revert: iterations cost ~25 min each (80 ≈ 20–33h) and
+      iteration 15 was separately observed entering an NDR-relaxation cascade that never
+      terminated.
+- [ ] **Lower `gpl` density** from `-density 0.65`, trading area for routability.
+- [ ] **Floorplan changes** — largest lift, last resort.
+- [ ] **First, settle the framing question**: does the thesis's PPA comparison for the SHA
+      extension actually need a *detail-routed* DEF, or do area/timing/power after CTS and
+      global route suffice? The lane already produces the latter. If they do, this entire
+      phase is optional measurement-quality work rather than a blocker, which matches the P&R
+      lane's own design non-goal ("timing closure and DRC convergence are not goals — the
+      lane measures, it doesn't fix").
+
+Iteration here is now cheap: `PNR_RESUME_EXCLUDE` + `PNR_STOP_AFTER` plus the checkpoint
+restore let a single stage re-run against real data in minutes rather than a full flow, and
+the synth cache removes the ~3h resynthesis.
 
 ---
 
