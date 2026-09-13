@@ -1,0 +1,26 @@
+name: newt
+version: 1.0.0
+description: APM project for newt
+author: Sergii Bidnyi
+# Which agent platforms to deploy to (uncomment to pin):
+targets:
+  - claude
+#  - copilot
+
+dependencies:
+  apm:
+    - github/awesome-copilot/skills/azure-pricing
+    - github/awesome-copilot/agents/bicep-implement.agent.md
+    - github/awesome-copilot/agents/github-actions-expert.agent.md
+    - github/awesome-copilot/agents/github-actions-node-upgrade.agent.md
+    - github/awesome-copilot/skills/github-actions-hardening
+    - github/awesome-copilot/skills/azure-deployment-preflight
+    - github/awesome-copilot/skills/az-cost-optimize
+    - github/awesome-copilot/skills/github-actions-efficiency
+    - github/awesome-copilot/skills/azure-well-architected-review
+    - github/awesome-copilot/skills/docs-sync-audit
+    - github/awesome-copilot/instructions/bicep-code-best-practices.instructions.md
+    - github/awesome-copilot/instructions/github-actions-ci-cd-best-practices.instructions.md
+  mcp: []
+includes: auto
+scripts: {}

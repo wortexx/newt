@@ -1,0 +1,525 @@
+lockfile_version: '1'
+apm_version: 0.30.0
+dependencies:
+- repo_url: github/awesome-copilot
+  name: azure-pricing
+  host: github.com
+  resolved_commit: 7568a482ce2df38f8965ab5336a3220db796a4ba
+  version: unknown
+  virtual_path: skills/azure-pricing
+  is_virtual: true
+  package_type: claude_skill
+  deployed_files:
+  - .claude/skills/azure-pricing
+  - .claude/skills/azure-pricing/SKILL.md
+  - .claude/skills/azure-pricing/references/COPILOT-STUDIO-RATES.md
+  - .claude/skills/azure-pricing/references/COST-ESTIMATOR.md
+  - .claude/skills/azure-pricing/references/REGIONS.md
+  - .claude/skills/azure-pricing/references/SERVICE-NAMES.md
+  deployed_file_hashes:
+    .claude/skills/azure-pricing/SKILL.md: sha256:905bd90f658435e9812dca1aa613675fce948ad878e29c9f1bbe19b237edc3ee
+    .claude/skills/azure-pricing/references/COPILOT-STUDIO-RATES.md: sha256:922b55a807afe9a5e5913cfec2d3b249a66fc92ba3584a9d0f81f18d047253be
+    .claude/skills/azure-pricing/references/COST-ESTIMATOR.md: sha256:1d5d64ecbf8bae5482e47c84905b7f7f6999118348004ccdde1e689f586567c9
+    .claude/skills/azure-pricing/references/REGIONS.md: sha256:c0125df101ab525177a7c84fc49f11ae78cde538599c10b07df1de894946dfff
+    .claude/skills/azure-pricing/references/SERVICE-NAMES.md: sha256:22d025d8b7149d0d826615975fea697d55e1f7a423ed4cdd93f3955bf34550e1
+  content_hash: sha256:61a34c6a6cc4afe0ee2c82ffaa18631d12c3cb3229c9a610dde624bc4ff27c65
+- repo_url: github/awesome-copilot
+  name: awesome-copilot-bicep-implement
+  host: github.com
+  resolved_commit: 7568a482ce2df38f8965ab5336a3220db796a4ba
+  version: 1.0.0
+  virtual_path: agents/bicep-implement.agent.md
+  is_virtual: true
+  package_type: apm_package
+  deployed_files:
+  - .claude/agents/bicep-implement.md
+  deployed_file_hashes:
+    .claude/agents/bicep-implement.md: sha256:8b9eaffd40c4e1e6326bef8aa34daf5d880550512ddf1eb89e36fd2daca7edac
+  content_hash: sha256:6cdbfdd4b136eab1423a991bbd93109d4a08624e74d93c37bcae5a8d9fccf234
+- repo_url: github/awesome-copilot
+  name: awesome-copilot-github-actions-expert
+  host: github.com
+  resolved_commit: 7568a482ce2df38f8965ab5336a3220db796a4ba
+  version: 1.0.0
+  virtual_path: agents/github-actions-expert.agent.md
+  is_virtual: true
+  package_type: apm_package
+  deployed_files:
+  - .claude/agents/github-actions-expert.md
+  deployed_file_hashes:
+    .claude/agents/github-actions-expert.md: sha256:9a113142559959683041c85c094ca32541fa7e0db42d3510acf6d79a68bbb597
+  content_hash: sha256:e4e9fe25710ba27716b2c5b588835b744fb7806cbbd795f3e9bc657f5b30a02f
+- repo_url: github/awesome-copilot
+  name: awesome-copilot-github-actions-node-upgrade
+  host: github.com
+  resolved_commit: 7568a482ce2df38f8965ab5336a3220db796a4ba
+  version: 1.0.0
+  virtual_path: agents/github-actions-node-upgrade.agent.md
+  is_virtual: true
+  package_type: apm_package
+  deployed_files:
+  - .claude/agents/github-actions-node-upgrade.md
+  deployed_file_hashes:
+    .claude/agents/github-actions-node-upgrade.md: sha256:1c35ded0b6342723c7fff4d30e956892094a24a9e4f6635e9e75681306e26365
+  content_hash: sha256:34bd2d2c1b556135faa2c129103118e1d38ca88a8cfd912c7fd1dfab56d62952
+- repo_url: github/awesome-copilot
+  name: awesome-copilot-bicep-code-best-practices
+  host: github.com
+  resolved_commit: 7568a482ce2df38f8965ab5336a3220db796a4ba
+  version: 1.0.0
+  virtual_path: instructions/bicep-code-best-practices.instructions.md
+  is_virtual: true
+  package_type: apm_package
+  deployed_files:
+  - .claude/rules/bicep-code-best-practices.md
+  deployed_file_hashes:
+    .claude/rules/bicep-code-best-practices.md: sha256:06ef493f7fda700e522ce9313bb1c96c8e4b2e66f412700e5e9955e7291c98c6
+  content_hash: sha256:11a6d6ef946f7c217de8f554b419926becff6ee0a0831279eb175d0f7e40190e
+- repo_url: github/awesome-copilot
+  name: awesome-copilot-github-actions-ci-cd-best-practices
+  host: github.com
+  resolved_commit: 7568a482ce2df38f8965ab5336a3220db796a4ba
+  version: 1.0.0
+  virtual_path: instructions/github-actions-ci-cd-best-practices.instructions.md
+  is_virtual: true
+  package_type: apm_package
+  deployed_files:
+  - .claude/rules/github-actions-ci-cd-best-practices.md
+  deployed_file_hashes:
+    .claude/rules/github-actions-ci-cd-best-practices.md: sha256:bc4c33101ed2798432c3dbcb03d6fd120a2d3233ba9ec2c0c394a2c95ff02b5f
+  content_hash: sha256:a520b3d373b6b6d1c5b2d6715272321ddaf51c8ef6876fff5f56dfba2c1610b6
+- repo_url: github/awesome-copilot
+  name: az-cost-optimize
+  host: github.com
+  resolved_commit: 7568a482ce2df38f8965ab5336a3220db796a4ba
+  version: unknown
+  virtual_path: skills/az-cost-optimize
+  is_virtual: true
+  package_type: claude_skill
+  deployed_files:
+  - .claude/skills/az-cost-optimize
+  - .claude/skills/az-cost-optimize/SKILL.md
+  deployed_file_hashes:
+    .claude/skills/az-cost-optimize/SKILL.md: sha256:d27f8311b57d02dedd48a0d563be0964dc458578e4de51b4730516b4e8083829
+  content_hash: sha256:4bad09d0db105898326d119abc6eeffdbcdb1f8026d6e793ced7ef9e9f50dad7
+- repo_url: github/awesome-copilot
+  name: azure-deployment-preflight
+  host: github.com
+  resolved_commit: 7568a482ce2df38f8965ab5336a3220db796a4ba
+  version: unknown
+  virtual_path: skills/azure-deployment-preflight
+  is_virtual: true
+  package_type: claude_skill
+  deployed_files:
+  - .claude/skills/azure-deployment-preflight
+  - .claude/skills/azure-deployment-preflight/SKILL.md
+  - .claude/skills/azure-deployment-preflight/references/ERROR-HANDLING.md
+  - .claude/skills/azure-deployment-preflight/references/REPORT-TEMPLATE.md
+  - .claude/skills/azure-deployment-preflight/references/VALIDATION-COMMANDS.md
+  deployed_file_hashes:
+    .claude/skills/azure-deployment-preflight/SKILL.md: sha256:dab815a49ff9fda7d48631c40df7e2540bb3fa7ba1cce63ce219aaa0a830b6a1
+    .claude/skills/azure-deployment-preflight/references/ERROR-HANDLING.md: sha256:e1f35c6d971a51f984969d5ca40cb2e08de768322437257a2397144fad67d065
+    .claude/skills/azure-deployment-preflight/references/REPORT-TEMPLATE.md: sha256:7c283a3fe492bd270d3a640954909364501856f7e12710a3c0a69370908343a4
+    .claude/skills/azure-deployment-preflight/references/VALIDATION-COMMANDS.md: sha256:edeca9bf403c3025afe4a915a7b5ee59f6bcd3eb3eb6f40db43f028dd9d51ce4
+  content_hash: sha256:b11e45a9efa28f472fa3a9febcddb17ff06e83e66f61c0c45ac17d2f1d22c4e3
+- repo_url: github/awesome-copilot
+  name: azure-well-architected-review
+  host: github.com
+  resolved_commit: 7568a482ce2df38f8965ab5336a3220db796a4ba
+  version: unknown
+  virtual_path: skills/azure-well-architected-review
+  is_virtual: true
+  package_type: claude_skill
+  deployed_files:
+  - .claude/skills/azure-well-architected-review
+  - .claude/skills/azure-well-architected-review/SKILL.md
+  deployed_file_hashes:
+    .claude/skills/azure-well-architected-review/SKILL.md: sha256:bac39e11c6f91cba8c65227986e27bd8f1c25c43680f24a737cb92cc1ac51a0a
+  content_hash: sha256:05bf13a08ae968d06a3885030be79dd54d86c53ec7e9ef720520b1298941ac8f
+- repo_url: github/awesome-copilot
+  name: docs-sync-audit
+  host: github.com
+  resolved_commit: 7568a482ce2df38f8965ab5336a3220db796a4ba
+  version: unknown
+  virtual_path: skills/docs-sync-audit
+  is_virtual: true
+  package_type: claude_skill
+  deployed_files:
+  - .claude/skills/docs-sync-audit
+  - .claude/skills/docs-sync-audit/SKILL.md
+  - .claude/skills/docs-sync-audit/scripts/docs_drift.py
+  deployed_file_hashes:
+    .claude/skills/docs-sync-audit/SKILL.md: sha256:c21b20dcc59ac43449ef02ed7f69bfa222a241cdf46b870675ac10aac736a203
+    .claude/skills/docs-sync-audit/scripts/docs_drift.py: sha256:1af66a256a5ef8c86f30e3789c93eb609020d5cf2360871819df51fa99f27bfc
+  content_hash: sha256:5006af1ccee94cdaa691931e5758588383ed28c1f4252b5e3e00b203a156c4df
+- repo_url: github/awesome-copilot
+  name: github-actions-efficiency
+  host: github.com
+  resolved_commit: 7568a482ce2df38f8965ab5336a3220db796a4ba
+  version: unknown
+  virtual_path: skills/github-actions-efficiency
+  is_virtual: true
+  package_type: claude_skill
+  deployed_files:
+  - .claude/skills/github-actions-efficiency
+  - .claude/skills/github-actions-efficiency/SKILL.md
+  - .claude/skills/github-actions-efficiency/references/actions.md
+  - .claude/skills/github-actions-efficiency/references/patterns.md
+  - .claude/skills/github-actions-efficiency/references/reporting.md
+  - .claude/skills/github-actions-efficiency/references/review-rubric.md
+  deployed_file_hashes:
+    .claude/skills/github-actions-efficiency/SKILL.md: sha256:9c41e860468e5c88d83ab6eec70c585b0f122facec2632ea65497b3389139e43
+    .claude/skills/github-actions-efficiency/references/actions.md: sha256:9f24153e0b743a978ec84e08bc64047616d18504965708cc7507437203689fdb
+    .claude/skills/github-actions-efficiency/references/patterns.md: sha256:a9fb61ee95b5f2f4cb372064f5de9d04ca749da1b78d050e42e909e9e97228dd
+    .claude/skills/github-actions-efficiency/references/reporting.md: sha256:18eec5acd0d9e52b450f86b8232e9994c5c5b7760240bcb2e97417f8a847508c
+    .claude/skills/github-actions-efficiency/references/review-rubric.md: sha256:f2fd2bbd34f15f68664e30ea62468f8a5b19bc9b49929dcd082a4c87316b3ce2
+  content_hash: sha256:cb1a6b7a2d06465b26f1245a0f617317032d40f0e63f3237ac67f996ad5eeea3
+- repo_url: github/awesome-copilot
+  name: github-actions-hardening
+  host: github.com
+  resolved_commit: 7568a482ce2df38f8965ab5336a3220db796a4ba
+  version: unknown
+  virtual_path: skills/github-actions-hardening
+  is_virtual: true
+  package_type: claude_skill
+  deployed_files:
+  - .claude/skills/github-actions-hardening
+  - .claude/skills/github-actions-hardening/SKILL.md
+  - .claude/skills/github-actions-hardening/references/injection.md
+  - .claude/skills/github-actions-hardening/references/permissions-and-tokens.md
+  - .claude/skills/github-actions-hardening/references/report-format.md
+  - .claude/skills/github-actions-hardening/references/supply-chain.md
+  - .claude/skills/github-actions-hardening/references/triggers-and-privilege.md
+  deployed_file_hashes:
+    .claude/skills/github-actions-hardening/SKILL.md: sha256:31a8e7483d978e6267941edefebbe42aaa946bb3d43c9095aa3db343d4a8ff06
+    .claude/skills/github-actions-hardening/references/injection.md: sha256:ebd6ef8d39ba6f1cd3dc13051e6ed4163d1d2ba36518cf0f7393836a211e58ff
+    .claude/skills/github-actions-hardening/references/permissions-and-tokens.md: sha256:7272d00b20cf99c6fcbf34346f76730907c00701aef44bb9cfb7ab3eecac336b
+    .claude/skills/github-actions-hardening/references/report-format.md: sha256:3ecd2442e173bc001f858747873349be7c6c77050470b87ae516647908b1e86e
+    .claude/skills/github-actions-hardening/references/supply-chain.md: sha256:f66f613dbd732ce87c1e76b88208efde8feae3ffe5a3ab405cde4ce3df66f605
+    .claude/skills/github-actions-hardening/references/triggers-and-privilege.md: sha256:465f3f76517e9f5374a73e30f46cb47e1fe62ce9fd81f782808a3abbb2df2756
+  content_hash: sha256:d826005e7e1f7792531836c747c78df9e9caac534dd027b8ad872725340e5df2
+deployments:
+- kind: project-relative
+  target: claude
+  value: .claude/agents/bicep-implement.md
+  runtime: null
+  scope: project
+  owners:
+  - github/awesome-copilot/agents/bicep-implement.agent.md
+  active_owner: github/awesome-copilot/agents/bicep-implement.agent.md
+  content_hash: sha256:8b9eaffd40c4e1e6326bef8aa34daf5d880550512ddf1eb89e36fd2daca7edac
+- kind: project-relative
+  target: claude
+  value: .claude/agents/github-actions-expert.md
+  runtime: null
+  scope: project
+  owners:
+  - github/awesome-copilot/agents/github-actions-expert.agent.md
+  active_owner: github/awesome-copilot/agents/github-actions-expert.agent.md
+  content_hash: sha256:9a113142559959683041c85c094ca32541fa7e0db42d3510acf6d79a68bbb597
+- kind: project-relative
+  target: claude
+  value: .claude/agents/github-actions-node-upgrade.md
+  runtime: null
+  scope: project
+  owners:
+  - github/awesome-copilot/agents/github-actions-node-upgrade.agent.md
+  active_owner: github/awesome-copilot/agents/github-actions-node-upgrade.agent.md
+  content_hash: sha256:1c35ded0b6342723c7fff4d30e956892094a24a9e4f6635e9e75681306e26365
+- kind: project-relative
+  target: claude
+  value: .claude/rules/bicep-code-best-practices.md
+  runtime: null
+  scope: project
+  owners:
+  - github/awesome-copilot/instructions/bicep-code-best-practices.instructions.md
+  active_owner: github/awesome-copilot/instructions/bicep-code-best-practices.instructions.md
+  content_hash: sha256:06ef493f7fda700e522ce9313bb1c96c8e4b2e66f412700e5e9955e7291c98c6
+- kind: project-relative
+  target: claude
+  value: .claude/rules/github-actions-ci-cd-best-practices.md
+  runtime: null
+  scope: project
+  owners:
+  - github/awesome-copilot/instructions/github-actions-ci-cd-best-practices.instructions.md
+  active_owner: github/awesome-copilot/instructions/github-actions-ci-cd-best-practices.instructions.md
+  content_hash: sha256:bc4c33101ed2798432c3dbcb03d6fd120a2d3233ba9ec2c0c394a2c95ff02b5f
+- kind: project-relative
+  target: claude
+  value: .claude/skills/az-cost-optimize
+  runtime: null
+  scope: project
+  owners:
+  - github/awesome-copilot/skills/az-cost-optimize
+  active_owner: github/awesome-copilot/skills/az-cost-optimize
+  content_hash: null
+- kind: project-relative
+  target: claude
+  value: .claude/skills/az-cost-optimize/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - github/awesome-copilot/skills/az-cost-optimize
+  active_owner: github/awesome-copilot/skills/az-cost-optimize
+  content_hash: sha256:d27f8311b57d02dedd48a0d563be0964dc458578e4de51b4730516b4e8083829
+- kind: project-relative
+  target: claude
+  value: .claude/skills/azure-deployment-preflight
+  runtime: null
+  scope: project
+  owners:
+  - github/awesome-copilot/skills/azure-deployment-preflight
+  active_owner: github/awesome-copilot/skills/azure-deployment-preflight
+  content_hash: null
+- kind: project-relative
+  target: claude
+  value: .claude/skills/azure-deployment-preflight/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - github/awesome-copilot/skills/azure-deployment-preflight
+  active_owner: github/awesome-copilot/skills/azure-deployment-preflight
+  content_hash: sha256:dab815a49ff9fda7d48631c40df7e2540bb3fa7ba1cce63ce219aaa0a830b6a1
+- kind: project-relative
+  target: claude
+  value: .claude/skills/azure-deployment-preflight/references/ERROR-HANDLING.md
+  runtime: null
+  scope: project
+  owners:
+  - github/awesome-copilot/skills/azure-deployment-preflight
+  active_owner: github/awesome-copilot/skills/azure-deployment-preflight
+  content_hash: sha256:e1f35c6d971a51f984969d5ca40cb2e08de768322437257a2397144fad67d065
+- kind: project-relative
+  target: claude
+  value: .claude/skills/azure-deployment-preflight/references/REPORT-TEMPLATE.md
+  runtime: null
+  scope: project
+  owners:
+  - github/awesome-copilot/skills/azure-deployment-preflight
+  active_owner: github/awesome-copilot/skills/azure-deployment-preflight
+  content_hash: sha256:7c283a3fe492bd270d3a640954909364501856f7e12710a3c0a69370908343a4
+- kind: project-relative
+  target: claude
+  value: .claude/skills/azure-deployment-preflight/references/VALIDATION-COMMANDS.md
+  runtime: null
+  scope: project
+  owners:
+  - github/awesome-copilot/skills/azure-deployment-preflight
+  active_owner: github/awesome-copilot/skills/azure-deployment-preflight
+  content_hash: sha256:edeca9bf403c3025afe4a915a7b5ee59f6bcd3eb3eb6f40db43f028dd9d51ce4
+- kind: project-relative
+  target: claude
+  value: .claude/skills/azure-pricing
+  runtime: null
+  scope: project
+  owners:
+  - github/awesome-copilot/skills/azure-pricing
+  active_owner: github/awesome-copilot/skills/azure-pricing
+  content_hash: null
+- kind: project-relative
+  target: claude
+  value: .claude/skills/azure-pricing/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - github/awesome-copilot/skills/azure-pricing
+  active_owner: github/awesome-copilot/skills/azure-pricing
+  content_hash: sha256:905bd90f658435e9812dca1aa613675fce948ad878e29c9f1bbe19b237edc3ee
+- kind: project-relative
+  target: claude
+  value: .claude/skills/azure-pricing/references/COPILOT-STUDIO-RATES.md
+  runtime: null
+  scope: project
+  owners:
+  - github/awesome-copilot/skills/azure-pricing
+  active_owner: github/awesome-copilot/skills/azure-pricing
+  content_hash: sha256:922b55a807afe9a5e5913cfec2d3b249a66fc92ba3584a9d0f81f18d047253be
+- kind: project-relative
+  target: claude
+  value: .claude/skills/azure-pricing/references/COST-ESTIMATOR.md
+  runtime: null
+  scope: project
+  owners:
+  - github/awesome-copilot/skills/azure-pricing
+  active_owner: github/awesome-copilot/skills/azure-pricing
+  content_hash: sha256:1d5d64ecbf8bae5482e47c84905b7f7f6999118348004ccdde1e689f586567c9
+- kind: project-relative
+  target: claude
+  value: .claude/skills/azure-pricing/references/REGIONS.md
+  runtime: null
+  scope: project
+  owners:
+  - github/awesome-copilot/skills/azure-pricing
+  active_owner: github/awesome-copilot/skills/azure-pricing
+  content_hash: sha256:c0125df101ab525177a7c84fc49f11ae78cde538599c10b07df1de894946dfff
+- kind: project-relative
+  target: claude
+  value: .claude/skills/azure-pricing/references/SERVICE-NAMES.md
+  runtime: null
+  scope: project
+  owners:
+  - github/awesome-copilot/skills/azure-pricing
+  active_owner: github/awesome-copilot/skills/azure-pricing
+  content_hash: sha256:22d025d8b7149d0d826615975fea697d55e1f7a423ed4cdd93f3955bf34550e1
+- kind: project-relative
+  target: claude
+  value: .claude/skills/azure-well-architected-review
+  runtime: null
+  scope: project
+  owners:
+  - github/awesome-copilot/skills/azure-well-architected-review
+  active_owner: github/awesome-copilot/skills/azure-well-architected-review
+  content_hash: null
+- kind: project-relative
+  target: claude
+  value: .claude/skills/azure-well-architected-review/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - github/awesome-copilot/skills/azure-well-architected-review
+  active_owner: github/awesome-copilot/skills/azure-well-architected-review
+  content_hash: sha256:bac39e11c6f91cba8c65227986e27bd8f1c25c43680f24a737cb92cc1ac51a0a
+- kind: project-relative
+  target: claude
+  value: .claude/skills/docs-sync-audit
+  runtime: null
+  scope: project
+  owners:
+  - github/awesome-copilot/skills/docs-sync-audit
+  active_owner: github/awesome-copilot/skills/docs-sync-audit
+  content_hash: null
+- kind: project-relative
+  target: claude
+  value: .claude/skills/docs-sync-audit/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - github/awesome-copilot/skills/docs-sync-audit
+  active_owner: github/awesome-copilot/skills/docs-sync-audit
+  content_hash: sha256:c21b20dcc59ac43449ef02ed7f69bfa222a241cdf46b870675ac10aac736a203
+- kind: project-relative
+  target: claude
+  value: .claude/skills/docs-sync-audit/scripts/docs_drift.py
+  runtime: null
+  scope: project
+  owners:
+  - github/awesome-copilot/skills/docs-sync-audit
+  active_owner: github/awesome-copilot/skills/docs-sync-audit
+  content_hash: sha256:1af66a256a5ef8c86f30e3789c93eb609020d5cf2360871819df51fa99f27bfc
+- kind: project-relative
+  target: claude
+  value: .claude/skills/github-actions-efficiency
+  runtime: null
+  scope: project
+  owners:
+  - github/awesome-copilot/skills/github-actions-efficiency
+  active_owner: github/awesome-copilot/skills/github-actions-efficiency
+  content_hash: null
+- kind: project-relative
+  target: claude
+  value: .claude/skills/github-actions-efficiency/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - github/awesome-copilot/skills/github-actions-efficiency
+  active_owner: github/awesome-copilot/skills/github-actions-efficiency
+  content_hash: sha256:9c41e860468e5c88d83ab6eec70c585b0f122facec2632ea65497b3389139e43
+- kind: project-relative
+  target: claude
+  value: .claude/skills/github-actions-efficiency/references/actions.md
+  runtime: null
+  scope: project
+  owners:
+  - github/awesome-copilot/skills/github-actions-efficiency
+  active_owner: github/awesome-copilot/skills/github-actions-efficiency
+  content_hash: sha256:9f24153e0b743a978ec84e08bc64047616d18504965708cc7507437203689fdb
+- kind: project-relative
+  target: claude
+  value: .claude/skills/github-actions-efficiency/references/patterns.md
+  runtime: null
+  scope: project
+  owners:
+  - github/awesome-copilot/skills/github-actions-efficiency
+  active_owner: github/awesome-copilot/skills/github-actions-efficiency
+  content_hash: sha256:a9fb61ee95b5f2f4cb372064f5de9d04ca749da1b78d050e42e909e9e97228dd
+- kind: project-relative
+  target: claude
+  value: .claude/skills/github-actions-efficiency/references/reporting.md
+  runtime: null
+  scope: project
+  owners:
+  - github/awesome-copilot/skills/github-actions-efficiency
+  active_owner: github/awesome-copilot/skills/github-actions-efficiency
+  content_hash: sha256:18eec5acd0d9e52b450f86b8232e9994c5c5b7760240bcb2e97417f8a847508c
+- kind: project-relative
+  target: claude
+  value: .claude/skills/github-actions-efficiency/references/review-rubric.md
+  runtime: null
+  scope: project
+  owners:
+  - github/awesome-copilot/skills/github-actions-efficiency
+  active_owner: github/awesome-copilot/skills/github-actions-efficiency
+  content_hash: sha256:f2fd2bbd34f15f68664e30ea62468f8a5b19bc9b49929dcd082a4c87316b3ce2
+- kind: project-relative
+  target: claude
+  value: .claude/skills/github-actions-hardening
+  runtime: null
+  scope: project
+  owners:
+  - github/awesome-copilot/skills/github-actions-hardening
+  active_owner: github/awesome-copilot/skills/github-actions-hardening
+  content_hash: null
+- kind: project-relative
+  target: claude
+  value: .claude/skills/github-actions-hardening/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - github/awesome-copilot/skills/github-actions-hardening
+  active_owner: github/awesome-copilot/skills/github-actions-hardening
+  content_hash: sha256:31a8e7483d978e6267941edefebbe42aaa946bb3d43c9095aa3db343d4a8ff06
+- kind: project-relative
+  target: claude
+  value: .claude/skills/github-actions-hardening/references/injection.md
+  runtime: null
+  scope: project
+  owners:
+  - github/awesome-copilot/skills/github-actions-hardening
+  active_owner: github/awesome-copilot/skills/github-actions-hardening
+  content_hash: sha256:ebd6ef8d39ba6f1cd3dc13051e6ed4163d1d2ba36518cf0f7393836a211e58ff
+- kind: project-relative
+  target: claude
+  value: .claude/skills/github-actions-hardening/references/permissions-and-tokens.md
+  runtime: null
+  scope: project
+  owners:
+  - github/awesome-copilot/skills/github-actions-hardening
+  active_owner: github/awesome-copilot/skills/github-actions-hardening
+  content_hash: sha256:7272d00b20cf99c6fcbf34346f76730907c00701aef44bb9cfb7ab3eecac336b
+- kind: project-relative
+  target: claude
+  value: .claude/skills/github-actions-hardening/references/report-format.md
+  runtime: null
+  scope: project
+  owners:
+  - github/awesome-copilot/skills/github-actions-hardening
+  active_owner: github/awesome-copilot/skills/github-actions-hardening
+  content_hash: sha256:3ecd2442e173bc001f858747873349be7c6c77050470b87ae516647908b1e86e
+- kind: project-relative
+  target: claude
+  value: .claude/skills/github-actions-hardening/references/supply-chain.md
+  runtime: null
+  scope: project
+  owners:
+  - github/awesome-copilot/skills/github-actions-hardening
+  active_owner: github/awesome-copilot/skills/github-actions-hardening
+  content_hash: sha256:f66f613dbd732ce87c1e76b88208efde8feae3ffe5a3ab405cde4ce3df66f605
+- kind: project-relative
+  target: claude
+  value: .claude/skills/github-actions-hardening/references/triggers-and-privilege.md
+  runtime: null
+  scope: project
+  owners:
+  - github/awesome-copilot/skills/github-actions-hardening
+  active_owner: github/awesome-copilot/skills/github-actions-hardening
+  content_hash: sha256:465f3f76517e9f5374a73e30f46cb47e1fe62ce9fd81f782808a3abbb2df2756

@@ -8,6 +8,7 @@
 IG_ROOT ?= $(shell pwd)
 
 include iguana.mk
+include apm.mk
 
 # Inside the repo, forward all target
 all:

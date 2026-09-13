@@ -54,6 +54,12 @@ pip3 install hjson Mako PyYAML setuptools tabulate
 pip3 install procpath
 ```
 
+### Claude Code agents/skills (optional)
+
+If you use Claude Code, run `make apm` after cloning to install the agents,
+skills, and rules declared in `apm.yml` (regenerated from `apm.lock.yaml`,
+not committed to git).
+
 
 
 ## Quick Start
