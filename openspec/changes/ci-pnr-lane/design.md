@@ -50,6 +50,7 @@ Stage boundaries follow `chip.tcl`'s existing checkpoints: `floorplan` (incl. po
 - Pre-route repairs (gpl/cts stages) keep their existing bounded forms (`-repair_tns 70/90`) — they completed in the manual run.
 - The post-GRT repair stage (`grt_repair`) runs `repair_timing` **bounded per the plan: `-repair_tns 20 -max_buffer_percent 15`** (both setup and hold variants), replacing the `-repair_tns 100` calls that looped forever. A driver-level knob (`PNR_SKIP_GRT_REPAIR=1`) skips the stage entirely, mapping to the plan's "skipped or bounded".
 - Flag names get re-validated against the new OpenROAD during bring-up (D3); the bound values are the contract, the spelling may change.
+- **As built, `grt_repair` is skipped outright** (`PNR_SKIP_GRT_REPAIR=1` in `pnr.yml`), not merely bounded. Bounding was not enough: even with its `global_route` calls bounded the same way as `grt.tcl`'s, the stage chains three route/repair phases (incremental round, a full re-route comparable to `grt.tcl`'s own ~5h pass, then another incremental round) and hit a 16h ceiling in `pnr-bringup-6`, taking `drt`/`final` down with it as `predecessor-failed`. Skipping maps to the plan's "skipped **or** bounded", so this stays inside D2 — but note the consequence for PPA: with post-route repair off, the reported WNS is far worse than the project's documented ≈ −2.5 ns baseline (`pnr-bringup-7` reports −14.76 at `grt`). Restore a bounded `grt_repair` before harvesting PPA figures for the thesis.
 
 ### D3: API adaptation is validated stage-by-stage on the real VM before any CI wiring
 
@@ -59,11 +60,14 @@ Bring-up order: get each stage running manually (dispatch-free — SSH + the lon
 
 The driver exits 0 iff all stages through `grt` complete. `grt_repair`, `drt`, and `final` run afterwards as best-effort: their failure or non-convergence is captured in the run summary (DRC-violation trajectory from `_route_drc.rpt`, iteration count, which stage stopped) but doesn't change the exit code. `detailed_route` runs with a bounded iteration budget (`-droute_end_iter`, value picked during bring-up — stock 40 ran "many hours" without converging; something like 8–16 plus the 48 h job timeout bounds it twice) and a driver timeout as the backstop. This is the user-selected success bar and matches the plan's "clean route is a stretch goal, not a gate".
 
-### D5: Workflow shape — `pnr.yml` with start / pnr / upload / stop jobs
+**Consequence made explicit in the specs (2026-09-12).** Because the flow legitimately exits 0 without a routed design, `specs/ci-pipeline`'s original promise — "WHEN a run exits 0 THEN the DEF and reports are downloadable" — directly contradicted this decision, and `pnr-bringup-10` violated it for real (exit 0, no DEF, because the design is not detail-routable at 101% of routing capacity). The requirement now publishes a DEF *whenever detailed routing produces one*, with a "Run exits 0 without a routed design" scenario for the legitimate case; `pnr.yml` uses `if-no-files-found: warn` and the step summary states which stage prevented a DEF rather than leaving the reader to infer it. Making the design routable at all is out of scope here — it is `docs/infra-plan.md` Phase 11.
+
+### D5: Workflow shape — `pnr.yml` with start / restore-checkpoints / pnr / upload / stop jobs
 
 - **Triggers**: `schedule` (weekly, one cron), `workflow_dispatch`, `push: tags: ['**']`. **No `pull_request` trigger at all** — the fork-PR problem the synth lane had to gate (its design D1b) is designed out entirely; only trusted refs reach the runner.
 - **`start`** (GH-hosted): OIDC login → `az vm start` (idempotent if already running).
-- **`pnr`** (`runs-on: [self-hosted, self-hosted-synth]`, `needs: start`, `container: newt-eda:dev`, `timeout-minutes: 2880`): checkout → synth-lane hardening steps → obtain the netlist (D7) → run the staged flow driver → write step summary → upload DEF/reports/logs artifacts (`if: always()`, 30-day retention).
+- **`restore-checkpoints`** (same runner, **no container**, `needs: start`): resume support, added during bring-up — see D11. Does nothing unless a resume is requested.
+- **`pnr`** (`runs-on: [self-hosted, self-hosted-synth]`, `needs: [start, restore-checkpoints]`, `container: newt-eda:dev`, `timeout-minutes: 2880`): checkout → synth-lane hardening steps → obtain the netlist (D7) → run the staged flow driver → write step summary → upload DEF/reports/logs artifacts (`if: always()`, 30-day retention).
 - **`upload-checkpoints`** (`runs-on` same runner, **no container**, `needs: pnr`, `if: always()`): `az login` via OIDC using the VM host's az CLI (added to VM provisioning runbook), `az storage blob upload-batch` of `save/*.zip` to `pnr-checkpoints/<run_id>/`. Runs outside the container because the image doesn't ship az CLI and shouldn't (it's an EDA image); the runner workspace is host-visible so the files are reachable. *Alternative:* VM's own managed identity via IMDS — works, but splits auth into two mechanisms; OIDC everywhere is one story and satisfies the spec as written.
 - **`stop`** (GH-hosted, `needs: [pnr, upload-checkpoints]`, `if: always()`): the guarded deallocate — see D6.
 - **Concurrency**: one group for the whole workflow, `cancel-in-progress: false`. Opposite of the synth lane's choice, deliberately: cancelling a multi-day P&R run to start a newer one throws away days of paid compute; the single runner serializes anyway, and GH holding at most one pending run per group is acceptable at weekly cadence.
@@ -87,6 +91,8 @@ The P&R run needs `basilisk.yosys.v` for the revision under test. Reaching into 
 
 *Alternative considered:* download the newest `basilisk-netlist` artifact matching the ref — faster but wrong-by-default on tags/dispatch refs the synth lane never built.
 
+**Caching, added during bring-up.** Re-synthesising ~3h for every P&R-only fix is pure waste, so the netlist is cached — but *not* with `actions/cache`, which was tried first and never produced a single hit across eight runs, for two independent reasons: Actions caches are scoped per ref (every run here is a fresh tag, and a tag can only read its own scope or the default branch's, never a sibling tag), and the key hashed *generated* pickle output, which is not byte-reproducible. The cache therefore lives on the VM's OS disk, mounted into the job container as `/synth-cache` — outside the working tree, which `actions/checkout` clears with `git clean -ffdx`, and on the disk that survives this lane's own deallocate cycle (unlike `/mnt`). The key is a SHA-256 over `git rev-parse HEAD:<path>` tree hashes of every tracked input that can change the netlist, plus the `yosys -V` string since the image tag is mutable. Tree hashes are content-addressed, so submodule pins — notably the PDK liberty that ABC and DFFLIBMAP consume — are captured for free. This preserves D7's correctness guarantee exactly: a genuinely different RTL state produces a different key and resynthesises.
+
 ### D8: OIDC via a GitHub environment-scoped federated credential
 
 Manual `az` setup (runbook'd for Phase 6): user-assigned managed identity `newt-ci-identity`; federated credential whose subject is pinned to a GitHub **environment** (`azure`) rather than per-ref subjects — tags and dispatch refs would otherwise each need their own credential (Azure federated credentials match subjects exactly; the environment-scoped subject is constant across all of them). The `start`/`stop`/`upload-checkpoints`/watchdog jobs declare `environment: azure`; the `pnr` job itself needs no Azure access. Role assignments, minimal: Virtual Machine Contributor scoped to the VM resource (start/deallocate), Storage Blob Data Contributor scoped to the checkpoint container. No subscription-level roles (spec: bounded scope).
@@ -100,6 +106,61 @@ Storage account in `newt-synth-lane-rg` (same region as the VM — uploads are i
 ### D10: Documentation truth-maintenance
 
 `synth.yml`'s header (manual-lifecycle note, 10:00 UTC auto-shutdown references, "don't dispatch after 06:30 UTC" note) and `docs/infra-plan.md` Phase 5 are rewritten to the new reality: VM deallocated by default, started by `pnr.yml` or by hand, watchdog cleans up, auto-shutdown gone. The synth lane's nightly cron still only fires usefully when the VM is up — unchanged behavior, now stated in terms of the watchdog world.
+
+### D11: Resume is a workflow capability, not just a driver one
+
+`run_pnr.sh` skips any stage whose checkpoint zip is already on disk (D1), so resuming across
+*runs* needs only one thing: the zips back in `save/` before the driver starts. Three pieces
+make that work, and each exists because of a constraint rather than a preference:
+
+- **A separate `restore-checkpoints` job.** It pulls `pnr-checkpoints/<run_id>/*` from Blob
+  into `/home/newt/pnr-restore/<run_id>` on the VM host. It runs *outside* the EDA container
+  for the same reason `upload-checkpoints` does — az CLI lives on the host, and D8
+  deliberately gives the `pnr` job no Azure access — and it stages outside the workspace
+  because the `pnr` job's own `actions/checkout` runs `git clean -ffdx` and would delete
+  anything left inside it. It resolves the run ID via the contents API rather than checking
+  the repo out, because it runs as the runner user while the `pnr` job runs as root in the
+  container, so a checkout here would try to clean root-owned leftovers and fail.
+- **A netlist-identity guard.** Checkpoints hold the physical database for one specific
+  synthesis result. Grafting them onto a different netlist would silently produce a layout for
+  a design that was never synthesized — the least visible failure available. Each upload
+  therefore carries `synth-key.txt` (D7's cache key), and the restore **refuses** when it
+  disagrees with the current run's key. Runs predating the marker warn and proceed on the
+  caller's assertion.
+- **Stage-slice knobs.** `PNR_RESUME_EXCLUDE` leaves named checkpoints out of the restore so
+  their stages re-run; `PNR_STOP_AFTER` ends the run once a named stage completes.
+  `PNR_STOP_AFTER` deliberately does **not** move the gate — stopping before `PNR_GATE` still
+  exits non-zero, since the gate was never reached.
+
+Together these make design D1's promise that "a human can rerun exactly one stage" real
+*through the workflow* rather than by hand on the VM — which is what let task 3.4's lock file
+be dropped, and what turned 2.5(b)'s retry verification into a 16-minute run.
+
+The run ID travels in a tracked `.github/pnr-resume-from` file (with a `workflow_dispatch`
+input and a repository variable taking precedence when set). A file, because
+`workflow_dispatch` is unregistered until this branch merges and setting repository variables
+needs permissions the CI token lacks — and, on reflection, because a committed run ID appears
+in the tag's own diff instead of lingering invisibly in repo settings, where a forgotten
+variable would silently resume every later run.
+
+### D12: The runner VM does not patch itself
+
+`pnr-bringup-8` was killed 74 minutes into a ~30h run: `apt-daily-upgrade.service` upgraded
+`libc6`, and `needrestart` restarted every service linking it — including the GitHub Actions
+runner (`Stopping actions.runner...service` / `Shutting down runner listener`), which surfaces
+as "The runner has received a shutdown signal". Docker and containerd were restarted in the
+same sweep, so the job's container was exposed too. This is structural, not bad luck: the
+timer fires daily and P&R runs take 24–30h, so **every** run crosses at least one window.
+
+Both mitigations are applied (runbook §3.2): `apt-daily-upgrade.timer` is disabled, and
+`/etc/needrestart/conf.d/99-ci-runner.conf` blocks auto-restart of `actions.runner.*`,
+`docker.*` and `containerd.*`. `apt-daily.timer` stays enabled deliberately — it only
+refreshes lists and pre-downloads, and never restarts anything.
+
+*Trade-off accepted:* the VM no longer receives security updates automatically. That is the
+right call for a CI runner that is deallocated most of the time and runs multi-day jobs, but
+it makes patching a deliberate act — Phase 6's Packer golden image is where it belongs, and
+until then it is a manual step to perform while the VM is idle.
 
 ## Risks / Trade-offs
 
