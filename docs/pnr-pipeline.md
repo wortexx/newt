@@ -10,7 +10,7 @@ that workflow invokes on it.
 | Job | Runs on | What it does |
 |---|---|---|
 | `start` | `ubuntu-latest` | OIDC login to Azure, starts the self-hosted VM (idempotent — no-op if already running). |
-| `restore-checkpoints` | self-hosted VM (no container) | Only does work when `PNR_RESUME_FROM_RUN` (repository variable) or the `resume_from_run` dispatch input names a previous run: downloads that run's checkpoints from Blob into `/home/newt/pnr-restore/<run_id>` — outside the workspace, which `actions/checkout` would `git clean -ffdx`. Runs outside the job container because az CLI lives on the VM host, and design D8 gives the `pnr` job no Azure access. |
+| `restore-checkpoints` | self-hosted VM (no container) | Only does work when `PNR_RESUME_FROM_RUN` (repository variable) or the `resume_from_run` dispatch input names a previous run: downloads that run's checkpoints from Blob into `/home/newt/pnr-restore/<run_id>` — outside the workspace, which `actions/checkout` would `git clean -ffdx`. The `pnr` job's own restore step then honors the `resume_exclude` dispatch input to leave named checkpoints out, so their stages run again. Runs outside the job container because az CLI lives on the VM host, and design D8 gives the `pnr` job no Azure access. |
 | `pnr` | self-hosted VM | Checks out the repo, generates the hardware config, pickles RTL, runs `make synth-all` (cached — see below) then `make -C target/ihp13/openroad -f openroad.mk run-pnr PROJ_NAME=basilisk` (the 9-stage flow below), builds a stage-status summary from `pnr_status.log`, uploads the final DEF and the reports/logs as workflow artifacts. |
 | `upload-checkpoints` | self-hosted VM | Pushes `.zip` checkpoints to the `pnr-checkpoints` blob container (task 1.3) so a later run can resume without redoing synth+P&R from scratch. |
 | `stop` | `ubuntu-latest` | Checks whether the runner is still needed (busy, or another `pnr.yml`/`synth.yml` run queued) before deallocating the VM — the coexistence guard. |
@@ -23,6 +23,42 @@ same workspace (a real, sharp edge — see the Notes section).
 
 `vm-watchdog.yml` runs hourly and deallocates the VM if it's sat idle,
 independent of this workflow — the backstop for a `stop` job that never ran.
+
+### Manual dispatch inputs
+
+`workflow_dispatch` accepts three optional inputs, all empty by default
+(`resume_from_run`, `resume_exclude`, `stop_after` — matching `pnr.yml`'s
+`inputs:` keys exactly). With all three empty, a dispatched run behaves
+exactly like a scheduled run:
+
+- `resume_from_run` — a previous run's ID whose checkpoints to restore
+  before P&R starts (feeds `restore-checkpoints`, above). The `pnr` job's
+  restore step refuses to resume if those checkpoints were built from a
+  different netlist than the dispatched ref produces (the synth-key
+  identity guard).
+- `resume_exclude` — space-separated checkpoint base names (no project
+  prefix, no `.zip`) to leave out of that restore, so their stages run
+  again. Feeds `PNR_RESUME_EXCLUDE`.
+- `stop_after` — a stage name (see the stage table below) after which the
+  driver stops rather than continuing through `final`. Feeds
+  `PNR_STOP_AFTER`. Does not change the gate (`PNR_GATE`, fixed at `grt`
+  and not exposed as an input): a dispatch that stops before the gate
+  still exits non-zero.
+
+Worked example — re-running just `grt_repair` against a previous full run's
+checkpoints, stopping once it completes (design D1's "Run B"):
+
+```console
+$ gh workflow run pnr.yml \
+    -f resume_from_run=<A> \
+    -f resume_exclude=grt_repaired \
+    -f stop_after=grt_repair
+```
+
+This restores run `<A>`'s checkpoints, skips every stage through `grt`
+(all restored), excludes `grt_repaired` from the restore so `grt_repair`
+itself runs again, and stops there — exercising one slice of the flow
+against real data in minutes instead of the full ~26h run.
 
 ## OpenROAD stage level (`target/ihp13/openroad/scripts/pnr/*.tcl`)
 

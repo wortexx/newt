@@ -2,11 +2,11 @@
 #
 # Runs the unattended, staged OpenROAD place-and-route flow
 # (target/ihp13/openroad/run_pnr.sh + scripts/pnr/*.tcl - see
-# openspec/changes/ci-pnr-lane/specs/pnr-flow/spec.md for the flow's own
+# openspec/changes/archive/2026-09-13-ci-pnr-lane/specs/pnr-flow/spec.md for the flow's own
 # contract) against a freshly synthesized netlist. Unlike synth.yml, this
 # lane owns the full VM lifecycle: it starts the self-hosted Azure VM
 # itself and deallocates it when done, rather than assuming a human left it
-# running (openspec/changes/ci-pnr-lane/design.md D5/D6).
+# running (openspec/changes/archive/2026-09-13-ci-pnr-lane/design.md D5/D6).
 #
 # Triggers deliberately exclude `pull_request` entirely - the fork-PR
 # execution risk synth.yml has to gate with two layers (its design D1b)
@@ -30,6 +30,14 @@ on:
         description: 'Run ID whose checkpoints to restore before P&R (empty = fresh run)'
         required: false
         default: ''
+      resume_exclude:
+        description: 'Space-separated checkpoint base names to leave out of that restore, so their stages run again (empty = exclude nothing)'
+        required: false
+        default: ''
+      stop_after:
+        description: 'Stage name after which the driver stops (empty = run through the full flow; does not change the grt success gate)'
+        required: false
+        default: ''
   push:
     tags: ['**']
 
@@ -46,7 +54,7 @@ defaults:
     shell: bash
 
 env:
-  # Populated by task 1.1's manual Azure setup (openspec/changes/ci-pnr-lane
+  # Populated by task 1.1's manual Azure setup (openspec/changes/archive/2026-09-13-ci-pnr-lane
   # runbook) as repository/environment variables - not secrets, these are
   # just identifiers; the actual authentication is OIDC (no client secret
   # anywhere in this workflow). AZURE_STORAGE_ACCOUNT is task 1.3's
@@ -80,8 +88,10 @@ env:
   # by a previous run is gone before the pnr job's first step runs.
   PNR_RESTORE_HOST_DIR: /home/newt/pnr-restore
   # Checkpoint base names (no project prefix, no .zip) to leave out of a
-  # resume, so their stages run again. Empty for ordinary runs.
-  PNR_RESUME_EXCLUDE: ''
+  # resume, so their stages run again. Empty for ordinary runs. Precedence:
+  # the workflow_dispatch input, else empty - tag and cron runs always see
+  # empty and behave exactly as before this input existed (design D2).
+  PNR_RESUME_EXCLUDE: ${{ github.event.inputs.resume_exclude || '' }}
 
 jobs:
   # ---------------------------------------------------------------------
@@ -513,7 +523,18 @@ jobs:
         # out/iguana_chip.yosys.v - a file that was never produced. Every
         # manual bring-up invocation all through task 2.4 passed this
         # explicitly; only the workflow step itself was missing it.
-        run: PNR_TIMEOUT_GRT=57600 PNR_TIMEOUT_GRT_REPAIR=57600 PNR_SKIP_GRT_REPAIR=1 PNR_SKIP_ANTENNA_REPAIR=1 PNR_DRT_END_ITER=8 make -C target/ihp13/openroad -f openroad.mk run-pnr PROJ_NAME=basilisk
+        #
+        # PNR_STOP_AFTER: plumbed straight from the workflow_dispatch input
+        # (empty by default, so tag and cron runs are unaffected) into the
+        # env var run_pnr.sh already honours - re-running one slice of the
+        # flow against a previous run's checkpoints (PNR_RESUME_EXCLUDE
+        # above) no longer needs editing this workflow, as pnr-bringup-11
+        # had to (design D2). PNR_GATE is deliberately not exposed the same
+        # way: it stays fixed at `grt`, so a dispatch can never redefine
+        # what "success" means for a run whose artifacts and status log
+        # look like any other - a slice that stops before the gate still
+        # exits non-zero, which is the honest verdict.
+        run: PNR_TIMEOUT_GRT=57600 PNR_TIMEOUT_GRT_REPAIR=57600 PNR_SKIP_GRT_REPAIR=1 PNR_SKIP_ANTENNA_REPAIR=1 PNR_DRT_END_ITER=8 PNR_STOP_AFTER=${{ github.event.inputs.stop_after || '' }} make -C target/ihp13/openroad -f openroad.mk run-pnr PROJ_NAME=basilisk
 
       - name: Stage-status summary
         if: always()
