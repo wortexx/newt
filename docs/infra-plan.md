@@ -265,7 +265,7 @@ WNS is far worse than this document's ≈ −2.5 ns assumption (−14.76 at `grt
 **Measured cost**: 10 bring-up runs, 158.84 VM-hours, ≈ $193 at $1.216/h. The last two runs
 cost ~$15 each versus $30–38 before the threading, antenna-skip, cache and resume work landed.
 
-## Phase 6 — Azure infrastructure as code
+## Phase 6 — Azure infrastructure as code  ✅ done (2026-09-13)
 
 Built as **Bicep**, in `infra/azure/` — see [`infra/azure/README.md`](../infra/azure/README.md),
 which is now the authoritative description of the CI's Azure footprint. The
@@ -311,6 +311,25 @@ hand-made resource simply persists; `infra/azure/README.md` documents the
 the DevTestLab schedule `shutdown-computevm-newt-synth-runner`, currently disabled.
 Phase 9 deletes it once `vm-watchdog.yml` has been observed working, so that there is
 never a window with no cost backstop.
+
+**Follow-ups surfaced during implementation, not acted on:**
+
+- [ ] `provision-runner.sh` overwrites a mismatched file (e.g. the needrestart
+      override) rather than diffing it, so a convergence run cannot report *what*
+      drifted — only that it did, after the fact, with the evidence already gone.
+      A `--check` mode that reports a diff and exits non-zero without writing
+      would make "converge the existing VM" safe to run exploratorily. New scope;
+      wants its own change rather than riding along here.
+- [ ] `needrestart -r l` was never re-verified on the live host after task 3.4
+      rewrote its override file — the rewrite happened right before the VM was
+      deallocated and the check's output never came back. Low risk (the file is
+      byte-identical to the form the ci-pnr-lane runbook verified parses), but
+      not independently confirmed on this host. Check next time the VM is up.
+- **`github-runner-pat` expires 2026-12-13** — 90 days from creation, not the
+  one-year cadence this plan originally assumed. Rotation is quarterly until a
+  longer-lived token is deliberately issued; the vault secret's own `expires`
+  attribute is the source of truth, `infra/azure/README.md` has the rotation
+  steps.
 
 ## Phase 7 — Coprocessor scaffolding  *(parallel track, not infra)*
 
@@ -367,21 +386,32 @@ bring-up ran off `pnr-bringup-*` tags. So these are deferred by sequencing, not 
 - [ ] Real `workflow_dispatch` run of `pnr.yml` (the bring-up used tag pushes throughout —
       `gh workflow run pnr.yml` 404s pre-merge, and `pnr.yml` doesn't even appear in
       `gh workflow list`). Confirms the `resume_from_run` input path, which has never run.
-- [ ] `vm-watchdog.yml`'s hourly cron actually firing, and one observed correct
-      idle-deallocate. It has never executed once — `gh run list --workflow=vm-watchdog.yml`
-      404s for the same reason.
-- [ ] **Only after** that observation: delete the Azure fixed auto-shutdown (currently
-      `status: Disabled` by hand, not removed) and enable the weekly `pnr.yml` cron. Never
-      leave a window with no cost backstop at all.
+      Still open — `azure-infra-as-code` exercised `vm-watchdog.yml`, not `pnr.yml`.
+- [x] `vm-watchdog.yml`'s hourly cron actually firing, and its OIDC login /
+      power-state check succeeding unattended. **Observed (2026-09-13), during
+      `azure-infra-as-code` task 2.4**: one manual `workflow_dispatch` plus two
+      unprompted scheduled runs (11:20, 14:10, 17:59 UTC) all completed
+      successfully via `Azure login (OIDC)` → `Check VM power state` →
+      `Nothing to do`.
+- [ ] One observed correct **idle-deallocate** (the `Deallocate idle VM` step
+      actually running). Still open: the VM was deallocated for all three runs
+      above, so that step has never executed — this is the one half of the
+      original bullet that direct observation didn't reach.
+- [ ] **Only after** an observed correct idle-deallocate: delete the Azure fixed
+      auto-shutdown (currently `status: Disabled` by hand, not removed — reconfirmed
+      2026-09-13) and enable the weekly `pnr.yml` cron. Never leave a window with no
+      cost backstop at all.
 - [ ] Re-enable the `CI Synth Lane` schedule (`gh workflow enable`) — disabled during
       bring-up so its nightly runs stopped competing for the single runner.
 - [ ] Coexistence guard under a **real** overlap: with a P&R run active, trigger a synth-lane
       dispatch so a run queues, and confirm `pnr.yml`'s `stop` job skips deallocation with a
       clear log line and the queued synth job then runs. Deferred here because it wants both
-      lanes' schedules live, which is only true post-merge. (The other half of that check is
-      already settled: `main` has **no branch protection at all**, so no P&R job can possibly
-      be a required status check — worth deciding separately whether `main` should have
-      protection, which is a repository-policy question, not a P&R one.)
+      lanes' schedules live, which is only true post-merge. (The other half of that check
+      needs revisiting: this section originally said `main` had no branch protection, so no
+      P&R job could be a required check — that changed before `azure-infra-as-code` started;
+      `main` now requires `lint` and `sw` (confirmed live, 2026-09-13). Neither `pnr.yml` nor
+      `synth.yml` is in that list, and neither has a `pull_request` trigger, so this coexistence
+      guard is unaffected — but the stale claim is corrected here rather than left standing.)
 - [ ] Update `synth.yml`'s header comment and this document's Phase 5 section to the
       post-watchdog reality: VM deallocated by default, started by `pnr.yml`, watchdog
       cleans up, fixed auto-shutdown gone.
@@ -462,6 +492,7 @@ the synth cache removes the ~3h resynthesis.
 | OpenROAD bump breaks `chip.tcl` command APIs | Budget 2–3 days in Phase 1; keep the 2024 image as fallback |
 | Golden-image drift on every tool bump | No golden image exists — Packer is deferred out of Phase 6 to its own change. The host is instead reproduced from `infra/azure/provision-runner.sh`, which pins nothing and resolves the Actions runner release at run time, so a rebuild picks up current versions rather than drifting from a stale image. The trade-off is cold-start pull cost on every rebuild |
 | Azure cost creep | Deallocate always (Phase 5's `stop` job plus the hourly `vm-watchdog.yml`); a $150/month resource-group budget alerting at 50/80/100 % of actual spend (Phase 6). Spot was dropped — P&R cannot survive an eviction and the synth lane alone does not justify a second VM. Measured: 10 P&R bring-up runs cost ≈ $193 in VM time |
+| A Bicep `what-if` preview is necessary but not sufficient: several VM properties (`securityType`, `ssh.publicKeys`, `osDisk.diskSizeGB`) show as a benign property-level `Create` in the preview but fail the real deployment with `PropertyChangeNotAllowed` once they'd need to change an existing VM. Separately, a template-declared SKU can be unavailable in-region (`Standard_B2s` doesn't exist in `swedencentral`) or region-available with zero subscription quota (`Standard_B2s_v2`), and a `securityType` value can need an unregistered preview feature (`Microsoft.Compute/UseStandardSecurityType`) even for a brand-new VM | Before trusting a preview on an *existing* resource, diff every leaf the template sets against the live `az … show` and treat "absent on live" as the danger signal — that is what actually catches `PropertyChangeNotAllowed` (`azure-infra-as-code` design.md Risks, task 2.2). Before picking a VM size for a *new* resource, check `az vm list-skus` and `az vm list-usage` in-region rather than assuming a size from another region or plan works here (`infra/azure/README.md`) |
 | `detailed_route` never converges on the modified design | It is congestion-bound at 63 % util even for stock Basilisk; treat a clean route as a stretch goal, not a gate. Consider a secondary easier PDK (Sky130) for fast QoR during development |
 | Phase 1 adoption gate's ~1% cell/area delta has an unexplained residual: a ~830-module textual divergence in the pickled RTL (`sv2v.v`) between the 2024 baseline and the new image. Ruled out: bender release-asset choice (verified byte-identical `sources.json` from both `v0.27.4` assets on identical input) and the `TARGET_*` bender-version schema difference (those defines aren't referenced anywhere in the dependency tree). Not yet distinguished: pure module-reordering in morty's output vs. an actual semantic difference | Not blocking — delta is small and in the benign direction (design got smaller), 0 yosys `CHECK` problems both sides. Revisit if a future gate shows a similar or larger delta; a sort-and-diff-by-module pass on `sv2v.v`, or re-running pickle against a `bender 0.32.1`-shaped `sources.json`, would isolate it |
 | 2024 baseline's own `sources.json` was generated by a host-installed `bender 0.32.1`, not either Docker image's bundled `0.27.4` — a pre-existing baseline-generation inconsistency, discovered while investigating the row above | Note for future baseline captures: regenerate references fully in-container with the pinned tool versions, not via whatever `bender` happens to be on the host PATH |
