@@ -16,11 +16,11 @@ instructions for a cryptographic (SHA) coprocessor on CVA6 / Cheshire, targeting
 | --- | --- |
 | Upstream repo dormant since 2024-10; Docker image built 2024-08-22 | Nobody upstream will refresh tooling — we own it. |
 | yosys is a **custom fork** (`github.com/phsauter/yosys` @ `3ce5059`) | Do **not** rebase onto upstream yosys unless it actively blocks us. |
-| OpenROAD is upstream (`589dee1c8`, ~mid-2024) | Safe to bump to a recent release. This is where all backend instability was. |
+| OpenROAD is upstream (`589dee1c8`, ~mid-2024) | **Bumped to `2c56926` (2026-08-27) in `newt-eda`.** "Safe to bump" held, but the 2.5-year API gap needed real porting work: `initialize_floorplan -sites`→`-site`, `detailed_route`'s `-bottom/-top_routing_layer` now hard errors (DRT-0509/0510, use `set_routing_layers`), PDN zero-instance crashes, per-process `set_wire_rc`/`estimate_parasitics`/`set_thread_count`. **Lesson: check a command's proc body, not its `define_cmd_args`** — the deprecated flags are still declared and parsed, and only the body rejects them. Backend instability was *not* all OpenROAD: see the routability blocker in Phase 11. |
 | Simulation is **Questa-only** (`iguana.mk` → `questa-2022.3 vsim`); no Verilator flow | **Critical-path blocker for RTL CI.** Must add Verilator. |
 | Dev machine has 31 GB RAM; synth peaks ~35 GB | Basilisk synth needs a >64 GB box or a swap file. |
-| Stock `chip.tcl` does not complete unattended | `remove_buffers` segfaults ~1/3 runs (retry); post-route `repair_timing -repair_tns 100` loops forever + segfaults on a design that can't close timing. |
-| Basilisk WNS ≈ −2.5 ns vs 6 ns target | Design does not close timing in the open flow (known / accepted). |
+| Stock `chip.tcl` does not complete unattended | Still true, but **the specific failure modes did not reproduce**: across 10 real P&R runs `remove_buffers` **never crashed once** (the "~1/3 runs" figure is unsubstantiated in this environment — the retry was ultimately verified by deliberate fault injection, not by a real crash). `repair_timing` looping forever did reproduce, and post-route repair is now skipped entirely. The real unattended blockers turned out to be elsewhere: `repair_antennas` hanging ~14h single-threaded, and global route's congestion iterations. |
+| Basilisk WNS ≈ −2.5 ns vs 6 ns target | Design does not close timing in the open flow (known / accepted). **Caveat for any PPA number quoted from the CI lane**: with `grt_repair` skipped (Phase 5), measured WNS at `grt` is **−14.76**, not −2.5 — post-route repair is exactly what closes that gap. Restore a bounded `grt_repair`, or requote the baseline, before using lane output as thesis PPA data. |
 | CVA6 CV-X-IF present but disabled: `CVA6ConfigCvxifEn = 0`; Cheshire ties off `cvxif_req_o` / `cvxif_resp_i`, `cheshire_pkg CvxifEn : 0` | The integration seam already exists; needs enabling + un-tying. |
 
 ### ISA integration — open decision (does not block infra)
@@ -217,33 +217,53 @@ record: `openspec/changes/ci-synth-lane/` (not yet archived).
       needed a CI-only symlink to resolve given `opensta_timings.tcl`'s own cwd requirement.
       Full root-cause/fix/verification detail in the change's `tasks.md` (task 3.3).
 
-## Phase 5 — CI P&R lane (self-hosted Azure agent)
+## Phase 5 — CI P&R lane (self-hosted Azure agent)  ✅ built (2026-09-13)
 
-**Partially pulled forward (2026-09-02) as part of Phase 4** — see `openspec/changes/ci-synth-lane/`
-design.md D1/D1a/D1b. One VM already exists (`newt-synth-runner`, `newt-synth-lane-rg`,
-`swedencentral`, `Standard_E16ds_v5`) with Docker and a registered GitHub Actions runner
-(label `self-hosted-synth`). **Not** pulled forward: Terraform/Bicep IaC, the OIDC federated
-credential, the Packer golden image, or the `start`/`stop` job pair below — VM lifecycle is
-still fully manual (stop/start by hand, with a 10:00 UTC daily auto-shutdown backstop; real
-on-demand cost is $1.216/hour, ~$888/mo if left always-on — notably higher than this phase's
-original $50–150/mo estimate, which assumed the spot/deallocate automation below already
-existed). **Known operational gotcha:** the auto-shutdown fires at a fixed time regardless of
-what's running — a `workflow_dispatch`/labeled-PR run started too close to it gets cancelled
-mid-flight, not just the nightly cron protected by the buffer math below. When this phase's
-own `start`/`stop` automation lands, it should absorb (or explicitly supersede) today's manual
-VM and its auto-shutdown backstop rather than stand up a second one.
+Delivered by `openspec/changes/ci-pnr-lane/` — all 18 tasks closed. **Post-merge verification
+continues in Phase 9**, and a detail-routed DEF is blocked on Phase 11; neither is a gap in
+the lane itself.
 
-Triggers: weekly + `workflow_dispatch` + tags/releases.
+**History.** Partially pulled forward (2026-09-02) as part of Phase 4 — see
+`openspec/changes/ci-synth-lane/` design.md D1/D1a/D1b. The VM (`newt-synth-runner`,
+`newt-synth-lane-rg`, `swedencentral`, `Standard_E16ds_v5`) and its `self-hosted-synth` runner
+came from there; VM lifecycle was manual, with a 10:00 UTC auto-shutdown backstop that this
+phase has now superseded (disabled, and deleted only once Phase 9 observes the watchdog
+working — never a window with no backstop).
 
-- [ ] `start` job (GH-hosted): `az vm start`.
-- [ ] `pnr` job (`runs-on: [self-hosted, newt]`, `timeout-minutes: 2880`):
-      run a **checkpoint-resume flow with `repair_timing` skipped or bounded**
-      (`-repair_tns 20 -max_buffer_percent 15`) — do **not** run stock `chip.tcl` unattended.
-      Reference implementation: `target/ihp13/openroad/scripts/resume_no_repair_timing.tcl`.
-      Wrap `remove_buffers` with one retry.
-- [ ] `stop` job (`if: always()`): `az vm deallocate --no-wait`.
-- [ ] Artifacts: DEF + reports → GitHub artifacts; checkpoints (~1.5 GB each) → Azure Blob
-      with a 30-day lifecycle rule.
+- [x] `start` job (GH-hosted, OIDC): `az vm start`, idempotent.
+- [x] `pnr` job (`runs-on: [self-hosted, self-hosted-synth]` — *not* the `newt` label this
+      plan guessed; `container: ghcr.io/wortexx/newt-eda:dev`, `timeout-minutes: 2880`).
+      Runs the staged flow driver `target/ihp13/openroad/run_pnr.sh` over
+      `scripts/pnr/*.tcl` — one `openroad -exit` process per stage, each loading the previous
+      stage's checkpoint. (This plan's "reference implementation
+      `scripts/resume_no_repair_timing.tcl`" never existed to build on: it was lost with
+      `backend-run/` before the work started.) Stock `chip.tcl` is untouched, for local GUI
+      use only. `remove_buffers` is wrapped in one retry — **verified by deliberate fault
+      injection**, since it never actually crashed in any real run.
+- [x] `stop` job (`if: always()`): a **guarded** deallocate — it queries the runner's busy
+      flag and queued runs first, and skips with a log line rather than cutting off a
+      concurrent synth run. Deliberately **without** `--no-wait`, against this plan's
+      original sketch: a deallocation failure is a cost leak and must fail loudly, which
+      needs the command to block on its result.
+- [x] Artifacts: reports and logs → GitHub artifacts (30-day retention); checkpoints → Azure
+      Blob with a 30-day lifecycle rule. **The DEF is published conditionally**, not on every
+      green run — detailed routing is best-effort, so a run can legitimately exit 0 without
+      one, and the step summary says which stage prevented it. See Phase 11.
+- [x] Beyond the original plan, because bring-up demanded it: a netlist cache on the VM's OS
+      disk (`actions/cache` is unusable here — per-ref scoping means tag-triggered runs can
+      never read each other's caches); checkpoint **resume** from Blob with a netlist-identity
+      guard; `PNR_STOP_AFTER`/`PNR_RESUME_EXCLUDE` to re-run one stage in minutes; and VM
+      hardening after unattended-upgrades restarted the runner mid-job and killed a 30-hour
+      run (see `ci-pnr-lane` design D11/D12).
+
+**Repair bounding, as built.** The plan called for `repair_timing` "skipped or bounded"
+(`-repair_tns 20 -max_buffer_percent 15`). Bounding proved insufficient — `grt_repair` chains
+three route/repair phases and still hit a 16h ceiling — so it is currently **skipped
+outright**. Consequence worth carrying into any PPA work: with post-route repair off, reported
+WNS is far worse than this document's ≈ −2.5 ns assumption (−14.76 at `grt` in bringup-7).
+
+**Measured cost**: 10 bring-up runs, 158.84 VM-hours, ≈ $193 at $1.216/h. The last two runs
+cost ~$15 each versus $30–38 before the threading, antenna-skip, cache and resume work landed.
 
 ## Phase 6 — Azure infrastructure as code
 
@@ -440,4 +460,21 @@ Die: 6.23 × 5.48 mm, 63 % utilization.
    `set_global_routing_layer_adjustment` lines from `chip.tcl`) or `detailed_route`
    fails with `DRT-0155` (guides on TopMetal2).
 5. Use a dedicated long-lived container (`docker run -d … sleep infinity`) for multi-hour
-   jobs — the docker-compose container exits on its own.
+   jobs — the docker-compose container exits on its own. **Superseded for CI work**: driving
+   the runner by hand this way destroyed two runs when `synth.yml`'s schedule fired through
+   it and `actions/checkout` wiped the shared workspace. Go through `pnr.yml` instead —
+   `PNR_RESUME_EXCLUDE` + `PNR_STOP_AFTER` re-run a single stage in minutes.
+
+**Status: all of the above are baked in** — 3 and 4 in `scripts/pnr/common.tcl`
+(`pnr_apply_routing_layers` is called by every routing stage, and no run has hit DRT-0155
+since). Bring-up added more of the same class, all stemming from one property of the staged
+architecture: **each stage is a fresh process, so anything the old single-process `chip.tcl`
+set once must be re-derived per stage.** Concretely — `set_thread_count` (OpenROAD defaults to
+**1 thread**; missing it left six of eight stages single-threaded), `set_wire_rc` before CTS
+(RSZ-0089), `estimate_parasitics -global_routing` before any post-route repair, and
+`load_checkpoint`'s `unzip` needing `-o` (a re-load prompts interactively and silently skips
+in a headless run). Two further traps worth knowing: OpenROAD's `-log` output is
+block-buffered, so a stage can look hung for hours while pinning 15 cores — check the process,
+not the log; and streaming a `-verbose` stage's stdout into the Actions live log can kill the
+runner's connection outright (`grt`'s ~5,472 net names in <50 ms did exactly that). Full
+per-stage detail lives in `docs/pnr-pipeline.md`.
