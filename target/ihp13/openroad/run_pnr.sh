@@ -30,6 +30,15 @@
 #                           stage without its own override below.
 #                           Default: 21600 (6h).
 #   PNR_TIMEOUT_<STAGE>    Per-stage override, e.g. PNR_TIMEOUT_DRT=57600.
+#   PNR_STOP_AFTER         Stop once this stage completes, instead of
+#                           continuing through `final`. Must name a stage
+#                           below. Lets a run exercise one part of the flow
+#                           without paying for the rest (design D1: "a human
+#                           can rerun exactly one stage"); combined with
+#                           restored checkpoints it makes targeted tests
+#                           cheap. Does not change the gate: a stop before
+#                           PNR_GATE still exits non-zero, since the gate
+#                           was never reached.
 #   PNR_DRY_RUN             If "1", print the planned per-stage commands
 #                           (in order, honoring resume-skip) and exit 0
 #                           without invoking OpenROAD at all - the cheap
@@ -78,6 +87,18 @@ declare -A STAGE_TIMEOUT_DEFAULT=(
     [grt]=14400 [grt_repair]=21600 [drt]=57600 [final]=3600
 )
 
+STOP_AFTER="${PNR_STOP_AFTER:-}"
+if [ -n "$STOP_AFTER" ]; then
+    stop_valid=0
+    for s in "${STAGES[@]}"; do
+        [ "$s" = "$STOP_AFTER" ] && stop_valid=1
+    done
+    if [ "$stop_valid" -ne 1 ]; then
+        echo "::error::PNR_STOP_AFTER=${STOP_AFTER} is not a known stage (${STAGES[*]})" >&2
+        exit 2
+    fi
+fi
+
 GATE="${PNR_GATE:-grt}"
 gate_valid=0
 for s in "${STAGES[@]}"; do
@@ -87,6 +108,14 @@ if [ "$gate_valid" -ne 1 ]; then
     echo "::error::PNR_GATE=${GATE} is not a known stage (${STAGES[*]})" >&2
     exit 2
 fi
+
+# True when PNR_STOP_AFTER names this stage. Checked on every path that
+# finishes a stage - ran it, skipped it via resume, or listed it in a dry
+# run - so the stop point is the same regardless of how the stage was
+# satisfied.
+stop_here() {
+    [ -n "$STOP_AFTER" ] && [ "$1" = "$STOP_AFTER" ]
+}
 
 log_status() {
     # $1=stage $2=status $3=detail(optional)
@@ -159,6 +188,10 @@ for stage in "${STAGES[@]}"; do
         echo "Stage '${stage}' already has checkpoint ${zip_path} - resuming past it."
         log_status "$stage" skipped "resume"
         [ "$stage" = "$GATE" ] && past_gate=1
+        if stop_here "$stage"; then
+            echo "PNR_STOP_AFTER=${STOP_AFTER} satisfied (from checkpoint) - not running the remaining stages."
+            break
+        fi
         continue
     fi
 
@@ -168,6 +201,10 @@ for stage in "${STAGES[@]}"; do
         [ "$stage" = "$GATE" ] && gate_note="gated, GATE"
         echo "[dry-run] would run stage '${stage}' (${gate_note}; timeout $(stage_timeout "$stage")s, retries ${STAGE_RETRIES[$stage]}) -> ${zip_path}"
         [ "$stage" = "$GATE" ] && past_gate=1
+        if stop_here "$stage"; then
+            echo "[dry-run] PNR_STOP_AFTER=${STOP_AFTER} reached - would not run the remaining stages."
+            break
+        fi
         continue
     fi
 
@@ -209,6 +246,11 @@ for stage in "${STAGES[@]}"; do
         fi
     else
         [ "$stage" = "$GATE" ] && past_gate=1
+        if stop_here "$stage"; then
+            echo "PNR_STOP_AFTER=${STOP_AFTER} completed - not running the remaining stages."
+            log_status "$stage" stop-after ""
+            break
+        fi
     fi
 done
 

@@ -79,6 +79,9 @@ env:
   # deletes ignored files too, so anything left in target/ihp13/openroad/save
   # by a previous run is gone before the pnr job's first step runs.
   PNR_RESTORE_HOST_DIR: /home/newt/pnr-restore
+  # Checkpoint base names (no project prefix, no .zip) to leave out of a
+  # resume, so their stages run again. Empty for ordinary runs.
+  PNR_RESUME_EXCLUDE: ''
 
 jobs:
   # ---------------------------------------------------------------------
@@ -421,7 +424,23 @@ jobs:
             echo "::warning::run ${RESUME_RUN} predates netlist-identity marking, so the match cannot be verified automatically. Proceeding on the caller's assertion that the netlist is unchanged."
           fi
           mkdir -p target/ihp13/openroad/save
-          cp -a "$src"/*.zip target/ihp13/openroad/save/
+          # PNR_RESUME_EXCLUDE: space-separated checkpoint base names to leave
+          # behind, so the stages that produce them run again. Pairs with the
+          # driver's PNR_STOP_AFTER to re-run one slice of the flow against
+          # real data without paying for the stages on either side.
+          for z in "$src"/*.zip; do
+            base="$(basename "$z" .zip)"
+            base="${base#"${PROJ_NAME:-basilisk}."}"
+            skip=""
+            for ex in ${PNR_RESUME_EXCLUDE:-}; do
+              [ "$base" = "$ex" ] && skip=1
+            done
+            if [ -n "$skip" ]; then
+              echo "  excluded: $(basename "$z") (its stage will re-run)"
+              continue
+            fi
+            cp -a "$z" target/ihp13/openroad/save/
+          done
           echo "Restored checkpoints from run ${RESUME_RUN} - these stages will be SKIPPED by the driver:"
           for z in target/ihp13/openroad/save/*.zip; do echo "  $(basename "$z")"; done
 
