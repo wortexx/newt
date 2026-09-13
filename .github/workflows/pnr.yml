@@ -1,0 +1,672 @@
+# CI P&R lane — docs/infra-plan.md Phase 5.
+#
+# Runs the unattended, staged OpenROAD place-and-route flow
+# (target/ihp13/openroad/run_pnr.sh + scripts/pnr/*.tcl - see
+# openspec/changes/ci-pnr-lane/specs/pnr-flow/spec.md for the flow's own
+# contract) against a freshly synthesized netlist. Unlike synth.yml, this
+# lane owns the full VM lifecycle: it starts the self-hosted Azure VM
+# itself and deallocates it when done, rather than assuming a human left it
+# running (openspec/changes/ci-pnr-lane/design.md D5/D6).
+#
+# Triggers deliberately exclude `pull_request` entirely - the fork-PR
+# execution risk synth.yml has to gate with two layers (its design D1b)
+# doesn't exist here at all, because no PR event can ever reach this
+# workflow.
+#
+# Success/failure follows target/ihp13/openroad/run_pnr.sh's own exit
+# code: 0 iff every stage through global route (the PNR_GATE default,
+# `grt`) completed - detailed route (`drt`) and everything after it is
+# best-effort and never flips this job's status (specs/ci-pipeline: "P&R
+# lane job status follows the flow's gate and never gates merges"). This
+# job is NOT a required status check on `main`.
+name: CI P&R Lane
+
+on:
+  schedule:
+    - cron: '0 18 * * 5' # Fridays 18:00 UTC - the run owns the weekend (design.md Open Questions; tune freely, doesn't change specs/approach)
+  workflow_dispatch:
+    inputs:
+      resume_from_run:
+        description: 'Run ID whose checkpoints to restore before P&R (empty = fresh run)'
+        required: false
+        default: ''
+  push:
+    tags: ['**']
+
+# One group for the whole workflow (not per-ref, unlike synth.yml): a
+# superseded run of a multi-day P&R job would throw away real paid Azure
+# compute, not just wasted CI minutes, so a second trigger queues behind
+# the first instead of cancelling it (design D5).
+concurrency:
+  group: pnr
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  # Populated by task 1.1's manual Azure setup (openspec/changes/ci-pnr-lane
+  # runbook) as repository/environment variables - not secrets, these are
+  # just identifiers; the actual authentication is OIDC (no client secret
+  # anywhere in this workflow). AZURE_STORAGE_ACCOUNT is task 1.3's
+  # storage account name.
+  AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+  AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+  AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+  AZURE_RESOURCE_GROUP: newt-synth-lane-rg
+  AZURE_VM_NAME: newt-synth-runner
+  AZURE_STORAGE_ACCOUNT: ${{ vars.AZURE_STORAGE_ACCOUNT }}
+  AZURE_CHECKPOINT_CONTAINER: pnr-checkpoints
+  # Resume support (design D1: "rerunning the driver skips stages whose
+  # checkpoint already exists"). Naming a previous run restores its
+  # checkpoints before P&R, so the driver starts at the first stage that has
+  # no checkpoint. Three sources, highest precedence first: the
+  # workflow_dispatch input; a PNR_RESUME_FROM_RUN repository variable; and a
+  # tracked `.github/pnr-resume-from` file holding just the run ID.
+  #
+  # The file exists because neither of the other two is usable for the
+  # tag-triggered bring-up runs this lane currently relies on:
+  # workflow_dispatch isn't registered until this branch merges (tasks.md
+  # 3.2), and setting a repository variable needs permissions the CI token
+  # doesn't have. It also turns out to be the safer default - the run ID is
+  # committed, so it shows up in the tag's diff and can't linger invisibly
+  # the way a forgotten repository variable would. Delete the file to go back
+  # to full runs.
+  PNR_RESUME_FROM_RUN: ${{ github.event.inputs.resume_from_run || vars.PNR_RESUME_FROM_RUN }}
+  # Host directory the restore job stages checkpoints into. Outside the git
+  # working tree on purpose: actions/checkout runs `git clean -ffdx`, which
+  # deletes ignored files too, so anything left in target/ihp13/openroad/save
+  # by a previous run is gone before the pnr job's first step runs.
+  PNR_RESTORE_HOST_DIR: /home/newt/pnr-restore
+  # Checkpoint base names (no project prefix, no .zip) to leave out of a
+  # resume, so their stages run again. Empty for ordinary runs.
+  PNR_RESUME_EXCLUDE: ''
+
+jobs:
+  # ---------------------------------------------------------------------
+  # Start the VM. GH-hosted: this job never touches the self-hosted
+  # runner, so it can run even while the VM is deallocated.
+  # ---------------------------------------------------------------------
+  start:
+    runs-on: ubuntu-latest
+    environment: azure
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Start VM (idempotent if already running)
+        run: az vm start --resource-group "${{ env.AZURE_RESOURCE_GROUP }}" --name "${{ env.AZURE_VM_NAME }}"
+
+  # ---------------------------------------------------------------------
+  # Stage a previous run's checkpoints onto the VM so the driver can resume
+  # (design D1). Runs outside the job container for the same reason
+  # upload-checkpoints does: az CLI lives on the VM host, not in the EDA
+  # image, and design D8 deliberately gives the pnr job no Azure access at
+  # all. Writes into PNR_RESTORE_HOST_DIR rather than the workspace, because
+  # the pnr job's own actions/checkout would `git clean -ffdx` the workspace
+  # immediately afterwards. Always runs (so the pnr job's `needs` stays
+  # simple) but does nothing unless a resume was requested.
+  # ---------------------------------------------------------------------
+  restore-checkpoints:
+    needs: start
+    runs-on: [self-hosted, self-hosted-synth]
+    environment: azure
+    permissions:
+      id-token: write
+      contents: read
+    outputs:
+      resume_run: ${{ steps.resolve.outputs.resume_run }}
+    steps:
+      # Read the marker straight from the API rather than checking the repo
+      # out: this job runs as the runner user, while the pnr job runs as root
+      # inside the container, so an actions/checkout here would try to
+      # `git clean -ffdx` root-owned leftovers and fail.
+      - name: Resolve resume source
+        id: resolve
+        run: |
+          set -uo pipefail
+          resume="${PNR_RESUME_FROM_RUN}"
+          if [ -z "$resume" ]; then
+            resume="$(curl -sfL \
+              -H "Authorization: Bearer ${{ github.token }}" \
+              -H "Accept: application/vnd.github.raw" \
+              "${{ github.api_url }}/repos/${{ github.repository }}/contents/.github/pnr-resume-from?ref=${{ github.sha }}" \
+              | tr -d '[:space:]')" || resume=""
+          fi
+          echo "resume_run=$resume" >> "$GITHUB_OUTPUT"
+          if [ -z "$resume" ]; then
+            echo "No resume requested - the pnr job will run the full flow from floorplan."
+          else
+            echo "::warning::RESUME MODE: restoring checkpoints from run ${resume}."
+            echo "Stages with a restored checkpoint will be SKIPPED, not re-run."
+          fi
+
+      - name: Azure login (OIDC)
+        if: steps.resolve.outputs.resume_run != ''
+        uses: azure/login@v2
+        with:
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Download checkpoints from Blob
+        if: steps.resolve.outputs.resume_run != ''
+        env:
+          RESUME_RUN: ${{ steps.resolve.outputs.resume_run }}
+        run: |
+          set -euo pipefail
+          dest="${PNR_RESTORE_HOST_DIR}/${RESUME_RUN}"
+          rm -rf "$dest"
+          mkdir -p "$dest"
+          az storage blob download-batch \
+            --account-name "${{ env.AZURE_STORAGE_ACCOUNT }}" \
+            --auth-mode login \
+            --source "${{ env.AZURE_CHECKPOINT_CONTAINER }}" \
+            --pattern "${RESUME_RUN}/*" \
+            --destination "$dest" >/dev/null
+          # download-batch recreates the blob prefix as a subdirectory; flatten
+          # it so the pnr job sees the .zip files directly under $dest.
+          if [ -d "$dest/${RESUME_RUN}" ]; then
+            mv "$dest/${RESUME_RUN}"/* "$dest"/
+            rmdir "$dest/${RESUME_RUN}"
+          fi
+          count=$(find "$dest" -maxdepth 1 -name '*.zip' | wc -l)
+          if [ "$count" -eq 0 ]; then
+            echo "::error::no checkpoint .zip files found for run ${RESUME_RUN}"
+            exit 1
+          fi
+          echo "Staged $count checkpoint(s) into $dest:"
+          find "$dest" -maxdepth 1 -name '*.zip' -printf '  %f (%s bytes)\n' | sort
+
+  # ---------------------------------------------------------------------
+  # The P&R run itself. Self-synthesizes (design D7) rather than trusting
+  # a prior synth-lane artifact, so it's correct-by-construction for
+  # whatever ref triggered this run (a tag or a manual dispatch ref the
+  # nightly synth lane may never have built).
+  # ---------------------------------------------------------------------
+  pnr:
+    needs: [start, restore-checkpoints]
+    runs-on: [self-hosted, self-hosted-synth]
+    container:
+      image: ghcr.io/wortexx/newt-eda:dev
+      # Mounts the VM-local synth cache (see the "Compute synth cache key"
+      # step below for why it can't be an actions/cache). The host path is
+      # on the OS disk, which survives this lane's own deallocate cycle -
+      # unlike /mnt, Azure's ephemeral temp disk. Docker creates the host
+      # directory on first use, so this needs no VM provisioning step.
+      volumes:
+        - /home/newt/synth-cache:/synth-cache
+        # Checkpoints staged by the restore-checkpoints job (resume support).
+        - /home/newt/pnr-restore:/pnr-restore
+    env:
+      SYNTH_CACHE_DIR: /synth-cache
+      PNR_RESTORE_DIR: /pnr-restore
+    timeout-minutes: 2880 # ~48h ceiling (design D5) - bounds a hung run; detailed_route's own iteration budget (PNR_DRT_END_ITER) is the primary backstop
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Same fix as ci.yml/synth.yml: the container job's user doesn't own
+      # the runner-checked-out tree.
+      - name: Allow git to operate on the checked-out tree
+        run: git config --global --add safe.directory '*'
+
+      # Previous weekly run's checkpoints are already in Blob storage by
+      # the time this one starts (upload-checkpoints job, below) - clear
+      # local save/reports so a stale run's ~20GB of checkpoints doesn't
+      # eat into the ~200GB/run disk budget (docs/infra-plan.md Appendix A;
+      # design.md Risks).
+      - name: Clean previous run's local save/reports
+        run: rm -rf target/ihp13/openroad/save target/ihp13/openroad/reports
+
+      # Same retry rationale as ci.yml/synth.yml: a fresh dependency
+      # checkout intermittently drops the buildroot.net submodule clone.
+      - name: Generate hardware config (make ig-hw-all)
+        run: |
+          retry() {
+            local attempt=1 max=3
+            until "$@"; do
+              if [ "$attempt" -ge "$max" ]; then
+                echo "::error::giving up after $max attempts: $*"
+                return 1
+              fi
+              echo "Attempt $attempt/$max failed - retrying with a clean .bender/ in 20s."
+              rm -rf .bender
+              sleep 20
+              attempt=$((attempt + 1))
+            done
+          }
+          try() { make ig-hw-all; }
+          retry try
+
+      - name: Pickle RTL (make pickle-all)
+        run: make pickle-all
+
+      # synth-all is the expensive step here (~3h on this design) but its
+      # output only depends on the RTL and the synthesis inputs - not on
+      # anything in the P&R step below. Without a cache, every retry of a
+      # P&R-only bug (task 3.2's bring-up hit five in a row) pays the full
+      # ~3h again for byte-identical output.
+      #
+      # This replaces an actions/cache@v4 step that never produced a single
+      # hit in any run (tasks.md 3.1, fourth addendum), for two independent
+      # reasons:
+      #
+      #  1. Actions caches are scoped per ref. Every run of this workflow is
+      #     triggered by a fresh tag (itself a workaround for workflow_dispatch
+      #     not being registered until this branch merges - see tasks.md 3.2),
+      #     and a run can only read caches written by its own ref or by the
+      #     repository's default branch - never by a sibling tag. So each run
+      #     wrote a cache into its own dead-end scope.
+      #  2. The old key hashed *generated* pickle output, which is not
+      #     byte-reproducible across runs: pnr-bringup-6 -> -7 changed no RTL
+      #     at all, yet the key moved, and every run since has produced a
+      #     fresh key.
+      #
+      # Both are fixed here. The key is derived from `git rev-parse HEAD:<path>`
+      # tree hashes of every *tracked input* that can change the netlist -
+      # content-addressed by git, so it is identical whenever those inputs are
+      # (verified retroactively: this key is the same for pnr-bringup-4 through
+      # 8, all of which paid full synthesis). Submodule pins are captured for
+      # free, since a submodule appears in its parent tree as its commit SHA -
+      # that is what makes target/ihp13/pdk (the liberty files ABC and
+      # DFFLIBMAP consume) part of the key. The yosys version string is mixed
+      # in as well, because the container image tag (`:dev`) is mutable and a
+      # rebuilt image with a different yosys must not reuse an old netlist.
+      #
+      # The cache itself lives on the VM's OS disk, outside the git working
+      # tree - actions/checkout wipes untracked files in the workspace, and the
+      # OS disk (unlike /mnt) survives this lane's own deallocate cycle. It is
+      # mounted into the job container via the `volumes:` entry above. A cache
+      # failure never fails the run: every write path below degrades to a
+      # warning.
+      - name: Compute synth cache key
+        id: synth-key
+        run: |
+          set -euo pipefail
+          # Every tracked path whose content can change the synthesized
+          # netlist. Over-inclusion only costs a redundant resynthesis;
+          # under-inclusion would serve a stale netlist and quietly break
+          # design D7's "correct for whatever ref triggered this run".
+          paths=(
+            Bender.yml Bender.lock hw
+            target/ihp13/yosys target/ihp13/pickle
+            target/ihp13/pdk target/ihp13/src
+            Makefile iguana.mk tools.mk
+          )
+          inputs="$RUNNER_TEMP/synth-key-inputs.txt"
+          : > "$inputs"
+          for path in "${paths[@]}"; do
+            # Fail loudly rather than letting a failed rev-parse (a renamed
+            # or deleted path) contribute an empty field: that would silently
+            # drop an input from the key and could collide two different
+            # source states onto one cache entry.
+            if ! tree_hash="$(git rev-parse "HEAD:$path")"; then
+              echo "::error::cannot hash '$path' - update the paths list in this step"
+              exit 1
+            fi
+            printf '%s %s\n' "$path" "$tree_hash" >> "$inputs"
+          done
+          printf 'yosys %s\n' "$(yosys -V 2>/dev/null || echo unknown)" >> "$inputs"
+          echo "Synth cache key inputs:"
+          cat "$inputs"
+          key="synth-$(sha256sum "$inputs" | cut -c1-32)"
+          echo "key=$key" >> "$GITHUB_OUTPUT"
+          echo "Synth cache key: $key"
+
+      - name: Restore synth output from the VM-local cache
+        id: synth-cache
+        run: |
+          set -uo pipefail
+          entry="$SYNTH_CACHE_DIR/${{ steps.synth-key.outputs.key }}"
+          if [ -f "$entry/.complete" ]; then
+            mkdir -p target/ihp13/yosys/out
+            if cp -a "$entry/." target/ihp13/yosys/out/; then
+              rm -f target/ihp13/yosys/out/.complete
+              echo "hit=true" >> "$GITHUB_OUTPUT"
+              echo "Cache hit: restored $(du -sh "$entry" | cut -f1) from $entry"
+            else
+              echo "::warning::restore from $entry failed - will synthesize"
+              echo "hit=false" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            echo "hit=false" >> "$GITHUB_OUTPUT"
+            echo "Cache miss for $entry - will synthesize."
+          fi
+
+      - name: Synthesize (make synth-all)
+        if: steps.synth-cache.outputs.hit != 'true'
+        run: make synth-all
+
+      # Only reached when synth-all actually ran and succeeded (a failed
+      # synth fails the job before this step). The .complete marker is
+      # written last so an interrupted copy - the VM vanishing mid-write is
+      # exactly this lane's known failure mode - can never be mistaken for a
+      # usable entry on the next run.
+      - name: Save synth output to the VM-local cache
+        if: steps.synth-cache.outputs.hit != 'true'
+        run: |
+          set -uo pipefail
+          entry="$SYNTH_CACHE_DIR/${{ steps.synth-key.outputs.key }}"
+          rm -rf "$entry"
+          if ! mkdir -p "$entry"; then
+            echo "::warning::cannot create $entry - skipping cache save"
+            exit 0
+          fi
+          if cp -a target/ihp13/yosys/out/. "$entry/"; then
+            touch "$entry/.complete"
+            echo "Cached $(du -sh "$entry" | cut -f1) to $entry"
+          else
+            echo "::warning::cache save failed - removing partial entry"
+            rm -rf "$entry"
+            exit 0
+          fi
+          # Keep the cache bounded: the VM's OS disk has ~111GB free and is
+          # shared with Docker's image cache and the runner workspace
+          # (tasks.md 1.4). Newest 5 entries is a few hundred MB at most.
+          keep=5
+          mapfile -t stale < <(find "$SYNTH_CACHE_DIR" -mindepth 1 -maxdepth 1 -type d \
+            -name 'synth-*' -printf '%T@ %p\n' 2>/dev/null \
+            | sort -rn | tail -n +$((keep + 1)) | cut -d' ' -f2-)
+          for dir in "${stale[@]:-}"; do
+            [ -n "$dir" ] || continue
+            echo "Pruning old cache entry: $dir"
+            rm -rf "$dir"
+          done
+
+      # Record which netlist these checkpoints belong to, so a later resume
+      # can refuse to graft them onto a different design (see the step below).
+      # Written after the clean step, and picked up by upload-checkpoints.
+      - name: Record netlist identity alongside checkpoints
+        run: |
+          set -euo pipefail
+          mkdir -p target/ihp13/openroad/save
+          echo "${{ steps.synth-key.outputs.key }}" > target/ihp13/openroad/save/synth-key.txt
+
+      # Resume (design D1). run_pnr.sh already skips any stage whose
+      # checkpoint zip is present, so restoring them here is the whole
+      # mechanism - no driver change needed. This also exercises the resume
+      # path that task 2.5 requires.
+      - name: Restore checkpoints to resume (only when a resume run is named)
+        if: needs.restore-checkpoints.outputs.resume_run != ''
+        env:
+          RESUME_RUN: ${{ needs.restore-checkpoints.outputs.resume_run }}
+        run: |
+          set -euo pipefail
+          src="${PNR_RESTORE_DIR}/${RESUME_RUN}"
+          if [ ! -d "$src" ]; then
+            echo "::error::${src} is missing - the restore-checkpoints job should have staged it"
+            exit 1
+          fi
+          # Refuse to resume onto a different netlist. Checkpoints carry the
+          # physical database for one specific synthesis result; grafting them
+          # onto another would silently produce a layout for a design that was
+          # never synthesized, breaking design D7's per-ref guarantee in the
+          # least visible way possible.
+          current="${{ steps.synth-key.outputs.key }}"
+          if [ -f "$src/synth-key.txt" ]; then
+            restored="$(cat "$src/synth-key.txt")"
+            if [ "$restored" != "$current" ]; then
+              echo "::error::refusing to resume: checkpoints were built from $restored but this run's netlist is $current"
+              exit 1
+            fi
+            echo "Netlist identity matches ($current) - safe to resume."
+          else
+            echo "::warning::run ${RESUME_RUN} predates netlist-identity marking, so the match cannot be verified automatically. Proceeding on the caller's assertion that the netlist is unchanged."
+          fi
+          mkdir -p target/ihp13/openroad/save
+          # PNR_RESUME_EXCLUDE: space-separated checkpoint base names to leave
+          # behind, so the stages that produce them run again. Pairs with the
+          # driver's PNR_STOP_AFTER to re-run one slice of the flow against
+          # real data without paying for the stages on either side.
+          for z in "$src"/*.zip; do
+            base="$(basename "$z" .zip)"
+            base="${base#"${PROJ_NAME:-basilisk}."}"
+            skip=""
+            for ex in ${PNR_RESUME_EXCLUDE:-}; do
+              [ "$base" = "$ex" ] && skip=1
+            done
+            if [ -n "$skip" ]; then
+              echo "  excluded: $(basename "$z") (its stage will re-run)"
+              continue
+            fi
+            cp -a "$z" target/ihp13/openroad/save/
+          done
+          echo "Restored checkpoints from run ${RESUME_RUN} - these stages will be SKIPPED by the driver:"
+          for z in target/ihp13/openroad/save/*.zip; do echo "  $(basename "$z")"; done
+
+      - name: Place and route (make -C target/ihp13/openroad run-pnr)
+        # PNR_TIMEOUT_GRT: run_pnr.sh's own 14400s (4h) default is nowhere
+        # near enough for this design's grt stage (task 2.4 real bring-up,
+        # three full timeout-killed attempts at 4h, 8h, then 16h before
+        # -verbose telemetry pinpointed the actual cause: iteration 15
+        # itself triggers a clock-net NDR-relaxation cascade with no
+        # observed sign of terminating - see grt.tcl's own comment and
+        # docs/pnr-pipeline.md). -congestion_iterations is now 14 to stop
+        # before ever entering it; 57600s (16h) keeps the same margin used
+        # for the earlier 20-iteration attempt, comfortably generous now
+        # that the pathological iteration is excluded.
+        #
+        # PNR_TIMEOUT_GRT_REPAIR / PNR_SKIP_GRT_REPAIR: grt_repair.tcl's own
+        # 21600s (6h) default was never going to be enough once its
+        # global_route calls were actually bounded/fixed to run for real
+        # (2026-09-06 audit, tasks.md 2.4 - this stage had never once
+        # executed before that audit). Raised to 57600s (16h, matching
+        # grt.tcl's own margin) as a starting budget - but pnr-bringup-6
+        # (run 34224904566, the first run to ever complete with a clean
+        # GitHub Actions verdict - confirming the runner-communication-loss
+        # fix above works end-to-end) still hit that 16h ceiling exactly
+        # (pnr_status.log: "grt_repair failed exit=124"), so drt/final were
+        # skipped as predecessor-failed and no DEF was produced. Real
+        # finding: grt_repair.tcl chains three route/repair phases
+        # (incremental round, a full "GRT (2)" re-route comparable in cost
+        # to grt.tcl's own ~9h pass, then another incremental round) - 2-3x
+        # grt.tcl's own budget, not a bug in the 14-iteration bounding
+        # itself. Rather than guess at a bigger timeout blind, skip
+        # grt_repair for now (PNR_SKIP_GRT_REPAIR=1 - grt_repair.tcl's own
+        # skip path just re-saves the grt checkpoint under the uniform
+        # grt_repaired name drt.tcl expects, so drt/final can finally run
+        # and produce a real out/basilisk.final.def off grt's own
+        # timing/congestion) to get the whole pipeline exercised end-to-end
+        # first; come back to tuning grt_repair's timeout/convergence once
+        # drt and final are themselves real-run-verified.
+        #
+        # PNR_SKIP_ANTENNA_REPAIR: run 34389061373 (pnr-bringup-7, the
+        # first fully green start->pnr->upload->stop run) still produced
+        # no DEF: drt's 16h budget was eaten entirely by repair_antennas,
+        # which never reached detailed_route at all - 47,980 diodes
+        # inserted into a design routing at 101% of global capacity
+        # (Metal3 115%), diode legalization not converging (20,728
+        # violations after 1h26), then a single-threaded post-insertion
+        # reroute hung ~14h with zero log output until timeout (exit 124).
+        # Antenna repair is manufacturing signoff, not PPA - skip it in CI
+        # (see drt.tcl's comment for the -jumper_only middle ground).
+        #
+        # PNR_DRT_END_ITER=8: design D4's 8-16 band, low end. The stock 40
+        # iterations can't converge on this congestion-bound design, and
+        # only an iteration budget detailed_route reaches *by itself* ends
+        # the stage cleanly (checkpoint saved, final runs, DEF produced) -
+        # hitting the 16h timeout instead loses everything, as every drt
+        # attempt so far has demonstrated. No 16-vCPU per-iteration timing
+        # data exists yet (detailed_route has never actually started in a
+        # real run); tune once the first run survives repair_antennas'
+        # removal from the path.
+        #
+        # PROJ_NAME=basilisk: the "Synthesize" step above runs `make
+        # synth-all` from the repo root, which includes iguana.mk - that's
+        # what sets PROJ_NAME to basilisk (TOP_DESIGN iguana_chip is the
+        # actual top module; basilisk is this project's name for it) and
+        # is why synth-all's own netlist is out/basilisk.yosys.v. This step
+        # instead runs openroad.mk directly (`-C ... -f openroad.mk`),
+        # bypassing the root Makefile/iguana.mk entirely, so without this
+        # override it falls back to openroad.mk's own bare default
+        # (PROJ_NAME ?= TOP_DESIGN = iguana_chip) and looks for
+        # out/iguana_chip.yosys.v - a file that was never produced. Every
+        # manual bring-up invocation all through task 2.4 passed this
+        # explicitly; only the workflow step itself was missing it.
+        run: PNR_TIMEOUT_GRT=57600 PNR_TIMEOUT_GRT_REPAIR=57600 PNR_SKIP_GRT_REPAIR=1 PNR_SKIP_ANTENNA_REPAIR=1 PNR_DRT_END_ITER=8 make -C target/ihp13/openroad -f openroad.mk run-pnr PROJ_NAME=basilisk
+
+      - name: Stage-status summary
+        if: always()
+        run: |
+          STATUS_LOG=target/ihp13/openroad/save/pnr_status.log
+          {
+            echo "### P&R stage status"
+            echo
+            echo "| Stage | Status | Detail |"
+            echo "| --- | --- | --- |"
+            if [ -f "$STATUS_LOG" ]; then
+              while read -r stage status detail; do
+                echo "| $stage | $status | $detail |"
+              done < "$STATUS_LOG"
+            else
+              echo "| (none) | no status log found | run_pnr.sh may not have started |"
+            fi
+            # State the DEF outcome explicitly (specs/ci-pipeline: "Run exits 0
+            # without a routed design"). Detailed routing is best-effort, so a
+            # missing DEF is a legitimate result of a successful run - but it
+            # must be reported, not left for the reader to infer from the
+            # stage table.
+            echo
+            DEF=target/ihp13/openroad/out/basilisk.final.def
+            if [ -f "$DEF" ]; then
+              echo "**Routed design:** \`$(basename "$DEF")\` published ($(du -h "$DEF" | cut -f1))."
+            else
+              blocker="$(awk '$2 == "failed" { print $1; exit }' "$STATUS_LOG" 2>/dev/null)"
+              echo "**Routed design:** none produced${blocker:+ - first failing stage was \`$blocker\`}."
+              echo "Detailed routing is best-effort (success is gated through global route), so this does not fail the run."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload DEF
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: basilisk-pnr-def
+          path: target/ihp13/openroad/out/basilisk.final.def
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Upload reports and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pnr-reports
+          path: |
+            target/ihp13/openroad/reports/
+            target/ihp13/openroad/save/pnr_status.log
+          retention-days: 30
+          if-no-files-found: warn
+
+  # ---------------------------------------------------------------------
+  # Upload stage checkpoints to Azure Blob. Deliberately no `container:` -
+  # newt-eda:dev doesn't ship (and shouldn't ship) the az CLI, and the
+  # self-hosted runner's own workspace is host-visible regardless of which
+  # job/container wrote to it (design D5).
+  # ---------------------------------------------------------------------
+  upload-checkpoints:
+    needs: pnr
+    if: always()
+    runs-on: [self-hosted, self-hosted-synth]
+    environment: azure
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Upload checkpoints
+        run: |
+          SAVE_DIR="${GITHUB_WORKSPACE}/target/ihp13/openroad/save"
+          if [ ! -d "$SAVE_DIR" ] || [ -z "$(find "$SAVE_DIR" -maxdepth 1 -name '*.zip' -print -quit)" ]; then
+            echo "No checkpoint .zip files found under $SAVE_DIR - nothing to upload (pnr job may have failed before floorplan)."
+            exit 0
+          fi
+          az storage blob upload-batch \
+            --account-name "${{ env.AZURE_STORAGE_ACCOUNT }}" \
+            --auth-mode login \
+            --destination "${{ env.AZURE_CHECKPOINT_CONTAINER }}/${{ github.run_id }}" \
+            --source "$SAVE_DIR" \
+            --pattern "*.zip"
+          # Small marker recording which netlist these checkpoints belong to;
+          # a later resume refuses to graft them onto a different design.
+          if [ -f "$SAVE_DIR/synth-key.txt" ]; then
+            az storage blob upload \
+              --account-name "${{ env.AZURE_STORAGE_ACCOUNT }}" \
+              --auth-mode login \
+              --container-name "${{ env.AZURE_CHECKPOINT_CONTAINER }}" \
+              --name "${{ github.run_id }}/synth-key.txt" \
+              --file "$SAVE_DIR/synth-key.txt" \
+              --overwrite >/dev/null
+          fi
+
+  # ---------------------------------------------------------------------
+  # Guarded deallocate (design D6): only powers off the VM if nothing else
+  # is running or queued against it, so a synth-lane run sharing the
+  # runner is never cut off mid-flight. Deliberately no --no-wait: the
+  # spec requires deallocation failure to be loudly visible, which needs
+  # this command to actually block on the result rather than fire-and-
+  # forget the Azure operation.
+  # ---------------------------------------------------------------------
+  stop:
+    needs: [pnr, upload-checkpoints]
+    if: always()
+    runs-on: ubuntu-latest
+    environment: azure
+    permissions:
+      id-token: write
+      contents: read
+      actions: read
+    steps:
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Check whether the runner is still needed
+        id: guard
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          busy=$(gh api "repos/${{ github.repository }}/actions/runners" --paginate \
+            --jq '.runners[] | select(.labels[].name == "self-hosted-synth") | .busy' | grep -c true || true)
+
+          # Exclude this workflow's own current run - it's necessarily
+          # still "in_progress" as a whole (this very stop job is one of
+          # its jobs) until after this job finishes, which would otherwise
+          # make the guard block on itself forever.
+          synth_active=$(gh run list --repo "${{ github.repository }}" --workflow=synth.yml \
+            --json status --jq '[.[] | select(.status == "in_progress" or .status == "queued")] | length')
+          pnr_active=$(gh run list --repo "${{ github.repository }}" --workflow=pnr.yml \
+            --json status,databaseId --jq "[.[] | select((.status == \"in_progress\" or .status == \"queued\") and .databaseId != ${{ github.run_id }})] | length")
+
+          echo "runner busy=${busy:-0}, synth.yml active=${synth_active}, other pnr.yml active=${pnr_active}"
+          if [ "${busy:-0}" -gt 0 ] || [ "${synth_active}" -gt 0 ] || [ "${pnr_active}" -gt 0 ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Deallocate VM
+        if: steps.guard.outputs.skip == 'false'
+        run: az vm deallocate --resource-group "${{ env.AZURE_RESOURCE_GROUP }}" --name "${{ env.AZURE_VM_NAME }}"
+
+      - name: Leave VM up for the other job
+        if: steps.guard.outputs.skip == 'true'
+        run: echo "Another job is running or queued on the shared runner - leaving the VM up. The hourly vm-watchdog.yml will deallocate it once everything is idle."

@@ -34,18 +34,26 @@ proc load_checkpoint { checkpoint_name } {
     utl::report "Loading checkpoint $checkpoint_name"
     set checkpoint ${save_dir}/${checkpoint_name}
 
-    exec unzip ${checkpoint}.zip -d ${save_dir}/${checkpoint_name}
+    # -o (overwrite, no prompt): the staged unattended flow
+    # (openspec/changes/ci-pnr-lane/design.md D1) loads a given checkpoint
+    # from a fresh openroad process for every stage and every retry -
+    # unlike chip.tcl's original single-process usage, which only ever
+    # loaded each checkpoint once. Without -o, a second load hits unzip's
+    # interactive "replace file?" prompt, which (no stdin in a headless
+    # run) reads EOF and silently defaults to skipping the extraction -
+    # found via task 2.4's real bring-up.
+    exec unzip -o ${checkpoint}.zip -d ${save_dir}/${checkpoint_name}
     read_verilog ${checkpoint}/$checkpoint_name.v
     read_db ${checkpoint}/$checkpoint_name.odb
-    
+
 }
 
 proc load_checkpoint_def { checkpoint_name } {
     global save_dir
     utl::report "Loading checkpoint $checkpoint_name"
     set checkpoint ${save_dir}/${checkpoint_name}
-    
-    exec unzip ${checkpoint}.zip -d ${save_dir}
+
+    exec unzip -o ${checkpoint}.zip -d ${save_dir}
     read_verilog ${checkpoint}/$checkpoint_name.v
     read_def ${checkpoint}/$checkpoint_name.def
 }

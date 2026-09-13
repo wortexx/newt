@@ -116,6 +116,20 @@ set mpgOffset 20; # chosen to properly connect to power pads
 ##########################################################################
 proc sram_power { name macro } {
     global mprWidth mprSpacing mprOffsetX mprOffsetY mpgWidth mpgSpacing mpgOffset
+    # Not every macro type this proc is called for is actually used by every
+    # design config (e.g. this design has zero RM_IHPSG13_1P_64x64/512x64/
+    # 1024x64_c2_bm_bist instances) - defining a macro power grid for a
+    # macro with no instances still computes a stripe pitch from the
+    # macro's bare geometry, which can be smaller than a routing layer's
+    # minimum pitch (found via OpenROAD 2c56926's PDN generator: "Pitch
+    # 11.36 is too small for TopMetal1, must be at least 26.0" on the
+    # 64x64 macro, which OpenROAD's own preceding "No instances found for
+    # grid" warning already signals nothing needs powering here). Skip
+    # rather than let a stricter pitch check crash flow on an unused macro.
+    if {[llength [get_cells -filter "ref_name == $macro"]] == 0} {
+        utl::report "Skipping power grid for $macro: no instances of this macro in the design"
+        return
+    }
     # Macro Grid and Rings
     define_pdn_grid -macro -cells $macro -name ${name}_grid -orient "R0 R180 MY MX" \
         -grid_over_boundary -voltage_domains {CORE} \
@@ -156,6 +170,11 @@ proc sram_power { name macro } {
 proc sram_power_rotated { name macro } {
     global mprWidth mprSpacing mprOffsetX mprOffsetY mpgWidth mpgSpacing mpgOffset
     global floor_leftX floor_rightX coreArea_leftX
+    # Same zero-instance guard as sram_power - see its comment for why.
+    if {[llength [get_cells -filter "ref_name == $macro"]] == 0} {
+        utl::report "Skipping power grid for $macro: no instances of this macro in the design"
+        return
+    }
     # Macro Grid and Rings
     define_pdn_grid -macro -cells $macro -name ${name}_rot_grid -orient "R90 R270 MXR90" \
         -grid_over_boundary -voltage_domains {CORE} \
@@ -254,12 +273,39 @@ add_pdn_stripe -grid {core_grid} -layer {TopMetal2} -width $tpg2Width \
 # M1 is declared vertical but tracks still horizontal
 # vertical TopMetal2 to below horizonals (M1 has horizontal power tracks)
 add_pdn_connect -grid {core_grid} -layers {TopMetal2 Metal1}
-add_pdn_connect -grid {core_grid} -layers {TopMetal2 Metal2}
-add_pdn_connect -grid {core_grid} -layers {TopMetal2 Metal4}
+# Metal2 carries no PDN shapes anywhere in this grid (the only standard-cell
+# rail generation in this file - the -followpins stripe above - is on
+# Metal1, not Metal2), so this connect has always been a no-op; OpenROAD
+# 2c56926's PDN generator hard-errors on it instead of the older version's
+# apparent silent tolerance (PDN-0112 "Cannot find shapes to connect to on
+# Metal2" - found via task 2.4's real bring-up). Commented out rather than
+# deleted, matching this file's existing convention for connects it doesn't
+# use (see the TopMetal2/TopMetal1 line below).
+# add_pdn_connect -grid {core_grid} -layers {TopMetal2 Metal2}
+# Metal4 shapes do exist in this design - but only inside each macro's own
+# grid (the Metal3/Metal4 ring in sram_power/sram_power_rotated's
+# add_pdn_ring calls), never in core_grid's own scope; add_pdn_connect only
+# looks at shapes within the named grid. Macro-to-core connectivity already
+# happens where the per-macro rings and core_grid's stripes physically
+# overlap on the shared TopMetal1/TopMetal2 layers (each macro grid already
+# connects its own ring down to Metal4 within its own scope). Same
+# PDN-0112 "Cannot find shapes to connect to" as the Metal2 case above,
+# found the same way (task 2.4 real bring-up); commented out for the same
+# reason - this connect had nothing in core_grid to act on.
+# add_pdn_connect -grid {core_grid} -layers {TopMetal2 Metal4}
 # add_pdn_connect -grid {core_grid} -layers {TopMetal2 TopMetal1}
 # Power-ring to standardcell rails
-add_pdn_connect -grid {core_grid} -layers {Metal3 Metal1}
-add_pdn_connect -grid {core_grid} -layers {Metal3 Metal2}
+# core_grid has no Metal3 shapes of its own either - its only ring is on
+# TopMetal1/TopMetal2 (above); the commented-out Metal2/Metal3 ring near
+# the top of this file ("messes up the vias in the power-ring") confirms
+# that was already tried and abandoned before this change touched
+# anything. Metal3 only exists inside each macro's own grid. Same
+# PDN-011x "Cannot find shapes to connect to" pattern as the Metal2/Metal4
+# cases above (here: PDN-0113, task 2.4 real bring-up); commented out for
+# the same reason.
+# add_pdn_connect -grid {core_grid} -layers {Metal3 Metal1}
+# Same dead-Metal2-connect reasoning as above.
+# add_pdn_connect -grid {core_grid} -layers {Metal3 Metal2}
 
 
 ##########################################################################
