@@ -49,7 +49,7 @@ Phase 0  ──►  Phase 1 (newt-eda image) ─┐
                                                                 └►  Phase 7 (coprocessor RTL, ongoing, parallel)
                                                                 └►  Phase 8 (svase→yosys-slang, exploratory, parallel)
 
-Phase 5+6  ──►  Phase 9  (post-merge CI verification — gated on `ci-pnr-lane` landing)
+Phase 5+6  ──►  Phase 9  ✅ (post-merge CI verification — gated on `ci-pnr-lane` landing)
 Phase 10 (Actions version upgrade)  — independent maintenance, any time
 Phase 11 (backend routability)      — design work; gates a detail-routed DEF, nothing else
 ```
@@ -227,8 +227,11 @@ the lane itself.
 `openspec/changes/ci-synth-lane/` design.md D1/D1a/D1b. The VM (`newt-synth-runner`,
 `newt-synth-lane-rg`, `swedencentral`, `Standard_E16ds_v5`) and its `self-hosted-synth` runner
 came from there; VM lifecycle was manual, with a 10:00 UTC auto-shutdown backstop that this
-phase has now superseded (disabled, and deleted only once Phase 9 observes the watchdog
-working — never a window with no backstop).
+phase superseded — deallocation is now handled by this phase's own guarded `stop` job and the
+hourly `vm-watchdog.yml`, both observed working for real during Phase 9
+(`post-merge-ci-verification` tasks 2.1–2.3/3.3 for `stop`, task 4.1 for the watchdog's
+idle-deallocate), and the fixed auto-shutdown schedule was deleted 2026-09-16 (task 5.1) once
+that observation confirmed there would never be a window with no backstop.
 
 **Checkpoint loss, 2026-09-15 (fixed).** The lane's first post-merge full run
 (34783899813, Phase 9's "Run A", ~26h and ~$32) finished `pnr` with `grt ok` and then
@@ -320,12 +323,13 @@ by hand and is kept only as history.
 - Auto-deallocate on job end and a `concurrency` group of 1 were delivered in Phase 5,
   not here.
 
-**Drift and the one undeclared resource.** Incremental deployments never delete, so a
+**Drift and the (former) one undeclared resource.** Incremental deployments never delete, so a
 hand-made resource simply persists; `infra/azure/README.md` documents the
-`az resource list` drift check. Exactly one live resource is deliberately *not* declared:
-the DevTestLab schedule `shutdown-computevm-newt-synth-runner`, currently disabled.
-Phase 9 deletes it once `vm-watchdog.yml` has been observed working, so that there is
-never a window with no cost backstop.
+`az resource list` drift check. One live resource was deliberately left undeclared for a
+time: the DevTestLab schedule `shutdown-computevm-newt-synth-runner`. Phase 9 deleted it
+2026-09-16 (`post-merge-ci-verification` task 5.1), once `vm-watchdog.yml`'s idle-deallocate
+had been observed working for real (task 4.1) — the resource group's nine live resources now
+map to `main.bicep` declarations exactly, with no exception left.
 
 **Follow-ups surfaced during implementation, not acted on:**
 
@@ -396,7 +400,7 @@ Three options, in increasing order of payoff and effort:
 
 ---
 
-## Phase 9 — Post-merge CI verification  *(unblocks only once `ci-pnr-lane` lands on `main`)*
+## Phase 9 — Post-merge CI verification  ✅ done (2026-09-17)
 
 Several P&R-lane acceptance items are **not** verifiable from a feature branch, for one
 GitHub-side reason: a workflow's `schedule` and `workflow_dispatch` triggers are only
@@ -404,27 +408,43 @@ registered once the workflow file exists on the repository's **default branch**.
 are exempt (any ref's push evaluates the workflows in that ref's tree), which is why the whole
 bring-up ran off `pnr-bringup-*` tags. So these are deferred by sequencing, not by difficulty:
 
-- [ ] Real `workflow_dispatch` run of `pnr.yml` (the bring-up used tag pushes throughout —
+- [x] Real `workflow_dispatch` run of `pnr.yml` (the bring-up used tag pushes throughout —
       `gh workflow run pnr.yml` 404s pre-merge, and `pnr.yml` doesn't even appear in
       `gh workflow list`). Confirms the `resume_from_run` input path, which has never run.
-      Still open — `azure-infra-as-code` exercised `vm-watchdog.yml`, not `pnr.yml`.
+      **Observed 2026-09-13 through 2026-09-16**: run 34783899813 (a fresh full run,
+      `resume_from_run` empty — confirms the inputs are inert by default) reached `grt ok`;
+      run 34938462965 re-established Blob checkpoints after the collision below; run
+      35100509927 ("Run B") dispatched with `resume_from_run=34938462965
+      resume_exclude=grt_repaired stop_after=grt_repair` and exercised the `resume_from_run`
+      path for real — netlist-identity guard's matching path, checkpoints restored, the
+      excluded stage re-run, stopped after `grt_repair`, `success` in ~12 min
+      (`post-merge-ci-verification` tasks 2.1, 3.1–3.2).
 - [x] `vm-watchdog.yml`'s hourly cron actually firing, and its OIDC login /
       power-state check succeeding unattended. **Observed (2026-09-13), during
       `azure-infra-as-code` task 2.4**: one manual `workflow_dispatch` plus two
       unprompted scheduled runs (11:20, 14:10, 17:59 UTC) all completed
       successfully via `Azure login (OIDC)` → `Check VM power state` →
       `Nothing to do`.
-- [ ] One observed correct **idle-deallocate** (the `Deallocate idle VM` step
-      actually running). Still open: the VM was deallocated for all three runs
-      above, so that step has never executed — this is the one half of the
-      original bullet that direct observation didn't reach.
-- [ ] **Only after** an observed correct idle-deallocate: delete the Azure fixed
+- [x] One observed correct **idle-deallocate** (the `Deallocate idle VM` step
+      actually running). **Observed 2026-09-16T19:53:19Z, run 35143225494**: a slice
+      dispatch's `stop` guard left the VM up for a queued synth run (`post-merge-ci-verification`
+      task 3.3), that synth run completed, and this was the next hourly tick with nothing
+      queued — `"VM is running and idle - deallocating."`, `Deallocate idle VM` `success`,
+      confirmed by `az vm get-instance-view` → `PowerState/deallocated` (task 4.1).
+- [x] **Only after** an observed correct idle-deallocate: delete the Azure fixed
       auto-shutdown (currently `status: Disabled` by hand, not removed — reconfirmed
       2026-09-13) and enable the weekly `pnr.yml` cron. Never leave a window with no
-      cost backstop at all.
-- [ ] Re-enable the `CI Synth Lane` schedule (`gh workflow enable`) — disabled during
-      bring-up so its nightly runs stopped competing for the single runner.
-- [ ] Coexistence guard under a **real** overlap: with a P&R run active, trigger a synth-lane
+      cost backstop at all. **Done 2026-09-16**: auto-shutdown schedule deleted at
+      2026-09-16T21:55:33Z, user-approved (`post-merge-ci-verification` task 5.1) — resource
+      group drops to nine resources, all declared. The weekly cron needed no "enabling": it
+      was already found `active` post-merge (task 5.2) — its first scheduled run is due
+      2026-09-18 18:00 UTC.
+- [x] Re-enable the `CI Synth Lane` schedule (`gh workflow enable`) — disabled during
+      bring-up so its nightly runs stopped competing for the single runner. **Done
+      2026-09-16** (`post-merge-ci-verification` task 5.3, done ahead of this checklist item as
+      a side effect of unblocking task 3.3's timed dispatch): `gh api
+      .../actions/workflows/synth.yml --jq .state` → `active`.
+- [x] Coexistence guard under a **real** overlap: with a P&R run active, trigger a synth-lane
       dispatch so a run queues, and confirm `pnr.yml`'s `stop` job skips deallocation with a
       clear log line and the queued synth job then runs. Deferred here because it wants both
       lanes' schedules live, which is only true post-merge. (The other half of that check
@@ -433,9 +453,21 @@ bring-up ran off `pnr-bringup-*` tags. So these are deferred by sequencing, not 
       `main` now requires `lint` and `sw` (confirmed live, 2026-09-13). Neither `pnr.yml` nor
       `synth.yml` is in that list, and neither has a `pull_request` trigger, so this coexistence
       guard is unaffected — but the stale claim is corrected here rather than left standing.)
-- [ ] Update `synth.yml`'s header comment and this document's Phase 5 section to the
+      **Both orderings observed** (`post-merge-ci-verification` tasks 2.2/2.3, 3.3): run
+      34820756433 (synth) queued behind Run A's `pnr` job and got the runner first, so `stop`
+      found nothing active and deallocated directly; a second timed dispatch caught the other
+      ordering deterministically — synth run 35106656087 was still `queued`/`active` when
+      slice run 35105723732's `stop` guard evaluated, which logged
+      `"Another job is running or queued on the shared runner - leaving the VM up."` and
+      skipped `Deallocate VM`, and the queued synth run then executed to `success`.
+- [x] Update `synth.yml`'s header comment and this document's Phase 5 section to the
       post-watchdog reality: VM deallocated by default, started by `pnr.yml`, watchdog
-      cleans up, fixed auto-shutdown gone.
+      cleans up, fixed auto-shutdown gone. **Done 2026-09-17** (`post-merge-ci-verification`
+      task 6.1 and this section's own History paragraph above). `synth.yml`'s header still
+      carries one open item beyond this bullet's original scope: the nightly 02:30 UTC
+      cron's actual behaviour against a deallocated-by-default VM needs a multi-night
+      observation (task 5.4) not yet complete as of this writing; the header notes exactly
+      that and will be filled in once observed.
 
 ## Phase 10 — GitHub Actions version upgrade  *(maintenance, deadline-driven)*
 
@@ -512,7 +544,8 @@ the synth cache removes the ~3h resynthesis.
 | Questa → Verilator port is hard (Cheshire TB, hyperbus / DDR models) | Start with the coprocessor unit TB; accept synth-lane-only full-SoC sim initially |
 | OpenROAD bump breaks `chip.tcl` command APIs | Budget 2–3 days in Phase 1; keep the 2024 image as fallback |
 | Golden-image drift on every tool bump | No golden image exists — Packer is deferred out of Phase 6 to its own change. The host is instead reproduced from `infra/azure/provision-runner.sh`, which pins nothing and resolves the Actions runner release at run time, so a rebuild picks up current versions rather than drifting from a stale image. The trade-off is cold-start pull cost on every rebuild |
-| Azure cost creep | Deallocate always (Phase 5's `stop` job plus the hourly `vm-watchdog.yml`); a $150/month resource-group budget alerting at 50/80/100 % of actual spend (Phase 6). Spot was dropped — P&R cannot survive an eviction and the synth lane alone does not justify a second VM. Measured: 10 P&R bring-up runs cost ≈ $193 in VM time |
+| Azure cost creep | Deallocate always (Phase 5's `stop` job plus the hourly `vm-watchdog.yml`) — the fixed 10:00 UTC auto-shutdown backstop no longer exists, deleted 2026-09-16 once both mechanisms were observed working for real (`post-merge-ci-verification` tasks 4.1/5.1); a $150/month resource-group budget alerting at 50/80/100 % of actual spend (Phase 6). Spot was dropped — P&R cannot survive an eviction and the synth lane alone does not justify a second VM. Measured: 10 P&R bring-up runs cost ≈ $193 in VM time; Phase 9's own verification runs measured ≈ $33/full run (Run A, 27h4m at $1.216/h) and ≈ $0.35 per resume-slice dispatch (~12 min) |
+| Synth cache key over-includes: it hashes tracked-Makefile-input tree hashes (`Bender.{yml,lock}`, `hw/`, `target/ihp13/{yosys,pickle,pdk,src}`, `Makefile`, `iguana.mk`, `tools.mk`) rather than only the paths that actually feed synthesis, so an unrelated root-`Makefile` change (e.g. PR #18's `include apm.mk`) invalidates the key and forces a full ~3h resynthesis plus strands the previous key's Blob checkpoints (`post-merge-ci-verification` design Risks; hit for real 2026-09-13→15, run 34783899813) | Accepted — over-inclusion only costs a redundant resynthesis, never a stale netlist, which is the failure mode that actually matters (`pnr.yml`'s own cache-key comment). Narrowing the key to only the synth-relevant subset is a small, isolated follow-up once there's time to enumerate exactly which included paths never affect `synth-all`'s output |
 | A Bicep `what-if` preview is necessary but not sufficient: several VM properties (`securityType`, `ssh.publicKeys`, `osDisk.diskSizeGB`) show as a benign property-level `Create` in the preview but fail the real deployment with `PropertyChangeNotAllowed` once they'd need to change an existing VM. Separately, a template-declared SKU can be unavailable in-region (`Standard_B2s` doesn't exist in `swedencentral`) or region-available with zero subscription quota (`Standard_B2s_v2`), and a `securityType` value can need an unregistered preview feature (`Microsoft.Compute/UseStandardSecurityType`) even for a brand-new VM | Before trusting a preview on an *existing* resource, diff every leaf the template sets against the live `az … show` and treat "absent on live" as the danger signal — that is what actually catches `PropertyChangeNotAllowed` (`azure-infra-as-code` design.md Risks, task 2.2). Before picking a VM size for a *new* resource, check `az vm list-skus` and `az vm list-usage` in-region rather than assuming a size from another region or plan works here (`infra/azure/README.md`) |
 | `detailed_route` never converges on the modified design | It is congestion-bound at 63 % util even for stock Basilisk; treat a clean route as a stretch goal, not a gate. Consider a secondary easier PDK (Sky130) for fast QoR during development |
 | Phase 1 adoption gate's ~1% cell/area delta has an unexplained residual: a ~830-module textual divergence in the pickled RTL (`sv2v.v`) between the 2024 baseline and the new image. Ruled out: bender release-asset choice (verified byte-identical `sources.json` from both `v0.27.4` assets on identical input) and the `TARGET_*` bender-version schema difference (those defines aren't referenced anywhere in the dependency tree). Not yet distinguished: pure module-reordering in morty's output vs. an actual semantic difference | Not blocking — delta is small and in the benign direction (design got smaller), 0 yosys `CHECK` problems both sides. Revisit if a future gate shows a similar or larger delta; a sort-and-diff-by-module pass on `sv2v.v`, or re-running pickle against a `bender 0.32.1`-shaped `sources.json`, would isolate it |

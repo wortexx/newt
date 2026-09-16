@@ -17,17 +17,29 @@
 # personal-account repo (task 1.1). Two consequences worth knowing before you
 # touch this file:
 #
-#   1. VM lifecycle is MANUAL for now (design.md D1a) - the VM is stopped by
-#      hand when not in use, with a 10:00 UTC daily auto-shutdown as a
-#      backstop against a forgotten VM (never a full month of idle billing,
-#      at most about a day). Real on-demand cost is $1.216/hour for the VM
-#      class alone (~$888/mo if it *were* left running 24/7 - it deliberately
-#      isn't). The practical upshot: the nightly cron trigger below will only
-#      actually produce a run on nights the VM happens to be up. That's a
-#      known, accepted gap until Phase 6 automates VM start/stop - not a bug
-#      in this workflow. `workflow_dispatch` and label-triggered runs are
-#      unaffected (they're inherently attended - you start the VM to use
-#      them).
+#   1. VM lifecycle is now automatic, not manual (design.md D1a described the
+#      original manual-stop/10:00-UTC-auto-shutdown state; Phase 6 landed the
+#      Bicep-declared infra and OIDC login that superseded it). The VM is
+#      deallocated by default, started by pnr.yml's `start` job (or by hand
+#      for a synth-only session), and deallocated again either by pnr.yml's
+#      own guarded `stop` job or by the hourly vm-watchdog.yml tick, whichever
+#      notices first that nothing is running or queued. The fixed 10:00 UTC
+#      auto-shutdown schedule (an undeclared Azure resource, not part of this
+#      repo's templates) was deleted 2026-09-16 once both of those mechanisms
+#      had been observed deallocating the VM for real
+#      (openspec/changes/post-merge-ci-verification tasks 4.1/5.1) - there is
+#      no longer any fixed-time backstop. Real on-demand cost is $1.216/hour
+#      for the VM class alone (~$888/mo if it *were* left running 24/7 - it
+#      deliberately isn't).
+#      The practical upshot for the nightly cron trigger below, now that the
+#      VM is deallocated by default rather than left running: [pending
+#      openspec/changes/post-merge-ci-verification task 5.4's multi-night
+#      observation as of 2026-09-17 - update this paragraph with what
+#      actually happens to a 02:30 UTC run queued against a deallocated VM
+#      once that's recorded]. `workflow_dispatch` and label-triggered runs are
+#      unaffected either way (they queue for the runner regardless of the
+#      VM's current power state, and a `pnr.yml` `start` job or a manual `az
+#      vm start` brings it up for them).
 #   2. This runner sits on a PUBLIC repo. A pull request from a fork must
 #      never auto-execute here (see the `if:` condition on the `pull_request`
 #      trigger below, plus the repo's "Require approval for all external
