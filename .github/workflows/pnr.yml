@@ -87,6 +87,15 @@ env:
   # deletes ignored files too, so anything left in target/ihp13/openroad/save
   # by a previous run is gone before the pnr job's first step runs.
   PNR_RESTORE_HOST_DIR: /home/newt/pnr-restore
+  # Host directory the pnr job moves its finished checkpoints into, and the
+  # only place upload-checkpoints reads them from. Outside the git working
+  # tree for the same reason as PNR_RESTORE_HOST_DIR above, but guarding the
+  # opposite direction: pnr and upload-checkpoints are separate jobs, so the
+  # runner is free between them and any other workflow's actions/checkout can
+  # `git clean -ffdx` the workspace before the upload ever starts. That is not
+  # hypothetical - it destroyed run 34783899813's entire checkpoint set (see
+  # the "Export checkpoints out of the shared workspace" step below).
+  PNR_EXPORT_HOST_DIR: /home/newt/pnr-export
   # Checkpoint base names (no project prefix, no .zip) to leave out of a
   # resume, so their stages run again. Empty for ordinary runs. Precedence:
   # the workflow_dispatch input, else empty - tag and cron runs always see
@@ -216,9 +225,13 @@ jobs:
         - /home/newt/synth-cache:/synth-cache
         # Checkpoints staged by the restore-checkpoints job (resume support).
         - /home/newt/pnr-restore:/pnr-restore
+        # Where this job hands its own checkpoints off to upload-checkpoints,
+        # out of reach of any other job's `git clean` (PNR_EXPORT_HOST_DIR).
+        - /home/newt/pnr-export:/pnr-export
     env:
       SYNTH_CACHE_DIR: /synth-cache
       PNR_RESTORE_DIR: /pnr-restore
+      PNR_EXPORT_DIR: /pnr-export
     timeout-minutes: 2880 # ~48h ceiling (design D5) - bounds a hung run; detailed_route's own iteration budget (PNR_DRT_END_ITER) is the primary backstop
     steps:
       - uses: actions/checkout@v4
@@ -536,6 +549,83 @@ jobs:
         # exits non-zero, which is the honest verdict.
         run: PNR_TIMEOUT_GRT=57600 PNR_TIMEOUT_GRT_REPAIR=57600 PNR_SKIP_GRT_REPAIR=1 PNR_SKIP_ANTENNA_REPAIR=1 PNR_DRT_END_ITER=8 PNR_STOP_AFTER=${{ github.event.inputs.stop_after || '' }} make -C target/ihp13/openroad -f openroad.mk run-pnr PROJ_NAME=basilisk
 
+      # Move the checkpoints out of the shared workspace before this job
+      # releases the runner. This is the whole fix for the collision that
+      # cost run 34783899813 (Run A of post-merge-ci-verification) its
+      # checkpoints on 2026-09-15: its pnr job finished at 22:02:34Z, the
+      # nightly synth run 34820756433 was assigned the runner 2s later and
+      # its own actions/checkout `git clean -ffdx` wiped the untracked
+      # target/ihp13/openroad/save/ at 22:02:40Z - 2.5h before
+      # upload-checkpoints got the runner and found an empty directory. A
+      # ~26h, ~$32 run lost its only durable output, and the upload job
+      # reported it as "the pnr job may have failed before floorplan".
+      #
+      # pnr.yml's `concurrency` group only serializes pnr.yml runs against
+      # each other, and the `stop` guard only decides whether to power the
+      # VM off; neither protects the workspace across the gap between two
+      # jobs of the same run. Inside a job the workspace is safe (the runner
+      # is busy), so the fix is simply not to leave anything a later job
+      # needs there once this one ends.
+      #
+      # Deliberately placed immediately after "Place and route" rather than
+      # last: the steps below cannot destroy anything, but a runner outage
+      # during them would otherwise leave the checkpoints exposed. Only the
+      # .zip checkpoints and synth-key.txt move - pnr_status.log stays for
+      # the summary/artifact steps below, and reports/ is uploaded from the
+      # workspace by this same job.
+      - name: Export checkpoints out of the shared workspace
+        if: always()
+        run: |
+          set -uo pipefail
+          SAVE_DIR=target/ihp13/openroad/save
+          dest="${PNR_EXPORT_DIR}/${GITHUB_RUN_ID}"
+
+          # Prune whatever an earlier run left behind: upload-checkpoints
+          # removes its own directory after a successful upload and keeps it
+          # only when the upload failed (for diagnosis), so anything here is
+          # stale. This step runs as root in the container, so ownership
+          # never blocks the prune. Keeps /pnr-export bounded to one run's
+          # checkpoints (~20GB) - the same volume save/ used to occupy in
+          # the workspace between runs, so the OS-disk budget is unchanged.
+          if [ -d "${PNR_EXPORT_DIR}" ]; then
+            find "${PNR_EXPORT_DIR}" -mindepth 1 -maxdepth 1 -exec rm -rf {} + \
+              || echo "::warning::could not fully prune ${PNR_EXPORT_DIR} - continuing"
+          fi
+          # Created even when there turns out to be nothing to put in it: its
+          # presence is how upload-checkpoints tells "the flow saved no
+          # checkpoints" apart from "this job never got this far".
+          mkdir -p "$dest"
+
+          if [ ! -d "$SAVE_DIR" ]; then
+            echo "::warning::${SAVE_DIR} does not exist - the flow saved no checkpoints to export."
+            exit 0
+          fi
+
+          echo "Exporting checkpoints from ${SAVE_DIR} ($(du -sh "$SAVE_DIR" | cut -f1)) to ${dest}"
+          started=$SECONDS
+          # mv across the bind mount is copy-then-unlink (rename(2) gives
+          # EXDEV), so peak extra disk is one checkpoint and the workspace
+          # copy is gone as each file lands.
+          for f in "$SAVE_DIR"/*.zip "$SAVE_DIR"/synth-key.txt; do
+            [ -e "$f" ] || continue
+            if ! mv "$f" "$dest/"; then
+              echo "::error::failed to move $(basename "$f") out of the shared workspace - the next job's checkout would destroy it"
+              exit 1
+            fi
+          done
+          count=$(find "$dest" -maxdepth 1 -name '*.zip' | wc -l)
+          echo "Exported ${count} checkpoint(s) in $((SECONDS - started))s, $(du -sh "$dest" | cut -f1) total:"
+          find "$dest" -maxdepth 1 -type f -printf '  %f (%s bytes)\n' | sort
+          if [ "$count" -eq 0 ]; then
+            echo "No checkpoint .zip files were produced - the flow failed before floorplan saved one."
+          fi
+
+          # upload-checkpoints runs on the host as the runner user, not as
+          # root in this container: it has to read every file here and remove
+          # the directory once the upload succeeds.
+          chmod a+rwx "${PNR_EXPORT_DIR}"
+          chmod -R a+rwX "$dest"
+
       - name: Stage-status summary
         if: always()
         run: |
@@ -590,9 +680,16 @@ jobs:
 
   # ---------------------------------------------------------------------
   # Upload stage checkpoints to Azure Blob. Deliberately no `container:` -
-  # newt-eda:dev doesn't ship (and shouldn't ship) the az CLI, and the
-  # self-hosted runner's own workspace is host-visible regardless of which
-  # job/container wrote to it (design D5).
+  # newt-eda:dev doesn't ship (and shouldn't ship) the az CLI, and design D8
+  # gives the pnr job no Azure access at all.
+  #
+  # Reads from PNR_EXPORT_HOST_DIR/<run_id>, never from the workspace. The
+  # runner is free between the pnr job and this one, so by the time this job
+  # starts, another workflow's actions/checkout may already have `git clean`ed
+  # the workspace - which is exactly how run 34783899813 lost its checkpoints
+  # on 2026-09-15. The pnr job's "Export checkpoints out of the shared
+  # workspace" step stages them here; this job is their only consumer and
+  # releases the disk once the upload lands.
   # ---------------------------------------------------------------------
   upload-checkpoints:
     needs: pnr
@@ -611,29 +708,60 @@ jobs:
           subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
 
       - name: Upload checkpoints
+        env:
+          # Whether the flow actually finished is what makes "no checkpoints"
+          # either an expected outcome or a lost checkpoint set (design D4).
+          # Bound here rather than interpolated into the script body.
+          PNR_JOB_RESULT: ${{ needs.pnr.result }}
         run: |
-          SAVE_DIR="${GITHUB_WORKSPACE}/target/ihp13/openroad/save"
-          if [ ! -d "$SAVE_DIR" ] || [ -z "$(find "$SAVE_DIR" -maxdepth 1 -name '*.zip' -print -quit)" ]; then
-            echo "No checkpoint .zip files found under $SAVE_DIR - nothing to upload (pnr job may have failed before floorplan)."
+          set -uo pipefail
+          SRC_DIR="${PNR_EXPORT_HOST_DIR}/${GITHUB_RUN_ID}"
+
+          # The pnr job never reached its export step (cancelled, timed out,
+          # or the runner lost the job). Nothing was ever staged, and that
+          # job's own status is already the verdict - don't pile a second red
+          # job on top of it.
+          if [ ! -d "$SRC_DIR" ]; then
+            echo "::warning::${SRC_DIR} does not exist - the pnr job (result: ${PNR_JOB_RESULT}) did not reach its checkpoint-export step, so there is nothing to upload."
             exit 0
           fi
+
+          if [ -z "$(find "$SRC_DIR" -maxdepth 1 -name '*.zip' -print -quit)" ]; then
+            # A successful flow with no checkpoint is the exact shape of the
+            # 2026-09-15 loss (run 34783899813). It must never be a quiet
+            # exit 0 again: nothing can resume from this run, and the next
+            # person to find out would be whoever tries.
+            if [ "$PNR_JOB_RESULT" = "success" ]; then
+              echo "::error::the pnr job succeeded but ${SRC_DIR} holds no checkpoint .zip files - this run's checkpoints are missing and nothing can resume from it."
+              exit 1
+            fi
+            echo "No checkpoint .zip files in ${SRC_DIR} - the pnr job (result: ${PNR_JOB_RESULT}) failed before floorplan saved one."
+            exit 0
+          fi
+
+          echo "Uploading $(find "$SRC_DIR" -maxdepth 1 -name '*.zip' | wc -l) checkpoint(s), $(du -sh "$SRC_DIR" | cut -f1) total, from ${SRC_DIR}"
           az storage blob upload-batch \
             --account-name "${{ env.AZURE_STORAGE_ACCOUNT }}" \
             --auth-mode login \
             --destination "${{ env.AZURE_CHECKPOINT_CONTAINER }}/${{ github.run_id }}" \
-            --source "$SAVE_DIR" \
+            --source "$SRC_DIR" \
             --pattern "*.zip"
           # Small marker recording which netlist these checkpoints belong to;
           # a later resume refuses to graft them onto a different design.
-          if [ -f "$SAVE_DIR/synth-key.txt" ]; then
+          if [ -f "$SRC_DIR/synth-key.txt" ]; then
             az storage blob upload \
               --account-name "${{ env.AZURE_STORAGE_ACCOUNT }}" \
               --auth-mode login \
               --container-name "${{ env.AZURE_CHECKPOINT_CONTAINER }}" \
               --name "${{ github.run_id }}/synth-key.txt" \
-              --file "$SAVE_DIR/synth-key.txt" \
+              --file "$SRC_DIR/synth-key.txt" \
               --overwrite >/dev/null
           fi
+          # Blob is the durable copy now (a ~30-day lifecycle rule governs
+          # it), so release the disk. Kept on failure for diagnosis - the next
+          # run's export step prunes it as root.
+          rm -rf "$SRC_DIR" \
+            || echo "::warning::could not remove ${SRC_DIR} - the next run's export step will prune it"
 
   # ---------------------------------------------------------------------
   # Guarded deallocate (design D6): only powers off the VM if nothing else
