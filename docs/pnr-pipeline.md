@@ -11,15 +11,21 @@ that workflow invokes on it.
 |---|---|---|
 | `start` | `ubuntu-latest` | OIDC login to Azure, starts the self-hosted VM (idempotent — no-op if already running). |
 | `restore-checkpoints` | self-hosted VM (no container) | Only does work when `PNR_RESUME_FROM_RUN` (repository variable) or the `resume_from_run` dispatch input names a previous run: downloads that run's checkpoints from Blob into `/home/newt/pnr-restore/<run_id>` — outside the workspace, which `actions/checkout` would `git clean -ffdx`. The `pnr` job's own restore step then honors the `resume_exclude` dispatch input to leave named checkpoints out, so their stages run again. Runs outside the job container because az CLI lives on the VM host, and design D8 gives the `pnr` job no Azure access. |
-| `pnr` | self-hosted VM | Checks out the repo, generates the hardware config, pickles RTL, runs `make synth-all` (cached — see below) then `make -C target/ihp13/openroad -f openroad.mk run-pnr PROJ_NAME=basilisk` (the 9-stage flow below), builds a stage-status summary from `pnr_status.log`, uploads the final DEF and the reports/logs as workflow artifacts. |
-| `upload-checkpoints` | self-hosted VM | Pushes `.zip` checkpoints to the `pnr-checkpoints` blob container (task 1.3) so a later run can resume without redoing synth+P&R from scratch. |
+| `pnr` | self-hosted VM | Checks out the repo, generates the hardware config, pickles RTL, runs `make synth-all` (cached — see below) then `make -C target/ihp13/openroad -f openroad.mk run-pnr PROJ_NAME=basilisk` (the 9-stage flow below), then moves the stage checkpoints and `synth-key.txt` out of the workspace into `/home/newt/pnr-export/<run_id>` (the export step — see the collision note below), builds a stage-status summary from `pnr_status.log`, uploads the final DEF and the reports/logs as workflow artifacts. |
+| `upload-checkpoints` | self-hosted VM | Pushes `.zip` checkpoints from `/home/newt/pnr-export/<run_id>` — never from the workspace — to the `pnr-checkpoints` blob container (task 1.3) so a later run can resume without redoing synth+P&R from scratch, then removes that directory. Fails loudly when the `pnr` job succeeded but left no checkpoint to upload; a `pnr` job that failed before its first checkpoint, or never reached the export step, is reported and passed over. |
 | `stop` | `ubuntu-latest` | Checks whether the runner is still needed (busy, or another `pnr.yml`/`synth.yml` run queued) before deallocating the VM — the coexistence guard. |
 
 Triggers: `schedule`, `workflow_dispatch`, `push`; no `pull_request` (P&R is
 too slow/expensive to run on every PR). `concurrency: group: pnr,
 cancel-in-progress: false` prevents two `pnr.yml` runs from fighting over
-the same VM; it does **not** protect against manual out-of-band work on the
-same workspace (a real, sharp edge — see the Notes section).
+the same VM. It says nothing about the workspace the two lanes share, and
+neither does the `stop` guard — but the lanes' own automated runs can no
+longer hurt each other there, because the `pnr` job hands its checkpoints to
+`/home/newt/pnr-export/<run_id>` before it releases the runner, so a
+`synth.yml` (or any other) checkout that lands between `pnr` and
+`upload-checkpoints` has nothing of this run's to clean. Manual out-of-band
+work on the same workspace is the remaining sharp edge (a real one — see the
+Notes section).
 
 `vm-watchdog.yml` runs hourly and deallocates the VM if it's sat idle,
 independent of this workflow — the backstop for a `stop` job that never ran.
@@ -101,6 +107,25 @@ blanket `PNR_STAGE_TIMEOUT`): `floorplan` 1h, `pre_place` 30m, `gpl` 4h,
 
 ## Notes from real bring-up (task 2.4)
 
+- **A sibling workflow's checkout destroyed a finished run's checkpoints
+  (2026-09-15).** Run 34783899813 — Run A of `post-merge-ci-verification`,
+  ~26h and ~$32 — finished its `pnr` job at 22:02:34Z with `grt ok`. The
+  nightly `synth.yml` run 34820756433 was assigned the shared runner 2s
+  later and its own `actions/checkout` ran `git clean -ffdx` at 22:02:40Z,
+  6s after `pnr` ended, wiping the untracked
+  `target/ihp13/openroad/save/`. `upload-checkpoints` did not get the runner
+  until 00:31:40Z — 2.5h later, after the synth run finished — found an
+  empty directory, printed "nothing to upload (pnr job may have failed
+  before floorplan)" and exited 0. The `pnr` job had in fact succeeded; the
+  run simply had no durable output, which only surfaced when a resume was
+  attempted. Neither guard covered it: `concurrency: group: pnr` serializes
+  `pnr.yml` runs against each other, and the `stop` guard only decides
+  whether to power the VM off. **Fixed** by `pnr.yml`'s "Export checkpoints
+  out of the shared workspace" step (change `pnr-checkpoints-outside-workspace`):
+  the `pnr` job moves the checkpoints to `/home/newt/pnr-export/<run_id>`
+  before it ends, mirroring what `restore-checkpoints` already did in the
+  inbound direction, and `upload-checkpoints` reads only from there and now
+  fails loudly rather than quietly if a successful flow left it nothing.
 - Manual out-of-band work on the shared VM workspace (e.g. driving the flow
   directly via `docker exec` instead of through `pnr.yml`) has **no
   collision protection** — a real scheduled `synth.yml`/`pnr.yml` run's

@@ -230,6 +230,21 @@ came from there; VM lifecycle was manual, with a 10:00 UTC auto-shutdown backsto
 phase has now superseded (disabled, and deleted only once Phase 9 observes the watchdog
 working — never a window with no backstop).
 
+**Checkpoint loss, 2026-09-15 (fixed).** The lane's first post-merge full run
+(34783899813, Phase 9's "Run A", ~26h and ~$32) finished `pnr` with `grt ok` and then
+uploaded nothing: the nightly synth run 34820756433 took the shared runner 2s after `pnr`
+released it, and its `actions/checkout` `git clean -ffdx` wiped the untracked
+`target/ihp13/openroad/save/` 6s later — 2.5h before `upload-checkpoints` got the runner and
+found an empty directory, which it reported as "nothing to upload (pnr job may have failed
+before floorplan)" and exited 0. The two lanes share one runner *and one workspace*, and
+neither `pnr.yml`'s `concurrency: group: pnr` (which serializes `pnr.yml` runs against each
+other) nor the `stop` coexistence guard (which only decides whether to power the VM off)
+covered the gap between two jobs of the same run. Fixed by
+`openspec/changes/pnr-checkpoints-outside-workspace/`: the `pnr` job now moves its checkpoints
+to `/home/newt/pnr-export/<run_id>` before it ends — the same outside-the-workspace pattern
+`restore-checkpoints` already used inbound — and `upload-checkpoints` reads only from there
+and fails loudly instead of quietly when a successful flow leaves it nothing.
+
 - [x] `start` job (GH-hosted, OIDC): `az vm start`, idempotent.
 - [x] `pnr` job (`runs-on: [self-hosted, self-hosted-synth]` — *not* the `newt` label this
       plan guessed; `container: ghcr.io/wortexx/newt-eda:dev`, `timeout-minutes: 2880`).
@@ -325,6 +340,12 @@ never a window with no cost backstop.
       deallocated and the check's output never came back. Low risk (the file is
       byte-identical to the form the ci-pnr-lane runbook verified parses), but
       not independently confirmed on this host. Check next time the VM is up.
+- **Shared-workspace collision between the P&R and synth lanes — fixed, not open.** Raised
+  as a follow-up by `post-merge-ci-verification` task 2.1 after run 34783899813 lost its
+  checkpoints to a sibling workflow's checkout (see Phase 5's History above). Addressed by
+  `openspec/changes/pnr-checkpoints-outside-workspace/` rather than by serializing the lanes
+  by hand, so re-enabling the nightly synth schedule no longer has to wait for the P&R lane
+  to be idle. Recorded here because Phase 9's task 6.4 expects this list to carry it.
 - **`github-runner-pat` expires 2026-12-13** — 90 days from creation, not the
   one-year cadence this plan originally assumed. Rotation is quarterly until a
   longer-lived token is deliberately issued; the vault secret's own `expires`

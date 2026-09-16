@@ -73,6 +73,15 @@ jobs:
     container: ghcr.io/wortexx/newt-eda:dev
     timeout-minutes: 350 # bounds a hung run so it doesn't tie up the one VM indefinitely
     steps:
+      # This checkout's default `git clean -ffdx` wipes every untracked file
+      # in the runner's single shared workspace, including anything the P&R
+      # lane left in target/ihp13/openroad/. That is safe as of change
+      # `pnr-checkpoints-outside-workspace`: pnr.yml's "Export checkpoints out
+      # of the shared workspace" step moves its checkpoints to
+      # /home/newt/pnr-export/<run_id> before its pnr job ends, so this clean
+      # can no longer destroy a P&R run's pending upload (it did exactly that
+      # to run 34783899813 on 2026-09-15). Manual out-of-band work on the
+      # workspace is still unprotected - see docs/pnr-pipeline.md's Notes.
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
