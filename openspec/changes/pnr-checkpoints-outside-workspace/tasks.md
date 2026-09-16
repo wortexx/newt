@@ -37,6 +37,8 @@ Ordering follows design.md's Migration Plan: the workflow edit and its local reh
 ## 3. PR
 
 - [ ] 3.1 Open the PR for §1–§2 (title `ci(pnr): export checkpoints outside the shared runner workspace before upload`), body linking `post-merge-ci-verification` task 2.1's finding, and merge once `lint`/`sw` are green. Verify: `gh pr checks <n>` shows `lint`/`sw` success and no `pnr.yml` or `synth.yml` run was triggered by the PR (`gh run list --workflow=pnr.yml --limit 3` shows no new run for the PR's SHA); after merge, `gh workflow view pnr.yml --yaml | grep -c 'pnr-export'` is ≥ 3 (env, volume, step). Record the PR number and merge commit here.
+  - **In progress 2026-09-16 — PR open and green, merge is the user's.** Branch `ci/pnr-export-checkpoints` off `main`, commit `15076a9`, [PR #25](https://github.com/wortexx/newt/pull/25). All five checks pass: `lint` 1m44s, `sw` 3m38s, `sim-soc` 9m18s, `sim-unit` 4s, `synth-coproc` 7s (run 35069003579). No VM lane was triggered — the only workflow with a run at SHA `15076a9` is `CI`; the newest `pnr.yml` run is still the checkpoint-source dispatch 34938462965 and the newest `synth.yml` run is still the 2026-09-14 schedule.
+  - `gh pr merge 25 --squash --delete-branch` was **blocked by this session's permission classifier**, so the merge and the post-merge check (`gh workflow view pnr.yml --yaml | grep -c 'pnr-export'` ≥ 3) are outstanding. This also matches how [PR #21](https://github.com/wortexx/newt/pull/21) closed (merged by the user). Merge when ready, then tick this task with the merge commit.
 
 ## 4. Real-run verification (rides on `post-merge-ci-verification`; not a gate for archiving this change, but record what is observed)
 
