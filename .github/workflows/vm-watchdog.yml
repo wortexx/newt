@@ -7,8 +7,12 @@
 # had already cancelled one in-flight synth-lane run (see synth.yml's
 # header and openspec/changes/archive/2026-09-02-ci-synth-lane/design.md
 # D1a). This workflow only ever deallocates a VM that genuinely has
-# nothing running or queued against it - the auto-shutdown is removed once
-# this has been observed doing its job correctly (tasks.md 4.1/5.1).
+# nothing running or queued against it - it was observed doing exactly
+# that for the first time in run 35143225494 (2026-09-16T19:53:19Z), and
+# the fixed auto-shutdown schedule was deleted the same day
+# (openspec/changes/post-merge-ci-verification tasks 4.1/5.1) once that
+# observation confirmed this workflow, together with pnr.yml's own
+# guarded `stop` job, as the sole remaining backstops.
 #
 # Also sweeps a VM started by hand for a manual synth-lane run: previously
 # that relied entirely on the human remembering to stop it (or the blunt

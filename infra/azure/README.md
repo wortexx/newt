@@ -59,8 +59,9 @@ az deployment group create \
 ```
 
 Deployments are **incremental** (the default). Complete mode is never used:
-incremental is what leaves the undeclared auto-shutdown schedule alone and what
-makes "a deployment never deletes anything" true by construction.
+incremental only touches what the templates declare, so any hand-made or
+otherwise undeclared resource in the group is left alone rather than deleted —
+this is what makes "a deployment never deletes anything" true by construction.
 
 **Never apply a preview showing `Delete` or `Replace`.** Fix the template so
 the preview is clean instead. A `Replace` on the VM would destroy the OS disk,
@@ -284,8 +285,8 @@ az resource list --resource-group newt-synth-lane-rg \
   --query "sort_by([].{name:name, type:type}, &name)" -o table
 ```
 
-Every resource must map to one declared in `main.bicep`. As of 2026-09-13 the
-group holds ten resources and all ten are accounted for:
+Every resource must map to one declared in `main.bicep`. As of 2026-09-16 the
+group holds nine resources and all nine are accounted for:
 
 | Resource | Type | Declared as |
 | --- | --- | --- |
@@ -298,11 +299,12 @@ group holds ten resources and all ten are accounted for:
 | `newtpnrcheckpoints` | `Microsoft.Storage/storageAccounts` | `storageAccount` (+ container, lifecycle rule) |
 | `newt-ci-kv` | `Microsoft.KeyVault/vaults` | `keyVault` |
 | `newt-synth-runner_OsDisk_1_5a97…` | `Microsoft.Compute/disks` | **not declared standalone** — referenced through `vm.storageProfile.osDisk`, which is the adoption path that leaves its contents alone |
-| `shutdown-computevm-newt-synth-runner` | `Microsoft.DevTestLab/schedules` | **the one exception** — see below |
 
-The DevTestLab schedule is disabled and deliberately undeclared:
-`docs/infra-plan.md` Phase 9 deletes it once `vm-watchdog.yml` has been observed
-working, so that there is never a window with no cost backstop.
+The `Microsoft.DevTestLab/schedules` auto-shutdown resource that used to appear
+here as the one exception was deleted 2026-09-16 (`post-merge-ci-verification`
+task 5.1), once `vm-watchdog.yml`'s idle-deallocate and `pnr.yml`'s own guarded
+`stop` job had both been observed working for real — every resource in the
+group now maps to a declared one, with no exception left.
 
 Anything else that appears is drift: either add it to the templates or delete
 it.
@@ -321,5 +323,7 @@ and no deployment can settle them — they are exempted by the
 
 The budget is a **notification, not an enforcement** — nothing stops the VM
 when a threshold is crossed. It alerts at 50 %, 80 % and 100 % of actual
-monthly spend against `budgetAmount` (default $150). `vm-watchdog.yml` is the
-mechanism that actually bounds spend, by deallocating an idle VM every hour.
+monthly spend against `budgetAmount` (default $150). The two mechanisms that
+actually bound spend are `vm-watchdog.yml`, which deallocates an idle VM every
+hour, and `pnr.yml`'s own guarded `stop` job, which deallocates the VM at the
+end of a P&R run once nothing else on the shared runner is active or queued.
