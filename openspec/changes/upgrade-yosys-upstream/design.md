@@ -79,6 +79,40 @@ After `synth-all`, a small script greps `out/basilisk.yosys.v` for each pattern 
 - [Synth wall time changes] → Likely shorter (parallel ABC). If it grows past the lane's timeout, cap `YOSYS_MAX_THREADS` to the runner's core count minus headroom rather than reverting.
 - [Upstream renames `read_slang` or removes the built-in frontend before Phase 8 starts] → Pinned tag; the smoke test asserts the command exists, so a later bump cannot silently lose it.
 
+### D9 — `abc -liberty_args` crashes v0.69 in this flow's exact configuration (OPEN, found during task 2.1)
+
+The flow passes `-liberty_args "-S 20 -G 3"` on its default combinational path. On v0.69 that segfaults ABC whenever a user `-script` file is also given, which is always true here.
+
+Reproduced on an Apple Silicon host running the published `linux/amd64` image under emulation, on a small synthetic module:
+
+| yosys | user `-script` | `-liberty_args` | result |
+| --- | --- | --- | --- |
+| v0.69 | yes | yes | `qemu: uncaught target signal 11` -> `ERROR: ABC failed with status B` |
+| v0.69 | yes | no | completes; buffering, resizing and final timing all run |
+| v0.69 | no (default) | yes | completes |
+
+The matching defect is visible in v0.69's own source, `passes/techmap/abc.cc`:
+
+```cpp
+run_abc.abc_script += stringf("read_lib %s %s %s -w \"%s\" ; ",
+    run_abc.dont_use_args,        // std::string -> %s
+    first_lib ? "" : "-m",
+    config.abc_liberty_args,      // std::string -> %s
+    liberty_file);                // std::string -> %s
+```
+
+Three `std::string` objects are passed to a printf-style `%s`, which is undefined behaviour. The branch is reachable only when `abc_liberty_args` is non-empty; the empty case takes `convert_liberty_files_to_merged_scl` and emits `read_scl` with a correct `.c_str()`. That is exactly the observed on/off pattern.
+
+**Not yet established: whether this also crashes on native x86_64.** With libstdc++ the first word of a `std::string` is a pointer to its data, so `%s` frequently "works by accident"; under a different allocator, layout or emulation it does not. This host cannot answer that question. Verify on a native x86_64 Linux machine or a GitHub-hosted runner before trusting the adoption gate.
+
+Options once that is known, in preference order:
+
+1. **Drop `-liberty_args` from the flow.** Without it, v0.69 takes the newer merged-SCL path (`read_scl`) rather than `read_lib`. That path did not exist when `-liberty_args` was introduced, and it may already give ABC the real delay model that `-S 20 -G 3` was added to provide. Needs a QoR comparison, not an assumption.
+2. **Carry a one-line patch** adding `.c_str()` to the three arguments, and send it upstream. Small and mechanical, unlike the `{tmpdir}` patch in D3.
+3. Pin to a yosys release where this path is correct, if one exists.
+
+This is a gate-blocking question: the adoption gate runs the full flow, which uses the crashing combination.
+
 ## Migration Plan
 
 1. Branch: Dockerfile + `packages.txt` (D1), smoke-test assertions (D2), `synth_metrics.py` + `yosys_synthesis.tcl` JSON report + `synth.yml` path and `image_tag` input (D4, D5), naming-check script (D6). PR run builds the image and pushes `pr-<n>`.
