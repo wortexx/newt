@@ -1,10 +1,14 @@
 build-essential
 ca-certificates
+cmake
 curl
 clang
+gawk
 gdb
 git
+lld
 libffi-dev
+libfl-dev
 libreadline-dev
 pkg-config
 python3

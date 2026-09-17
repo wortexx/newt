@@ -53,6 +53,7 @@ jobs:
       # Each stage caches independently on GHCR so an unchanged Dockerfile is
       # a cache hit and only touched stages actually rebuild (design.md D5).
       - name: Build pickle stage
+        id: pickle
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: docker/pickle
@@ -62,6 +63,7 @@ jobs:
           cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-cache:pickle,mode=max
 
       - name: Build yosys stage
+        id: yosys
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: docker/yosys
@@ -71,6 +73,7 @@ jobs:
           cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-cache:yosys,mode=max
 
       - name: Build openroad stage
+        id: openroad
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: docker/openroad
@@ -80,6 +83,7 @@ jobs:
           cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-cache:openroad,mode=max
 
       - name: Build riscv64 stage
+        id: riscv64
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: docker/riscv64
@@ -89,6 +93,7 @@ jobs:
           cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-cache:riscv64,mode=max
 
       - name: Build verilator stage
+        id: verilator
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: docker/verilator
@@ -101,12 +106,21 @@ jobs:
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: docker/all
+          # Consume each stage by the DIGEST that step just pushed, never by the
+          # mutable :ci tag. buildx does not re-resolve a tag it already has a
+          # cached resolution for, so a :ci reference can silently resolve to a
+          # previous run's image: in run 35192327059 the yosys stage pushed
+          # sha256:688531e8 while the composite consumed sha256:5f4a7521, built
+          # the image from the OLD yosys, and the smoke test failed against a
+          # stale binary. Harmless while a stage never changed, which is why it
+          # went unnoticed until the yosys upgrade. Digests also make the shared
+          # :ci tag safe against two PR runs overwriting each other.
           build-args: |
-            PICKLE_IMG=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-pickle:ci
-            YOSYS_IMG=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-yosys:ci
-            OPENROAD_IMG=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-openroad:ci
-            RISCV64_IMG=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-riscv64:ci
-            VERILATOR_IMG=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-verilator:ci
+            PICKLE_IMG=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-pickle@${{ steps.pickle.outputs.digest }}
+            YOSYS_IMG=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-yosys@${{ steps.yosys.outputs.digest }}
+            OPENROAD_IMG=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-openroad@${{ steps.openroad.outputs.digest }}
+            RISCV64_IMG=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-riscv64@${{ steps.riscv64.outputs.digest }}
+            VERILATOR_IMG=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-verilator@${{ steps.verilator.outputs.digest }}
           tags: newt-eda:smoke-test
           load: true
           cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-cache:all
@@ -116,6 +130,22 @@ jobs:
         run: |
           docker run --rm -v "${{ github.workspace }}/docker/smoke-test.sh:/smoke-test.sh:ro" \
             newt-eda:smoke-test bash /smoke-test.sh
+
+      # A pull request's composite image, published so it can be *run* rather
+      # than only build-verified. The adoption gate for a tooling bump is a
+      # synth.yml dispatch with image_tag=pr-<n> on the self-hosted runner
+      # (upgrade-yosys-upstream design D5), and that runner cannot see the
+      # `load: true` image above - it lives only in this runner's local Docker
+      # daemon. Pushed only after the smoke test passes, and never as `:dev`,
+      # so a PR can never move the tag the synth lane and developers default
+      # to. The tag follows the PR head: a later push to the same PR
+      # overwrites it, which is what a gate run wants (measure the latest
+      # head, not whatever the PR opened with).
+      - name: Publish PR image for gate runs
+        if: github.event_name == 'pull_request'
+        run: |
+          docker tag newt-eda:smoke-test "${REGISTRY}/${IMAGE_NAME}:pr-${{ github.event.pull_request.number }}"
+          docker push "${REGISTRY}/${IMAGE_NAME}:pr-${{ github.event.pull_request.number }}"
 
       # Publish only after the smoke test passes, and only on main (never on PRs).
       - name: Tag and publish

@@ -51,6 +51,20 @@ on:
   schedule:
     - cron: '30 2 * * *' # 02:30 UTC nightly; see note (1) above re: VM lifecycle
   workflow_dispatch:
+    inputs:
+      image_tag:
+        description: >-
+          newt-eda tag to run the lane against. Defaults to `dev`, the tag
+          `main` publishes. Set it to a PR's image (`pr-<number>`, pushed by
+          docker-image.yml on pull-request runs) to run a tooling-bump
+          adoption gate against that PR before merging it - see
+          openspec/changes/upgrade-yosys-upstream design D5. Any tag other
+          than `dev` also makes the netlist-naming check gating rather than
+          advisory, since a gate run is exactly when a naming regression
+          must block.
+        required: false
+        default: dev
+        type: string
   pull_request:
     types: [labeled, synchronize, reopened]
 
@@ -82,7 +96,9 @@ jobs:
       (contains(github.event.pull_request.labels.*.name, 'full-synth') &&
        github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: [self-hosted, self-hosted-synth]
-    container: ghcr.io/wortexx/newt-eda:dev
+    # `inputs.image_tag` is set only on workflow_dispatch; schedule and
+    # pull_request runs fall through to `dev`.
+    container: ghcr.io/wortexx/newt-eda:${{ inputs.image_tag || 'dev' }}
     timeout-minutes: 350 # bounds a hung run so it doesn't tie up the one VM indefinitely
     steps:
       # This checkout's default `git clean -ffdx` wipes every untracked file
@@ -135,6 +151,26 @@ jobs:
       - name: Synthesize (make synth-all)
         run: make synth-all
 
+      # A netlist can pass `check` with 0 problems and still be unusable by
+      # the backend, because OpenROAD looks a lot of things up by literal
+      # name: macros.tcl places every SRAM by hierarchical instance path,
+      # and basilisk_instances.sdc anchors constraints to specific cells and
+      # nets. A `get_cells` glob that matches nothing is not a Tcl error, so
+      # a synthesis rename degrades placement or silently drops constraints
+      # instead of failing. (That is not hypothetical: `*ddr_rcv_clk_o*`
+      # already matches nothing, which is why WNS reads "unavailable" - the
+      # script reports it as a known warning rather than a new failure.)
+      #
+      # Advisory on the lane's routine runs, gating on an adoption-gate
+      # dispatch (image_tag != dev), which is exactly when a tooling bump
+      # could have renamed things and the run exists to catch it.
+      - name: Check netlist names used by the backend scripts
+        continue-on-error: ${{ (inputs.image_tag || 'dev') == 'dev' }}
+        run: |
+          python3 target/ihp13/yosys/scripts/check_netlist_names.py \
+            target/ihp13/yosys/out/basilisk.yosys.v \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+
       # run-sta needs cwd target/ihp13/yosys: opensta_timings.tcl's
       # `read_sdc ../openroad/src/basilisk.sdc` is relative to the caller's
       # cwd (design.md D4). Two variables must be passed explicitly because
@@ -185,7 +221,7 @@ jobs:
       - name: Metrics summary (cell count / area / DFF count / WNS vs baseline)
         run: |
           python3 target/ihp13/yosys/scripts/synth_metrics.py \
-            --area target/ihp13/yosys/reports/basilisk_area.rpt \
+            --area target/ihp13/yosys/reports/basilisk_area.json \
             --check target/ihp13/yosys/reports/basilisk_synth.rpt \
             --sta target/ihp13/yosys/reports/sta_output.txt \
             --baseline target/ihp13/yosys/synth-baseline.json
