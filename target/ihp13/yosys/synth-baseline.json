@@ -1,9 +1,11 @@
 {
-  "cells": 714166,
-  "chip_area_um2": 17156844.69,
-  "dffs": 89258,
-  "wns_ps": -2500,
-  "source": "Phase 1 newt-eda adoption gate (openspec/changes/archive/2026-08-30-newt-eda-tooling-image)",
-  "date": "2026-08-29",
-  "image": "ghcr.io/wortexx/newt-eda:2026-08-29-8d13fe0"
+  "cells": 735953,
+  "chip_area_um2": 17774827.51,
+  "dffs": 89499,
+  "wns_ps": null,
+  "yosys": "v0.69",
+  "source": "upgrade-yosys-upstream adoption gate (openspec/changes/upgrade-yosys-upstream), run 35275581702",
+  "date": "2026-09-17",
+  "image": "ghcr.io/wortexx/newt-eda:pr-32",
+  "notes": "Supersedes the fork-era baseline of 714166 cells / 17156844.69 um^2 / 89258 DFFs (2026-08-29, image 2026-08-29-8d13fe0). The +3.05% cells / +3.60% area delta carries both the yosys 0.40->0.69 jump and the dropped `abc -liberty_args` (design D9); accepted deliberately. wns_ps is null because basilisk.sdc's *ddr_rcv_clk_o* pattern matches nothing in this netlist - a pre-existing content bug, not a regression."
 }
