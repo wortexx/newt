@@ -41,7 +41,7 @@ jobs:
     runs-on: ubuntu-latest
     container: ghcr.io/wortexx/newt-eda:dev
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -190,7 +190,7 @@ jobs:
     runs-on: ubuntu-latest
     container: ghcr.io/wortexx/newt-eda:dev
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Allow git to operate on the checked-out tree
         run: git config --global --add safe.directory '*'
@@ -219,7 +219,7 @@ jobs:
   sim-unit:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Coprocessor unit testbench (stub)
         run: |
@@ -238,7 +238,7 @@ jobs:
     runs-on: ubuntu-latest
     container: ghcr.io/wortexx/newt-eda:dev
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Allow git to operate on the checked-out tree
         run: git config --global --add safe.directory '*'
@@ -281,7 +281,7 @@ jobs:
   synth-coproc:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Coprocessor-only synthesis (stub)
         run: |

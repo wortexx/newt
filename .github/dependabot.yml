@@ -1,0 +1,23 @@
+# Copyright 2026 the newt project authors.
+# Licensed under the Apache License, Version 2.0, see LICENSE for details.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Watches the GitHub Actions referenced under .github/workflows/ and opens a
+# pull request when a new release is available, so action versions no longer
+# drift unnoticed (see openspec/changes/upgrade-github-actions/design.md
+# Decision 3). Updates are grouped into a single weekly pull request rather
+# than one per action, and never auto-merged: the group still has to pass
+# the normal pull-request lane and a human still has to look at it, because
+# a green hosted-lane check is not evidence that the self-hosted synth/P&R
+# lanes still work (see that same design doc, Decision 4).
+version: 2
+
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      github-actions:
+        patterns:
+          - "*"

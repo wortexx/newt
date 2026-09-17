@@ -469,30 +469,49 @@ bring-up ran off `pnr-bringup-*` tags. So these are deferred by sequencing, not 
       observation (task 5.4) not yet complete as of this writing; the header notes exactly
       that and will be filled in once observed.
 
-## Phase 10 — GitHub Actions version upgrade  *(maintenance, deadline-driven)*
+## Phase 10 — GitHub Actions version upgrade  ✅ done (2026-09-17)
 
-Every action pinned across `ci.yml` / `synth.yml` / `pnr.yml` / `docker-image.yml` declares
+Every action pinned across `ci.yml` / `synth.yml` / `pnr.yml` / `docker-image.yml` declared
 the **Node 20** runtime, which GitHub deprecated. Runners have defaulted to Node 24 since
-2026-06-16 and **already force these actions onto it** (that is the warning in every run log);
-Node 20 is removed entirely on **2026-09-23**. Nothing in this repo breaks on that date — the
-forcing is what we already run on, and we never set the `ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION`
-opt-out — but every action here is several majors behind, and each has a Node 24 release:
+2026-06-16 and were already forcing these actions onto it (that was the warning in every run
+log); Node 20 is removed entirely on **2026-09-23**. Nothing in this repo broke on that date —
+the forcing is what we already ran on, and we never set the
+`ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION` opt-out — but every action here was several majors
+behind. Resolved as `upgrade-github-actions`; see that change's `design.md` for the full
+rationale. As bumped:
 
-| action | pinned | latest | uses |
+| action | was | now | uses |
 | --- | --- | --- | --- |
-| `actions/checkout` | v4 (x8) | v7.0.1 | node20 → node24 |
+| `actions/checkout` | v4 (x9) | v7.0.1 | node20 → node24 |
 | `actions/upload-artifact` | v4 (x4) | v7.0.1 | node20 → node24 |
-| `azure/login` | v2 (x5) | v3.1.0 | node20 → node24 |
-| `docker/build-push-action` | v6 (x6) | v7.3.0 | node20 → node24 |
-| `docker/setup-buildx-action` | v3 | v4.3.0 | node20 → node24 |
-| `docker/login-action` | v3 | v4.6.0 | node20 → node24 |
+| `azure/login` | v2 (x5) | v3.1.0, SHA-pinned | node20 → node24 |
+| `docker/build-push-action` | v6 (x6) | v7.4.0, SHA-pinned | node20 → node24 |
+| `docker/setup-buildx-action` | v3 | v4.4.1, SHA-pinned | node20 → node24 |
+| `docker/login-action` | v3 | v4.6.0, SHA-pinned | node20 → node24 |
 
-- [ ] Upgrade one action at a time, letting the per-PR fast lane validate `checkout` and
-      `upload-artifact` first — it runs on every push and costs nothing.
-- [ ] Watch for real breaking changes across three majors: `fetch-depth: 0` behaviour,
-      `if-no-files-found` semantics, artifact immutability.
-- [ ] Leave `azure/login` for last: its failure mode is a VM that won't start, which costs a
-      whole P&R run to discover.
+Actual approach diverged from the plan above, deliberately:
+
+- Went straight to each action's latest major in one commit rather than stepping through
+  intermediate majors one at a time. Every deprecation the intermediate majors carried was
+  checked against the actual call sites in this repo and none applied (no
+  `DOCKER_BUILD_NO_SUMMARY`/`DOCKER_BUILD_EXPORT_RETENTION_DAYS` usage, no deprecated
+  `setup-buildx-action` inputs, no `pull_request_target`/`workflow_run` trigger for
+  `checkout` v7's fork-PR guard to matter against). Stepping through would have paid the
+  same validation cost multiple times for zero risk reduction here.
+- **New convention:** every third-party action (`docker/*`, `azure/*` — anything outside the
+  `actions/` org) is now pinned to a full 40-character commit SHA with a trailing
+  `# vX.Y.Z` comment, so a compromised or retagged upstream release can't silently change
+  what runs on runners holding Azure OIDC and GHCR credentials. `actions/*` stays on major
+  tags — GitHub controls both that namespace and the runner executing it. Keep this
+  convention for any new action reference added to `.github/workflows/`.
+- `azure/login` was **not** left for last — going straight to latest major and validating
+  all six together in one PR made a staged rollout pointless; the hosted lanes gate the PR,
+  and the self-hosted lane's `azure/login` sites (VM start/deallocate, checkpoint upload)
+  are verified on the next scheduled `pnr.yml` run instead (still not folded into a
+  pre-merge gate — a regression there is exactly the class of thing that only surfaces
+  hours into a run, per the original note below).
+- Added `.github/dependabot.yml` (`github-actions` ecosystem, weekly, grouped into one PR,
+  no auto-merge) so this doesn't silently drift to three majors behind again.
 - Not folded into `ci-pnr-lane`: a workflow regression there surfaces only *after* ~3h of
   synthesis, exactly how the `-f openroad.mk`, `PROJ_NAME` and `PNR_TIMEOUT_GRT` bugs were
   each found.
