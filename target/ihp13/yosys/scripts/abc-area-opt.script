@@ -16,9 +16,13 @@ stime
 print_level
 print_stats -t
 
-write_blif "{tmpdir}/tmp.blif";
-read_lib  -w "{TECH_CELLS}" ;
-read_blif "{tmpdir}/tmp.blif";
+# A BLIF save/reload was removed here for the same reason as in
+# abc-speed-opt-new.script (see the long note there): it worked around an old
+# ABC `buffer` bug and depended on yosys substituting {tmpdir} inside a user
+# ABC script, which only the retired fork did. Upstream yosys passes this file
+# to ABC verbatim, so {tmpdir} would arrive as a literal directory name.
+# This script is not referenced by the flow today, but it is kept in tree as an
+# alternative, and a stale {tmpdir} here would break silently if it were used.
 
 echo "buffering for delay and fanout..."
 buffer -p
