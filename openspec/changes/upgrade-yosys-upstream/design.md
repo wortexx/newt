@@ -79,6 +79,37 @@ After `synth-all`, a small script greps `out/basilisk.yosys.v` for each pattern 
 - [Synth wall time changes] → Likely shorter (parallel ABC). If it grows past the lane's timeout, cap `YOSYS_MAX_THREADS` to the runner's core count minus headroom rather than reverting.
 - [Upstream renames `read_slang` or removes the built-in frontend before Phase 8 starts] → Pinned tag; the smoke test asserts the command exists, so a later bump cannot silently lose it.
 
+### D9 — `abc -liberty_args` crashes v0.69 in this flow's exact configuration (OPEN, blocks the gate)
+
+The flow passes `-liberty_args "-S 20 -G 3"` on its default combinational path together with a user `-script` file. On v0.69 that combination kills ABC. **Confirmed on native x86_64**, not an emulation artifact (CI probe run 35252940096, `ubuntu-latest`, image `newt-eda:pr-32`):
+
+| case | user `-script` | `-liberty_args` | native x86_64 | emulated arm64 |
+| --- | --- | --- | --- | --- |
+| A | yes | yes | **CRASHED** | **CRASHED** |
+| B | yes | no | completes (buffering, resizing, final timing) | completes |
+| C | no (default) | yes | no crash | no crash |
+
+Case A is the flow's real configuration, so this blocks the adoption gate and any real `synth-all`.
+
+**Mechanism, as far as it is pinned down.** yosys reports `ERROR: ABC failed with status 8B`. That message comes from `AbcProcess`'s destructor in v0.69's `passes/techmap/abc.cc`, and `0x8B` is `128 + 11`, i.e. the child was killed by **SIGSEGV**. The emulated run showed the same thing more plainly as `qemu: uncaught target signal 11`. So ABC itself segfaults.
+
+Two things narrow it further:
+
+- `read_lib -S 20 -G 3 -w <liberty>` run standalone in a one-shot `yosys-abc` works fine: it derives the genlib and reports "slew 20.00 ps and gain 3.00", exit 0. So the arguments are valid and parse correctly.
+- v0.69 runs ABC as a **pooled, long-lived process** (`REUSE_YOSYS_ABC_PROCESSES`) rather than one process per invocation. The crash appears only on that path.
+
+The `-liberty_args` flag is what selects the legacy `read_lib` branch at all: when it is empty, v0.69 instead calls `convert_liberty_files_to_merged_scl` and emits `read_scl`. That is exactly why the flag acts as the on/off switch, and it means the crashing branch is the older of the two library paths.
+
+**Superseded hypothesis, recorded so it is not re-derived:** the three `std::string` values passed to `%s` in the `read_lib` `stringf` call at line 1036 look like classic printf UB, but v0.69's `stringf` is a type-safe variadic template (`kernel/io.h`), so this is not the defect. Do not chase it again.
+
+Options, in preference order:
+
+1. **Drop `-liberty_args` from `yosys_synthesis.tcl`.** Without it v0.69 takes the newer merged-SCL path, which did not exist when the flag was introduced and may already give ABC the real delay model that `-S 20 -G 3` was added to provide. Cheapest fix and plausibly an improvement, but it changes what ABC is given, so it needs a QoR comparison before it is trusted for thesis numbers.
+2. **Disable the pooled-ABC path** if a supported switch exists, keeping `-liberty_args` and today's delay model exactly. Preserves intended behaviour; costs whatever parallel-ABC speedup the pooling was providing.
+3. **Report upstream and carry a patch.** Correct long-term, but the defect is inside ABC's interaction with the reuse protocol rather than a one-line typo, so this is not the small mechanical patch option 2 in D3 looked like.
+
+Whichever is chosen, the gate cannot run until it is.
+
 ## Migration Plan
 
 1. Branch: Dockerfile + `packages.txt` (D1), smoke-test assertions (D2), `synth_metrics.py` + `yosys_synthesis.tcl` JSON report + `synth.yml` path and `image_tag` input (D4, D5), naming-check script (D6). PR run builds the image and pushes `pr-<n>`.

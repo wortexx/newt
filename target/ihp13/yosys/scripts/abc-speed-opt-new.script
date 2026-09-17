@@ -66,12 +66,21 @@ echo "Opt+mapping Iterations..."
 topo
 stime
 
-# save and reload
-# currently there is a bug in buffer making this necessary
-write_blif "{tmpdir}/tmp.blif";
-read_lib  -w "{TECH_CELLS}" ;
-read_blif "{tmpdir}/tmp.blif";
-
+# NOTE: a BLIF save/reload used to sit here ("currently there is a bug in
+# buffer making this necessary"), working around a bug in the 2022-era ABC
+# bundled with the old yosys fork. It was written as
+#   write_blif "{tmpdir}/tmp.blif"; read_lib -w "{TECH_CELLS}"; read_blif ...
+# and relied on a fork-only feature: that yosys substituted {tmpdir} inside a
+# user ABC script. Upstream yosys never does - it emits `source <path>` and
+# lets ABC read this file verbatim, so {tmpdir} would reach ABC as a literal
+# directory name that does not exist. Removed with the v0.69 upgrade
+# (openspec/changes/upgrade-yosys-upstream, design D3 option 1); this file's
+# other placeholders ({D}, {REC_AIG}, {TECH_CELLS}) are substituted by
+# processAbcScript in yosys_common.tcl before ABC ever sees them, so they are
+# unaffected. The re-read of the liberty was only needed to restore state
+# after the reload, and the library from yosys's own preamble is still loaded.
+# If cell buffering or sizing below ever looks wrong, this is the first thing
+# to suspect.
 
 echo "buffering for delay and fanout..."
 buffer -p
