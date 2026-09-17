@@ -94,7 +94,7 @@ jobs:
       # can no longer destroy a P&R run's pending upload (it did exactly that
       # to run 34783899813 on 2026-09-15). Manual out-of-band work on the
       # workspace is still unprotected - see docs/pnr-pipeline.md's Notes.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -193,7 +193,7 @@ jobs:
       # Netlist only on a successful synth (nothing to upload otherwise).
       - name: Upload netlist
         if: success()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: basilisk-netlist
           path: target/ihp13/yosys/out/basilisk.yosys.v
@@ -202,7 +202,7 @@ jobs:
       # Reports/logs always, even on failure - they're the diagnostic trail.
       - name: Upload reports and logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: synth-reports
           path: |

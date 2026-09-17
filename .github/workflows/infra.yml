@@ -34,7 +34,7 @@ jobs:
     name: validate
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # az auto-installs Bicep on first use; doing it explicitly keeps the
       # failure mode (and the version in the log) obvious.
