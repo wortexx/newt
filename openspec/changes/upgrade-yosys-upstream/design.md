@@ -91,22 +91,27 @@ The flow passes `-liberty_args "-S 20 -G 3"` on its default combinational path t
 
 Case A is the flow's real configuration, so this blocks the adoption gate and any real `synth-all`.
 
-**Mechanism, as far as it is pinned down.** yosys reports `ERROR: ABC failed with status 8B`. That message comes from `AbcProcess`'s destructor in v0.69's `passes/techmap/abc.cc`, and `0x8B` is `128 + 11`, i.e. the child was killed by **SIGSEGV**. The emulated run showed the same thing more plainly as `qemu: uncaught target signal 11`. So ABC itself segfaults.
+**Mechanism.** yosys reports `ERROR: ABC failed with status 8B`; `0x8B` is `128 + 11`, so ABC was killed by SIGSEGV (the emulated run says so directly: `qemu: uncaught target signal 11`). The crash tracks the `-liberty_args` flag itself, not the surrounding machinery:
 
-Two things narrow it further:
+| configuration | result |
+| --- | --- |
+| `-liberty_args`, pooled ABC (default) | segfault |
+| `-liberty_args`, `-exe <copy>` (forces one-shot ABC) | **still segfaults** |
+| no `-liberty_args` | works: 2207 gates, 22074 area, 4143.90 ps |
 
-- `read_lib -S 20 -G 3 -w <liberty>` run standalone in a one-shot `yosys-abc` works fine: it derives the genlib and reports "slew 20.00 ps and gain 3.00", exit 0. So the arguments are valid and parse correctly.
-- v0.69 runs ABC as a **pooled, long-lived process** (`REUSE_YOSYS_ABC_PROCESSES`) rather than one process per invocation. The crash appears only on that path.
+`read_lib -S 20 -G 3 -w <lib>` on its own in a one-shot ABC is fine and reports "slew 20.00 ps and gain 3.00", so the arguments parse correctly. The `-exe` run also printed timing (4109 gates, 33989 area) *before* dying, which shows `-S 20 -G 3` really does derive a different and much larger genlib; the crash comes later, in the script's mapping/buffer/resize sequence over that library.
 
-The `-liberty_args` flag is what selects the legacy `read_lib` branch at all: when it is empty, v0.69 instead calls `convert_liberty_files_to_merged_scl` and emits `read_scl`. That is exactly why the flag acts as the on/off switch, and it means the crashing branch is the older of the two library paths.
+**Two superseded hypotheses, recorded so they are not re-derived:**
+- *printf UB*: the three `std::string` values passed to `%s` in the `read_lib` `stringf` call look like classic UB, but v0.69's `stringf` is a type-safe variadic template (`kernel/io.h`). Not the defect.
+- *pooled-ABC path*: v0.69 reuses a long-lived ABC process, gated on `is_yosys_abc()`. Passing `-exe` with a different path does skip that branch, and the crash persists anyway. Not the defect.
 
-**Superseded hypothesis, recorded so it is not re-derived:** the three `std::string` values passed to `%s` in the `read_lib` `stringf` call at line 1036 look like classic printf UB, but v0.69's `stringf` is a type-safe variadic template (`kernel/io.h`), so this is not the defect. Do not chase it again.
+Options:
 
-Options, in preference order:
+1. **Drop `-liberty_args` from `yosys_synthesis.tcl`.** The only configuration that works on v0.69, verified natively and emulated. yosys then takes the newer merged-SCL path (`read_scl`) instead of the legacy `read_lib` one. This is the recommended fix.
+2. ~~Disable the pooled-ABC path via `-exe`~~ — tested, does not avoid the crash.
+3. Report upstream and carry a patch, or pin a different release. Only if option 1 proves unacceptable on QoR.
 
-1. **Drop `-liberty_args` from `yosys_synthesis.tcl`.** Without it v0.69 takes the newer merged-SCL path, which did not exist when the flag was introduced and may already give ABC the real delay model that `-S 20 -G 3` was added to provide. Cheapest fix and plausibly an improvement, but it changes what ABC is given, so it needs a QoR comparison before it is trusted for thesis numbers.
-2. **Disable the pooled-ABC path** if a supported switch exists, keeping `-liberty_args` and today's delay model exactly. Preserves intended behaviour; costs whatever parallel-ABC speedup the pooling was providing.
-3. **Report upstream and carry a patch.** Correct long-term, but the defect is inside ABC's interaction with the reuse protocol rather than a one-line typo, so this is not the small mechanical patch option 2 in D3 looked like.
+**On measuring the QoR cost.** `-S 20 -G 3` exists to give ABC a real delay model, so dropping it plausibly changes results. Repeated attempts to measure this on a small synthetic DUT against the fork-era image were not productive: the baseline arm kept failing for harness reasons rather than real ones. The right instrument already exists — the adoption gate (task 5.1) runs the full design and diffs cell count, area and DFF count against the checked-in `synth-baseline.json`. That is a far better measurement than a toy module, and it is a step this change has to take anyway. Take option 1, then let the gate quantify the delta and explain it, exactly as the gate's own scenario requires.
 
 Whichever is chosen, the gate cannot run until it is.
 
