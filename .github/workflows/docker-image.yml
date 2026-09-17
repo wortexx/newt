@@ -117,6 +117,22 @@ jobs:
           docker run --rm -v "${{ github.workspace }}/docker/smoke-test.sh:/smoke-test.sh:ro" \
             newt-eda:smoke-test bash /smoke-test.sh
 
+      # A pull request's composite image, published so it can be *run* rather
+      # than only build-verified. The adoption gate for a tooling bump is a
+      # synth.yml dispatch with image_tag=pr-<n> on the self-hosted runner
+      # (upgrade-yosys-upstream design D5), and that runner cannot see the
+      # `load: true` image above - it lives only in this runner's local Docker
+      # daemon. Pushed only after the smoke test passes, and never as `:dev`,
+      # so a PR can never move the tag the synth lane and developers default
+      # to. The tag follows the PR head: a later push to the same PR
+      # overwrites it, which is what a gate run wants (measure the latest
+      # head, not whatever the PR opened with).
+      - name: Publish PR image for gate runs
+        if: github.event_name == 'pull_request'
+        run: |
+          docker tag newt-eda:smoke-test "${REGISTRY}/${IMAGE_NAME}:pr-${{ github.event.pull_request.number }}"
+          docker push "${REGISTRY}/${IMAGE_NAME}:pr-${{ github.event.pull_request.number }}"
+
       # Publish only after the smoke test passes, and only on main (never on PRs).
       - name: Tag and publish
         if: github.event_name != 'pull_request'

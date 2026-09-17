@@ -48,7 +48,7 @@ binaries the Makefiles expect on `PATH` (or set their paths directly):
 - [Morty](https://github.com/pulp-platform/morty#install) — SystemVerilog pickler
 - [SVase](https://github.com/pulp-platform/svase#install--build) — SystemVerilog pre-elaborator
 - [SV2V](https://github.com/zachjs/sv2v#installation) — SystemVerilog to Verilog
-- [Yosys](https://github.com/YosysHQ/yosys#building-from-source) — synthesis (this repo needs a fork/build including [PR-4343](https://github.com/YosysHQ/yosys/pull/4343); no release version has it yet)
+- [Yosys](https://github.com/YosysHQ/yosys#building-from-source) — synthesis (upstream v0.69, pinned in `docker/yosys/Dockerfile`)
 - [OpenROAD](https://github.com/The-OpenROAD-Project/OpenROAD/blob/master/docs/user/Build.md) — place & route backend
 - `riscv64-unknown-elf-gcc` and Modelsim/Questa — only needed to build software and simulate
 
@@ -150,8 +150,12 @@ rotate credentials, and check for drift. Planning and rationale live in
 - **Dependency changes**: `cheshire` and `cva6` are modified via forks pinned
   in `Bender.yml` (by `git`/`rev`), not via local patches — prefer a fork
   commit over anything beyond a one-line change.
-- **Yosys is a custom fork** (pinned in `docker/`) — do not rebase it onto
-  upstream Yosys unless it actively blocks the work.
+- **Yosys is upstream**, pinned to a release tag in
+  `docker/yosys/Dockerfile` (v0.69 since 2026-09; the custom fork it
+  replaced is retired). Bump the tag only via a change that re-runs the
+  synthesis adoption gate — a version bump moves cell count, area and
+  netlist naming, so it needs a measured before/after and a reseeded
+  `target/ihp13/yosys/synth-baseline.json`, not just a green build.
 - **Licensing**: hardware and tool scripts are Solderpad Hardware License
   0.51; software is Apache-2.0. Keep SPDX headers consistent with the
   existing file's license family when editing, and add one to new

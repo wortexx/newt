@@ -8,17 +8,40 @@
 yosys/OpenSTA reports, compare them against a checked-in baseline, and emit a
 Markdown summary table.
 
-Report format reference (captured from a real `yosys stat`/`check` run and a
-real `sta` `report_checks` run against the newt-eda:dev image, IHP sg13g2
-stdcell liberty - see openspec/changes/ci-synth-lane/tasks.md task 1.2/2.1):
+Report format reference:
 
-  basilisk_area.rpt (yosys `stat -top <top> -liberty <lib>`):
-      Number of cells:                714166
-        sg13g2_and2_1                 12345
-        sg13g2_dfrbp_1                89258
-        ...
+  basilisk_area.json (yosys `stat -json -top <top> -liberty <lib>`):
+      {
+         "creator": "Yosys 0.69 (...)",
+         "invocation": "stat -json -top iguana_chip -liberty ... ",
+         "modules": {
+            "\\\\some_submodule": { "num_cells": 123, "area": 456.0, ... },
+            ...
+         },
+         "design": {
+            "num_cells":         714166,
+            "area":              17156844.687500,
+            "sequential_area":   4919330.000000,
+            "num_cells_by_type": { "sg13g2_dfrbp_1": 89258, ... }
+         }
+      }
 
-      Chip area for module '\\iguana_chip': 17156844.687500
+      The top-level "design" key is the whole-hierarchy rollup that yosys
+      emits when `-top` is given, so it is the one the lane reports. The
+      per-module entries under "modules" are local (this-module-only)
+      counts; summing them would double-count, which is exactly the bug the
+      old text parser had to work around by scoping to the last
+      "=== design hierarchy ===" marker.
+
+      This replaced text-report scraping in the yosys v0.69 upgrade
+      (openspec/changes/upgrade-yosys-upstream, design D4): v0.69's `stat`
+      prints a table and no longer emits the "Number of cells:" lines the
+      old parser matched, while `-json` is a documented structure.
+
+      Note the shape depends on flags: with `-hierarchy`, num_cells becomes
+      an object of stringified counts rather than an integer. The flow does
+      not pass it; parse_area_report rejects that shape loudly rather than
+      silently misreading it.
 
   basilisk_synth.rpt (yosys `check`):
       Checking module iguana_chip...
@@ -41,16 +64,11 @@ import os
 import re
 import sys
 
-CELLS_RE = re.compile(r"Number of cells:\s*(\d+)")
-AREA_RE = re.compile(r"Chip area for module '[^']*':\s*([\d.]+)")
-TOP_AREA_RE = re.compile(r"Chip area for top module '[^']*':\s*([\d.]+)")
-CELL_ROW_RE = re.compile(r"^\s{2,}(\S+)\s+(\d+)\s*$")
 CHECK_RE = re.compile(r"Found and reported (\d+) problems?\.")
 SLACK_RE = re.compile(r"^\s*(-?[\d.]+)\s+slack\s+\((?:MET|VIOLATED)\)\s*$", re.MULTILINE)
 
-# yosys `stat` on a hierarchical design prints this marker immediately
-# before its final top-level rollup (see parse_area_report).
-DESIGN_HIERARCHY_MARKER = "=== design hierarchy ==="
+# Key holding the whole-hierarchy rollup in `stat -json -top <top>` output.
+DESIGN_KEY = "design"
 
 # Cells counted as flip-flops for the DFF metric. Matches the Phase 1
 # adoption-gate's counting method: any mapped cell whose name starts with
@@ -71,42 +89,71 @@ def read_report(path, label):
         return f.read()
 
 
-def parse_area_report(text):
-    # On a hierarchical design, `stat -top <top>` prints one `=== <module>
-    # ===` block per submodule (each with its own "Number of cells:" and
-    # per-cell-type breakdown) BEFORE a final "=== design hierarchy ==="
-    # rollup with the true top-level totals. Scanning the whole file would
-    # double- (or many-times-) count every cell that also appears in its own
-    # submodule's block - caught against a real synth-lane run (task 3.3):
-    # DFF count came out ~2x actual because of exactly this. Restrict to
-    # text at-or-after the last "=== design hierarchy ===" marker, which
-    # holds the true final tallies; a flat/single-module report (no
-    # hierarchy section at all - e.g. this script's own fixture tests)
-    # has no such marker, so the whole text is used as before.
-    idx = text.rfind(DESIGN_HIERARCHY_MARKER)
-    scope = text[idx:] if idx != -1 else text
+def _require_number(value, field):
+    """Reject the `stat -hierarchy` shape, where counts are objects of strings.
 
-    # yosys prints "Chip area for top module '...'" for the hierarchy
-    # rollup's line specifically, vs. plain "Chip area for module '...'"
-    # for every per-submodule block (and for a flat design with no
-    # hierarchy section). Prefer the "top module" wording when present so
-    # a hierarchical report can't accidentally match a submodule's line
-    # even if the marker-based scoping above were ever bypassed.
-    top_area_matches = TOP_AREA_RE.findall(scope)
-    area_matches = top_area_matches or AREA_RE.findall(scope)
-    cells_matches = CELLS_RE.findall(scope)
-    if not cells_matches or not area_matches:
+    Without -hierarchy a count is a plain JSON number. With it, yosys emits
+    {"count": "714166", "area": "...", "local_count": ...} instead. Reading
+    that shape as a number would not raise on its own - it would quietly
+    produce a wrong metric - so name the mismatch explicitly.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ReportError(
-            "area report did not contain both a cell count and a chip area line"
+            f"'{field}' is {type(value).__name__}, expected a number - the report "
+            "looks like it was produced by `stat -json -hierarchy`, which this "
+            "parser does not read; regenerate it without -hierarchy"
         )
-    cells = int(cells_matches[-1])
-    chip_area = float(area_matches[-1])
+    return value
 
+
+def parse_area_report(text):
+    # `tee -o` can capture stray yosys log lines (warnings) alongside the
+    # JSON, so slice from the first '{' to the last '}' rather than trusting
+    # the file to be pure JSON.
+    start = text.find("{")
+    end = text.rfind("}")
+    if start == -1 or end == -1 or end <= start:
+        raise ReportError(
+            "area report contains no JSON object - if this is the text "
+            "`stat` report (basilisk_area.rpt), pass the `stat -json` one "
+            "(basilisk_area.json) instead; the text layout is no longer parsed"
+        )
+    try:
+        report = json.loads(text[start : end + 1])
+    except json.JSONDecodeError as e:
+        raise ReportError(f"area report is not valid JSON: {e}") from e
+
+    # `stat -json -top <top>` emits a top-level "design" entry holding the
+    # whole-hierarchy rollup. Its absence means the report was generated
+    # without -top, in which case there is no design-wide total to report
+    # and per-module entries would have to be summed (double-counting
+    # anything instantiated more than once) - refuse rather than guess.
+    if DESIGN_KEY not in report:
+        raise ReportError(
+            f"area report has no top-level '{DESIGN_KEY}' entry - it was likely "
+            "generated without `-top`, so it carries no whole-design rollup"
+        )
+    design = report[DESIGN_KEY]
+
+    if "num_cells" not in design:
+        raise ReportError(f"'{DESIGN_KEY}' entry has no 'num_cells'")
+    # yosys omits "area" entirely when no liberty file was loaded (area 0).
+    if "area" not in design:
+        raise ReportError(
+            f"'{DESIGN_KEY}' entry has no 'area' - the report was generated "
+            "without a -liberty argument, so no cell areas are known"
+        )
+
+    cells = int(_require_number(design["num_cells"], "num_cells"))
+    chip_area = float(_require_number(design["area"], "area"))
+
+    by_type = design.get("num_cells_by_type", {})
+    if not isinstance(by_type, dict):
+        raise ReportError("'num_cells_by_type' is not an object")
     dffs = 0
-    for line in scope.splitlines():
-        m = CELL_ROW_RE.match(line)
-        if m and m.group(1).lower().startswith(DFF_PREFIX):
-            dffs += int(m.group(2))
+    for cell_type, count in by_type.items():
+        if cell_type.lower().startswith(DFF_PREFIX):
+            dffs += int(_require_number(count, f"num_cells_by_type[{cell_type}]"))
 
     return cells, chip_area, dffs
 
@@ -170,7 +217,7 @@ def render_summary(metrics, baseline):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--area", required=True, help="path to the yosys stat report (e.g. basilisk_area.rpt)")
+    parser.add_argument("--area", required=True, help="path to the yosys `stat -json` report (e.g. basilisk_area.json)")
     parser.add_argument("--check", required=True, help="path to the yosys check report (e.g. basilisk_synth.rpt)")
     parser.add_argument("--baseline", required=True, help="path to the checked-in baseline JSON")
     parser.add_argument("--sta", help="path to the sta report_checks output (optional)")

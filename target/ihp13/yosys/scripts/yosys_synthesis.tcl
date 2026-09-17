@@ -232,6 +232,13 @@ yosys hilomap -singleton -hicell {*}[split ${tech_tiehi} " "] -locell {*}[split 
 # final reports
 yosys tee -q -o "${report_dir}/${proj_name}_synth.rpt" check
 yosys tee -q -o "${report_dir}/${proj_name}_area.rpt" stat -top $top_design {*}$liberty_args
+# Machine-readable twin of the area report above, for synth_metrics.py.
+# The text report is for humans; its layout is not a stable interface (yosys
+# 0.69 replaced the "Number of cells:" lines the old parser grepped with a
+# table), whereas -json emits a documented structure. With -top and without
+# -hierarchy, the whole-hierarchy rollup lands under a top-level "design"
+# key, which is what the lane reports.
+yosys tee -q -o "${report_dir}/${proj_name}_area.json" stat -json -top $top_design {*}$liberty_args
 yosys tee -q -o "${report_dir}/${proj_name}_area_logic.rpt" stat -top $top_design -liberty "$tech_cells"
 
 # final netlist
