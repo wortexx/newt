@@ -214,8 +214,22 @@ if { [envVarValid "YOSYS_USE_ABC_SEQ"] } {
 } else {
     puts "Using combinational-only abc optimizations"
     yosys dfflibmap -liberty "$tech_cells"
-    yosys abc -liberty "$tech_cells" -D $period_ps -script $abc_comb_script -constr $abc_constr -liberty_args "-S 20 -G 3" -showtmp
-    # yosys abc -liberty "$tech_cells" -D $period_ps -script $abc_comb_script -constr $abc_constr -showtmp
+    # NOTE: -liberty_args "-S 20 -G 3" was dropped here for yosys v0.69.
+    # It reliably segfaults ABC on v0.69 whenever a user -script is also given,
+    # which is always the case on this path. Confirmed on native x86_64, not an
+    # emulation artifact. The flag is what selects ABC's legacy `read_lib`
+    # branch; without it yosys takes the newer merged-SCL path (`read_scl`),
+    # which is the only configuration that runs. Ruled out as causes: printf UB
+    # (yosys's stringf is type-safe) and v0.69's pooled-ABC process (forcing a
+    # one-shot ABC with -exe still crashes). Full detail and the reproduction
+    # matrix: openspec/changes/upgrade-yosys-upstream/design.md, decision D9.
+    #
+    # The flag existed to give ABC a real delay model ("-S <slew> -G <gain>")
+    # rather than a unit one, so QoR may move. The adoption gate measures that
+    # on the real design against target/ihp13/yosys/synth-baseline.json; if the
+    # delta is large and in a bad direction, revisit D9 rather than restoring
+    # this flag, which cannot run on v0.69 as it stands.
+    yosys abc -liberty "$tech_cells" -D $period_ps -script $abc_comb_script -constr $abc_constr -showtmp
 } 
 
 yosys clean -purge

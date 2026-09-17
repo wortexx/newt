@@ -111,6 +111,8 @@ Options:
 2. ~~Disable the pooled-ABC path via `-exe`~~ — tested, does not avoid the crash.
 3. Report upstream and carry a patch, or pin a different release. Only if option 1 proves unacceptable on QoR.
 
+**Applied.** Option 1 is implemented in `yosys_synthesis.tcl`'s combinational path, with the rationale recorded inline at the call site. Verified end to end on v0.69: yosys exits 0, and ABC's buffering, resizing and final timing all run. A synthetic-DUT run reports 32 `check` problems (undriven output bits), but the fork-era image reports exactly the same 32 with the identical harness, so they are an artifact of the reduced test pipeline rather than anything this change introduces. The real flow's `check` is what the gate reads.
+
 **On measuring the QoR cost.** `-S 20 -G 3` exists to give ABC a real delay model, so dropping it plausibly changes results. Repeated attempts to measure this on a small synthetic DUT against the fork-era image were not productive: the baseline arm kept failing for harness reasons rather than real ones. The right instrument already exists — the adoption gate (task 5.1) runs the full design and diffs cell count, area and DFF count against the checked-in `synth-baseline.json`. That is a far better measurement than a toy module, and it is a step this change has to take anyway. Take option 1, then let the gate quantify the delta and explain it, exactly as the gate's own scenario requires.
 
 Whichever is chosen, the gate cannot run until it is.
