@@ -6,6 +6,7 @@
   "yosys": "v0.69",
   "source": "upgrade-yosys-upstream adoption gate (openspec/changes/upgrade-yosys-upstream), run 35275581702",
   "date": "2026-09-17",
-  "image": "ghcr.io/wortexx/newt-eda:pr-32",
-  "notes": "Supersedes the fork-era baseline of 714166 cells / 17156844.69 um^2 / 89258 DFFs (2026-08-29, image 2026-08-29-8d13fe0). The +3.05% cells / +3.60% area delta carries both the yosys 0.40->0.69 jump and the dropped `abc -liberty_args` (design D9); accepted deliberately. wns_ps is null because basilisk.sdc's *ddr_rcv_clk_o* pattern matches nothing in this netlist - a pre-existing content bug, not a regression."
+  "image": "ghcr.io/wortexx/newt-eda:2026-09-17-5c20f1e",
+  "notes": "Supersedes the fork-era baseline of 714166 cells / 17156844.69 um^2 / 89258 DFFs (2026-08-29, image 2026-08-29-8d13fe0). The +3.05% cells / +3.60% area delta carries both the yosys 0.40->0.69 jump and the dropped `abc -liberty_args` (design D9); accepted deliberately. wns_ps is null because basilisk.sdc's *ddr_rcv_clk_o* pattern matches nothing in this netlist - a pre-existing content bug, not a regression. The gate ran against the ephemeral `pr-32` tag; this records the durable `<date>-<sha>` tag main published instead. They are the same image: `pr-32`, `2026-09-17-5c20f1e` and `dev` all resolve to the digest above, so the reference is exact, not approximate.",
+  "image_digest": "sha256:31779dddf7d5695f9318b3d1f084937834863f78d47d415aacb0ec83c940c1b9"
 }
