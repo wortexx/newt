@@ -15,7 +15,7 @@ instructions for a cryptographic (SHA) coprocessor on CVA6 / Cheshire, targeting
 | Fact | Implication |
 | --- | --- |
 | Upstream repo dormant since 2024-10; Docker image built 2024-08-22 | Nobody upstream will refresh tooling — we own it. |
-| yosys is a **custom fork** (`github.com/phsauter/yosys` @ `3ce5059`) | Do **not** rebase onto upstream yosys unless it actively blocks us. |
+| yosys was a **custom fork** (upstream 2024-04 + 3 commits on `abc.cc`) | **Retired 2026-09-17**: now upstream **v0.69**, pinned by release tag in `docker/yosys/Dockerfile`. The fork's `-liberty_args` landed upstream in v0.66, and v0.67+ is the first yosys with the slang frontend built in, which Phase 8 needs. Bump the tag only via a change that re-runs the synthesis adoption gate. |
 | OpenROAD is upstream (`589dee1c8`, ~mid-2024) | **Bumped to `2c56926` (2026-08-27) in `newt-eda`.** "Safe to bump" held, but the 2.5-year API gap needed real porting work: `initialize_floorplan -sites`→`-site`, `detailed_route`'s `-bottom/-top_routing_layer` now hard errors (DRT-0509/0510, use `set_routing_layers`), PDN zero-instance crashes, per-process `set_wire_rc`/`estimate_parasitics`/`set_thread_count`. **Lesson: check a command's proc body, not its `define_cmd_args`** — the deprecated flags are still declared and parsed, and only the body rejects them. Backend instability was *not* all OpenROAD: see the routability blocker in Phase 11. |
 | Simulation is **Questa-only** (`iguana.mk` → `questa-2022.3 vsim`); no Verilator flow | **Critical-path blocker for RTL CI.** Must add Verilator. |
 | Dev machine has 31 GB RAM; synth peaks ~35 GB | Basilisk synth needs a >64 GB box or a swap file. |
@@ -51,6 +51,7 @@ Phase 0  ──►  Phase 1 (newt-eda image) ─┐
 
 Phase 5+6  ──►  Phase 9  ✅ (post-merge CI verification — gated on `ci-pnr-lane` landing)
 Phase 10 (Actions version upgrade)  — independent maintenance, any time
+Phase 12 (yosys fork retired -> upstream v0.69)  ✅  — unblocks Phase 8
 Phase 11 (backend routability)      — design work; gates a detail-routed DEF, nothing else
 ```
 
@@ -94,7 +95,7 @@ Full planning + implementation record: `openspec/changes/newt-eda-tooling-image/
       replacing the hand-rolled boost/eigen/lemon/spdlog/swig chain.
 - [x] **riscv64 toolchain**: bumped to release `2026.08.27` (GCC 16.1.0, well past the
       ≥13 bar; `Zknh` compiles).
-- [x] **Kept pinned**: yosys fork `3ce5059`, morty `v0.9.0`, svase `f5f5290`, sv2v `v0.0.11`,
+- [x] **Kept pinned** *(at the time; yosys has since moved to upstream v0.69 — see Phase 12)*: yosys fork `3ce5059`, morty `v0.9.0`, svase `f5f5290`, sv2v `v0.0.11`,
       bender `v0.27.4`.
 - [x] **Added**: Verilator `v5.050`, Verible `v0.0-4148-g1ea007ec` (static release binary).
 - [x] Published to **GHCR**: `ghcr.io/wortexx/newt-eda:2026-08-29-8d13fe0` + moving `:dev`,
@@ -368,6 +369,10 @@ map to `main.bicep` declarations exactly, with no exception left.
 
 ## Phase 8 — Replace svase+sv2v with `yosys-slang`  *(exploratory, not blocking)*
 
+> **Prerequisite met (2026-09-17).** This needed yosys ≥ 0.67, the first release with the slang
+> frontend built in (the standalone plugin supports only 0.52–0.66). The toolchain is now on
+> upstream v0.69 and the image asserts `read_slang` is available, so the prototype below can start.
+
 `svase` (github.com/pulp-platform/svase) is now archived upstream — no more fixes will land.
 It's a thin wrapper around **slang** (SV compiler frontend): parse+elaborate with slang,
 re-emit plain SystemVerilog for `sv2v` to downgrade further for yosys. Slang itself has no
@@ -556,6 +561,75 @@ the synth cache removes the ~3h resynthesis.
 
 ---
 
+## Phase 12 — yosys fork retired, upstream v0.69  ✅ done (2026-09-17)
+
+The flow ran a custom yosys fork: upstream 2024-04 plus three commits on `passes/techmap/abc.cc`,
+4,483 commits behind. Both features it existed for had diverged — `-liberty_args` landed upstream in
+v0.66, while the `{tmpdir}` script placeholder never will (PR #4343 closed, successor #4592 closed).
+Separately, Phase 8 cannot start on a 0.40-era fork because the slang frontend is built in only from
+v0.67. Change: `openspec/changes/upgrade-yosys-upstream`.
+
+- [x] `docker/yosys/Dockerfile` → upstream **v0.69**, pinned by release tag, CMake build from the
+      release tarball (which bundles the abc/slang/fmt submodules the auto-generated archives omit;
+      note it has **no top-level directory**, so no `--strip-components`).
+- [x] Smoke test asserts the pinned version, `abc -liberty_args`, and built-in `read_slang`.
+- [x] **Composite image now assembled from stage digests, not the mutable `:ci` tag.** buildx does not
+      re-resolve a tag whose resolution it has cached, so the composite had been able to consume a
+      previous run's stage image. Latent since the workflow was written; only surfaced because this
+      was the first change to a stage. Digests also stop concurrent PR runs clobbering each other.
+- [x] Synth-lane metrics parse `stat -json`; v0.69's text `stat` no longer prints the
+      `Number of cells:` lines the old parser scraped.
+- [x] Removed the ABC BLIF round-trip that depended on the fork-only `{tmpdir}` substitution
+      (upstream passes a user `-script` to ABC verbatim, so it arrived as a literal directory name).
+- [x] **Dropped `abc -liberty_args "-S 20 -G 3"`** — it segfaults ABC on v0.69 whenever a user
+      `-script` is also given, confirmed on native x86_64. See `design.md` D9 for the reproduction
+      matrix and two ruled-out root causes.
+- [x] **Adoption gate PASSED** (run 35275581702): `synth-all` in **110 min** vs ~148 min baseline
+      (~25% faster — v0.69 runs ABC in parallel), yosys `CHECK` **0 problems**.
+
+| metric | v0.69 | fork baseline | delta |
+| --- | --- | --- | --- |
+| cells | 735,953 | 714,166 | **+3.05%** |
+| chip area (um²) | 17,774,827.51 | 17,156,844.69 | **+3.60%** |
+| DFFs | 89,499 | 89,258 | +0.27% |
+
+`synth-baseline.json` reseeded from this run. The +3% is **accepted deliberately** (see PPA note below).
+
+**Known-bad, left in place:** the netlist-naming check added by this change greps the *yosys* netlist
+for the flattened instance paths `macros.tcl` uses. Those exist only after *OpenROAD* flattens; in the
+yosys netlist the ~25 `YOSYS_KEEP_HIER_INST` instances are real modules with local internal names, so
+only 20 of 122 patterns can ever match. It failed the gate for a defect that was not there and is now
+**advisory, never gating**. Fix it by restricting it to leaf globs (`*RM_IHP*`, `*i_delay_line*`,
+`*_reg`) or by running it against the OpenROAD-flattened netlist.
+
+### PPA improvement opportunities
+
+The area is what it is today, not what it has to be. Roughly in order of expected payoff per unit of
+effort:
+
+1. **Recover the `-liberty_args` delay model (~3% area).** `-S 20 -G 3` made ABC derive its internal
+   delay model from the liberty's slew/gain instead of a unit model, and dropping it is the most
+   likely cause of the +3%. It is unusable on v0.69 only because of the crash in D9. Fixing that
+   upstream — or finding the equivalent knob on the newer merged-SCL (`read_scl`) path, which may
+   already carry this information — would plausibly return most of the delta. Best value here.
+2. **Re-examine the ABC script itself.** `abc-speed-opt-new.script` is tuned for 2022-era ABC and
+   still uses the "Lazy Man's Synthesis" record library (`rec_start3` on a 42 MB AIG). v0.69 bundles
+   an ABC more than two years newer with passes the script never calls. Worth an A/B against a
+   modern `&nf`-based flow before assuming the current script is optimal.
+3. **Revisit `YOSYS_KEEP_HIER_INST`.** ~25 instances are kept hierarchical to make backend scripts
+   able to find things by name. Every kept boundary blocks cross-module optimisation. Some entries
+   exist for floorplanning convenience rather than necessity, and each one is a real area cost.
+4. **Try `abc9`.** The flow uses the classic `abc` pass. `abc9` does better structural choices and
+   timing-driven mapping on many designs. Needs care with the sequential path, and the flow already
+   documents why FF handling is delicate here.
+5. **Sequential optimisation / retiming.** `YOSYS_USE_ABC_SEQ` and `YOSYS_USE_ABC_RETIME` are both
+   `0`. The script's own comments explain the clock-domain and init-value pitfalls, so this is the
+   most invasive option — but it is also the only one on this list that can move the DFF count.
+
+Worth noting for thesis framing: the ~25% synthesis speed-up from parallel ABC is itself a result,
+and area and runtime are separate axes. None of the above is required for correctness; all of it is
+optional PPA work that can follow the coprocessor.
+
 ## Risks
 
 | Risk | Mitigation |
@@ -569,6 +643,7 @@ the synth cache removes the ~3h resynthesis.
 | `detailed_route` never converges on the modified design | It is congestion-bound at 63 % util even for stock Basilisk; treat a clean route as a stretch goal, not a gate. Consider a secondary easier PDK (Sky130) for fast QoR during development |
 | Phase 1 adoption gate's ~1% cell/area delta has an unexplained residual: a ~830-module textual divergence in the pickled RTL (`sv2v.v`) between the 2024 baseline and the new image. Ruled out: bender release-asset choice (verified byte-identical `sources.json` from both `v0.27.4` assets on identical input) and the `TARGET_*` bender-version schema difference (those defines aren't referenced anywhere in the dependency tree). Not yet distinguished: pure module-reordering in morty's output vs. an actual semantic difference | Not blocking — delta is small and in the benign direction (design got smaller), 0 yosys `CHECK` problems both sides. Revisit if a future gate shows a similar or larger delta; a sort-and-diff-by-module pass on `sv2v.v`, or re-running pickle against a `bender 0.32.1`-shaped `sources.json`, would isolate it |
 | 2024 baseline's own `sources.json` was generated by a host-installed `bender 0.32.1`, not either Docker image's bundled `0.27.4` — a pre-existing baseline-generation inconsistency, discovered while investigating the row above | Note for future baseline captures: regenerate references fully in-container with the pinned tool versions, not via whatever `bender` happens to be on the host PATH |
+| Synthesis QoR moved +3.05% cells / +3.60% area when yosys went 0.40→v0.69, because `abc -liberty_args "-S 20 -G 3"` had to be dropped (it segfaults v0.69 — see Phase 12 / design D9). That flag gave ABC a slew/gain delay model instead of a unit one | Accepted deliberately; `synth-baseline.json` reseeded from adoption-gate run 35275581702 so later design work is measured against the tool that synthesises it. Any thesis PPA figure quoted against the older 714,166-cell baseline must be requoted. Recovering the delta is item 1 of Phase 12's PPA improvement list |
 
 ---
 
