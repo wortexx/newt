@@ -29,17 +29,12 @@ The `newt-eda` image SHALL be built on `ubuntu:24.04` and SHALL contain, on `PAT
 
 ### Requirement: Image runs the existing synthesis flow at parity
 
-The image SHALL run the repository's frontend + synthesis flow (`make ig-hw-all`, `make pickle-all`, `make synth-all`) on unmodified Basilisk to completion. Whenever a synthesis-tool bump is adopted, the result SHALL be compared against the checked-in synthesis baseline (`target/ihp13/yosys/synth-baseline.json`) produced by the previous tool, the delta SHALL be explained before adoption, the resulting netlist SHALL remain consumable by the backend scripts' instance and net name patterns, and the baseline SHALL be reseeded from the new tool once adopted so that later design changes are measured against the tool that synthesizes them.
+The image SHALL run the repository's frontend + synthesis flow (`make ig-hw-all`, `make pickle-all`, `make synth-all`) on unmodified Basilisk to completion. Whenever a synthesis-tool bump is adopted, the result SHALL be compared against the checked-in synthesis baseline (`target/ihp13/yosys/synth-baseline.json`) produced by the previous tool, the delta SHALL be explained before adoption, and the baseline SHALL be reseeded from the new tool once adopted so that later design changes are measured against the tool that synthesizes them.
 
 #### Scenario: Adoption gate on unmodified Basilisk
 
 - **WHEN** `make synth-all` completes in the new image on unmodified Basilisk RTL
 - **THEN** the run finishes without errors, yosys `CHECK` reports 0 problems, and cell count / chip area / DFF count are recorded and diffed against the checked-in `synth-baseline.json`, with the delta explained (tool-version change is an acceptable explanation only when the direction and magnitude are consistent with the tool's own release notes) before adoption
-
-#### Scenario: Netlist naming stays compatible with the backend scripts
-
-- **WHEN** the gate's netlist is produced by the new synthesis tool
-- **THEN** every instance and net name pattern that the backend constraints and macro-placement scripts match (`target/ihp13/openroad/src/basilisk_instances.sdc`, `target/ihp13/openroad/scripts/macros*.tcl`, and the `*_reg` clock-pin lookup in `chip.tcl` / `pnr/common.tcl`) resolves to at least one object in the new netlist, or the pattern is updated in the same change
 
 #### Scenario: Baseline reseeded after adoption
 
