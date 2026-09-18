@@ -151,35 +151,6 @@ jobs:
       - name: Synthesize (make synth-all)
         run: make synth-all
 
-      # A netlist can pass `check` with 0 problems and still be unusable by
-      # the backend, because OpenROAD looks a lot of things up by literal
-      # name: macros.tcl places every SRAM by hierarchical instance path,
-      # and basilisk_instances.sdc anchors constraints to specific cells and
-      # nets. A `get_cells` glob that matches nothing is not a Tcl error, so
-      # a synthesis rename degrades placement or silently drops constraints
-      # instead of failing. (That is not hypothetical: `*ddr_rcv_clk_o*`
-      # already matches nothing, which is why WNS reads "unavailable" - the
-      # script reports it as a known warning rather than a new failure.)
-      #
-      # Advisory on the lane's routine runs, gating on an adoption-gate
-      # dispatch (image_tag != dev), which is exactly when a tooling bump
-      # could have renamed things and the run exists to catch it.
-      - name: Check netlist names used by the backend scripts
-        # Never gating: this check is known to be wrong (see task 4.1 in
-        # openspec/changes/upgrade-yosys-upstream). It greps the YOSYS netlist
-        # for the flattened instance paths macros.tcl uses, but those paths
-        # only exist after OpenROAD flattens; in the yosys netlist the ~25
-        # YOSYS_KEEP_HIER_INST instances are real modules with LOCAL internal
-        # names. It failed adoption-gate run 35275581702 for a defect that was
-        # not there, and skipped the metrics it was supposed to accompany.
-        # Left in place as advisory output until it is either restricted to
-        # leaf globs or moved to the OpenROAD-flattened netlist.
-        continue-on-error: true
-        run: |
-          python3 target/ihp13/yosys/scripts/check_netlist_names.py \
-            target/ihp13/yosys/out/basilisk.yosys.v \
-            | tee -a "$GITHUB_STEP_SUMMARY"
-
       # run-sta needs cwd target/ihp13/yosys: opensta_timings.tcl's
       # `read_sdc ../openroad/src/basilisk.sdc` is relative to the caller's
       # cwd (design.md D4). Two variables must be passed explicitly because
