@@ -57,3 +57,7 @@ apm_modules/
 .claude/skills/docs-sync-audit/
 .claude/skills/github-actions-efficiency/
 .claude/skills/github-actions-hardening/
+
+# Python bytecode (created by importing flow scripts, e.g. during analysis)
+__pycache__/
+*.pyc
