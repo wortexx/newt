@@ -38,7 +38,7 @@ Tags: **[edit]** = plain file editing, **[docker]** = needs a Docker image build
 
 ## 5. Adoption gate and baseline reseed
 
-- [ ] 5.1 **[long-run]** Dispatch `synth.yml` with `image_tag=pr-<n>` on the self-hosted runner. Verify: `synth-all` exits 0, yosys `CHECK` reports 0 problems, the naming check passes (with the pre-existing `*ddr_rcv_clk_o*` warning noted), and the metrics summary reports cells / area / DFFs against the fork-era baseline (714,166 / 17,156,844.69 / 89,258). Record the numbers, the wall time versus ~2h28m, and the delta explanation in this task. If the delta is unexplained and worse, stop here and decide with the previous image still as `:dev`.
+- [x] 5.1 **[long-run]** Dispatch `synth.yml` with `image_tag=pr-<n>` on the self-hosted runner. Verify: `synth-all` exits 0, yosys `CHECK` reports 0 problems, the naming check passes (with the pre-existing `*ddr_rcv_clk_o*` warning noted), and the metrics summary reports cells / area / DFFs against the fork-era baseline (714,166 / 17,156,844.69 / 89,258). Record the numbers, the wall time versus ~2h28m, and the delta explanation in this task. If the delta is unexplained and worse, stop here and decide with the previous image still as `:dev`.
 
   **RESULT (run 35275581702, 2026-09-17, self-hosted VM, image `pr-32`).** `synth-all` completed in **110 min** versus the ~148 min baseline, about 25% faster, consistent with v0.69 running ABC in parallel. yosys `CHECK`: **0 problems**.
 
@@ -54,6 +54,8 @@ Tags: **[edit]** = plain file editing, **[docker]** = needs a Docker image build
   **The run is marked failed, but not by synthesis.** The netlist-naming check (task 4.1) failed it, and that check is wrong — see the correction recorded under task 4.1. Because it is gating on a non-`dev` tag it also skipped the STA, metrics and netlist-upload steps; the metrics above were computed afterwards by running `synth_metrics.py` over the uploaded `basilisk_area.json`.
 
   **Open decision:** whether +3% area is acceptable for thesis PPA numbers, or whether the `-liberty_args` delay model is worth recovering via an upstream fix (D9 option 3).
+
+  **CLOSED.** +3% accepted by the user; baseline reseeded (task 5.2) and PPA recovery routes recorded in `docs/infra-plan.md` Phase 12, led by restoring the `-liberty_args` delay model. Marked done on substance: `synth-all` exited 0, yosys `CHECK` reported 0 problems, and the metrics were recorded against the fork-era baseline with the delta explained. The one acceptance criterion not met literally was "the naming check passes" — that check was itself invalid and has since been deleted (task 4.1), so it cannot gate this.
 - [x] 5.2 **[edit]** Reseed `target/ihp13/yosys/synth-baseline.json` from the 5.1 run (design D7): new cells / area / DFFs, `wns_ps` as measured or unavailable, `source` = this change, `date`, `image` = the `pr-<n>` tag, new `yosys` field `v0.69`. Verify `synth_metrics.py` run against the 5.1 JSON with the new baseline reports zero drift on all three metrics. — done. Reseeded from run 35275581702: 735,953 cells / 17,774,827.51 um^2 / 89,499 DFFs, `yosys: v0.69`, image `pr-32`, with a `notes` field recording the superseded fork-era numbers and why `wns_ps` is null (the pre-existing `*ddr_rcv_clk_o*` SDC pattern, not a regression). Verified: `synth_metrics.py` against the gate's own `basilisk_area.json` reports +0.00% on cells, area and DFFs.
 
 ## 6. Docs and rule retirement
