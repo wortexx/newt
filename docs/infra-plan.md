@@ -535,6 +535,16 @@ The cause is upstream and already visible in `grt`'s own final congestion report
 `global_route` runs with `-allow_congestion`. Global routing hands detailed routing a
 solution that does not physically fit.
 
+**2026-09-18 finding: `cts` now fails too, not just `drt`.** The first real weekly-cron run
+since Phase 12's yosys v0.69 upgrade (run `35390510737`, `post-merge-ci-verification` task
+5.2) timed out in `cts` (its 4h default, exit 124) after `floorplan`/`pre_place`/`gpl`/`dpl`
+all passed — the first `cts` failure in this project's history; every prior real run reached
+`cts ok`. Not yet investigated: whether this is congestion-driven like the `drt` blocker below
+(plausible, since v0.69's netlist is ~3% larger — Phase 12) or an unrelated regression.
+Whoever picks this phase up should start by checking `cts.tcl`'s report for
+congestion/setup-violation counts against the pre-upgrade baseline before assuming it shares
+`drt`'s root cause. Recorded, not investigated, per the user's decision when this surfaced.
+
 Candidate levers, roughly cheapest first — none yet tried:
 
 - [ ] **Relax our own layer adjustments.** `pnr_apply_routing_layers` removes 30% of M2/M3
