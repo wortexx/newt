@@ -32,14 +32,21 @@
 #      for the VM class alone (~$888/mo if it *were* left running 24/7 - it
 #      deliberately isn't).
 #      The practical upshot for the nightly cron trigger below, now that the
-#      VM is deallocated by default rather than left running: [pending
-#      openspec/changes/post-merge-ci-verification task 5.4's multi-night
-#      observation as of 2026-09-17 - update this paragraph with what
-#      actually happens to a 02:30 UTC run queued against a deallocated VM
-#      once that's recorded]. `workflow_dispatch` and label-triggered runs are
-#      unaffected either way (they queue for the runner regardless of the
-#      VM's current power state, and a `pnr.yml` `start` job or a manual `az
-#      vm start` brings it up for them).
+#      VM is deallocated by default rather than left running: "nightly"
+#      degrades to "whenever the VM is up next", exactly as predicted
+#      (post-merge-ci-verification design D6). Observed over two nights
+#      (task 5.4): both 02:30 UTC crons registered with GitHub only ~5h late
+#      (07:2x UTC), then queued for hours until pnr.yml's own `start` job
+#      powered the VM for its weekly run - one queued run grabbed the runner
+#      ahead of pnr.yml's `restore-checkpoints`, delaying that P&R run by
+#      ~2h; the other grabbed it 2s after pnr.yml's own `pnr` job ended,
+#      the same collision shape that once destroyed a P&R run's checkpoints
+#      (see the checkout step's comment below) - harmless this time because
+#      those checkpoints were already exported out of the workspace. Both
+#      nights' synth runs completed `success`. `workflow_dispatch` and
+#      label-triggered runs are unaffected either way (they queue for the
+#      runner regardless of the VM's current power state, and a `pnr.yml`
+#      `start` job or a manual `az vm start` brings it up for them).
 #   2. This runner sits on a PUBLIC repo. A pull request from a fork must
 #      never auto-execute here (see the `if:` condition on the `pull_request`
 #      trigger below, plus the repo's "Require approval for all external
