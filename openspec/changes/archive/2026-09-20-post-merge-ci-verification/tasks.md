@@ -79,4 +79,5 @@ Ordering follows design.md's Migration Plan: inert workflow edits first, then th
 
 ## 7. Wrap-up
 
-- [ ] 7.1 `openspec validate post-merge-ci-verification --strict` passes and every task above carries its run IDs, dates, and the ordering/observations it asked for; then hand off to `/opsx:archive` (which syncs the two delta specs into `openspec/specs/`). Verify: validate exits 0; `git status` clean after the archive commit.
+- [x] 7.1 `openspec validate post-merge-ci-verification --strict` passes and every task above carries its run IDs, dates, and the ordering/observations it asked for; then hand off to `/opsx:archive` (which syncs the two delta specs into `openspec/specs/`). Verify: validate exits 0; `git status` clean after the archive commit.
+  - Done 2026-09-20. `openspec validate post-merge-ci-verification --strict` and both capability validations passed before archiving. `/opsx:archive` synced both delta specs into `openspec/specs/` (`azure-infrastructure`'s and `ci-pipeline`'s MODIFIED requirements applied verbatim, diff-checked against the delta before archiving) and moved this change to `openspec/changes/archive/2026-09-20-post-merge-ci-verification/`. `git status` clean after this commit.
