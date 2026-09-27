@@ -41,7 +41,9 @@ Legend: **[edit]** plain editing · **[eda]** needs the `newt-eda` tools (minute
 - [x] 2a.1 **[edit]** Add `flatdict` to `docker/all/requirements.txt`. Verify: a post-bump `make ig-hw-all` failed in `newt-eda:dev` with `ModuleNotFoundError: No module named 'flatdict'` from iDMA's `gen_idma.py`, and the same run passes once `flatdict` is installed.
       Confirmed both ways. Without it: `idma.mk:116` fails generating `idma_transport_layer_rw_axi.sv`. With it (runtime `pip install` probe): `ig-hw-all` + `pickle-all` exit 0. `flatdict` is the only new module needed.
 - [x] 2a.2 **[edit]** Add `python3 -c "import <mod>"` assertions to `docker/smoke-test.sh` for `hjson mako yaml tabulate flatdict`, and add the `eda-tooling-image` spec delta. Verify: against the current `:dev` (2026-09-17) only `python3 import flatdict` FAILs. Against a thin image that replays `docker/all/Dockerfile`'s pip step with the new `requirements.txt` (`newt-eda:bump-cheshire`, local), all 20 checks pass and the smoke test exits 0.
-- [ ] 2a.3 **[eda]** On the PR, `docker-image.yml` builds the real image and its smoke test passes. Verify: the PR run is green, `:pr-N` is published, and the synth-lane dispatch in 6.2 uses `image_tag=pr-N`.
+- [x] 2a.3 **[eda]** On the PR, `docker-image.yml` builds the real image and its smoke test passes. Verify: the PR run is green, `:pr-N` is published, and the synth-lane dispatch in 6.2 uses `image_tag=pr-N`.
+      **Split into prerequisite PR #49 (user decision, 2026-09-27).** #48's required `sw` check failed with `No module named 'flatdict'`: the fast lane runs in `:dev`, and Cheshire's sw build also generates iDMA register headers with `gen_idma.py`. The earlier claim that the fast lane was unaffected was wrong. So the three image files (`requirements.txt`, `packages.txt`, `smoke-test.sh`) land first in #49. After it merges and `:dev` republishes, #48 is rebased onto `main` (the files drop out of its diff) and its CI re-runs. The `eda-tooling-image` spec delta stays here.
+      Verified on the real images. The `docker-image.yml` runs succeeded for both #48 (`36309653503`) and #49 (`36310349683`), including the new `sgdisk` and Python-import smoke checks. `ghcr.io/wortexx/newt-eda:pr-48` is published, and the synth lane was dispatched against it (run `36321657267`).
 
 ## 3. Repair dependency-keyed flow artifacts
 
@@ -120,7 +122,7 @@ Legend: **[edit]** plain editing · **[eda]** needs the `newt-eda` tools (minute
 ## 6. Integration
 
 - [ ] 6.1 **[edit]** Open the PR. Verify: the fast-lane `lint` (including `bender sources`) and `sw` jobs are green.
-- [ ] 6.2 **[long]** Apply the `full-synth` label to the PR and let the synth lane run. Verify:
+- [ ] 6.2 **[long]** Run the synth lane against the PR. It is triggered by `workflow_dispatch` of `synth.yml` on the PR branch with `image_tag=pr-48`, not by the `full-synth` label: a label-triggered run uses `:dev`, which lacks `flatdict`, and would fail in `ig-hw-all`. Verify:
   - The lane completes with a clean yosys `CHECK`.
   - The cell count, area, DFF count and WNS deltas against `synth-baseline.json` are copied into `docs/infra-plan.md`'s entry from 5.2, with the expected causes noted (iDMA 0.6.3, the extra CVA6 execute region, the live SPM remap).
   - `synth-baseline.json` is reseeded only as a deliberate, separately stated step.
