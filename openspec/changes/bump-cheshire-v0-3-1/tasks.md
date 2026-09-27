@@ -121,10 +121,24 @@ Legend: **[edit]** plain editing · **[eda]** needs the `newt-eda` tools (minute
   That proposal is untracked in the working tree, not on `main`, so the note stays local and is **not** committed on this change's branch. Whoever owns that change picks it up.
 ## 6. Integration
 
-- [ ] 6.1 **[edit]** Open the PR. Verify: the fast-lane `lint` (including `bender sources`) and `sw` jobs are green.
-- [ ] 6.2 **[long]** Run the synth lane against the PR. It is triggered by `workflow_dispatch` of `synth.yml` on the PR branch with `image_tag=pr-48`, not by the `full-synth` label: a label-triggered run uses `:dev`, which lacks `flatdict`, and would fail in `ig-hw-all`. Verify:
+- [x] 6.1 **[edit]** Open the PR. Verify: the fast-lane `lint` (including `bender sources`) and `sw` jobs are green.
+  Done: PR #48, merged as `f3fe9bb`. The first CI run failed `sw` on `:dev` (no `flatdict`), so the image files were split into prerequisite PR #49, merged as `9133185`. #48 was then rebased, and its `lint`, `sw` and stub jobs went green on the republished `:dev`.
+
+- [x] 6.2 **[long]** Run the synth lane against the PR. It is triggered by `workflow_dispatch` of `synth.yml` on the PR branch with `image_tag=pr-48`, not by the `full-synth` label: a label-triggered run uses `:dev`, which lacks `flatdict`, and would fail in `ig-hw-all`. Verify:
   - The lane completes with a clean yosys `CHECK`.
   - The cell count, area, DFF count and WNS deltas against `synth-baseline.json` are copied into `docs/infra-plan.md`'s entry from 5.2, with the expected causes noted (iDMA 0.6.3, the extra CVA6 execute region, the live SPM remap).
   - `synth-baseline.json` is reseeded only as a deliberate, separately stated step.
 
   This task is non-blocking for merge if the lane is unavailable. Record that instead.
+  Done. [Run 36321657267](https://github.com/wortexx/newt/actions/runs/36321657267) on `:pr-48`: all stages passed, yosys `CHECK` reported 0 problems, and `synth-all` + STA took about 2 h.
+  - **VM start.** The run stayed queued until the synth VM was started by hand (`az vm start -g newt-synth-lane-rg -n newt-synth-runner`), as `synth.yml` note (1) describes for synth-only sessions. The day's scheduled `main` run ([36306162671](https://github.com/wortexx/newt/actions/runs/36306162671), pre-bump `599d837`) took the runner first. That run reproduces `synth-baseline.json` exactly, which confirms the flow is deterministic, and it serves as the same-day baseline.
+  - **Metrics**, `main` vs this change:
+
+    | Metric | `main` | v0.3.1 | Δ |
+    |---|---|---|---|
+    | Cells | 735,953 | 735,837 | −116 (−0.02%) |
+    | Chip area | 17,774,827.51 µm² | 17,776,378.83 µm² | +1,551.32 µm² (+0.01%) |
+    | DFFs | 89,499 | 89,209 | −290 (−0.32%) |
+    | WNS | unavailable | unavailable | pre-existing `basilisk.sdc` pattern issue |
+
+  - **Baseline not reseeded.** `eda-tooling-image` reserves reseeding for synthesis-*tool* bumps, and this drift is negligible.

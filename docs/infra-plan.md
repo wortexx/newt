@@ -53,7 +53,7 @@ Phase 5+6  ──►  Phase 9  ✅ (post-merge CI verification — gated on `ci-
 Phase 10 (Actions version upgrade)  — independent maintenance, any time
 Phase 12 (yosys fork retired -> upstream v0.69)  ✅  — unblocks Phase 8
 Phase 11 (backend routability)      — design work; gates a detail-routed DEF, nothing else
-Phase 13 (Cheshire 4a270af -> v0.3.1) — dependency maintenance; synth metrics pending the full-synth run
+Phase 13 (Cheshire 4a270af -> v0.3.1)  ✅  — dependency maintenance; synth drift ≤0.32%
 ```
 
 **Do Phase 2 first among the technical work** — it is the long pole; everything meaningful
@@ -641,7 +641,7 @@ Worth noting for thesis framing: the ~25% synthesis speed-up from parallel ABC i
 and area and runtime are separate axes. None of the above is required for correctness; all of it is
 optional PPA work that can follow the coprocessor.
 
-## Phase 13 — Cheshire bumped to v0.3.1  🟡 in review — synth-lane metrics pending
+## Phase 13 — Cheshire bumped to v0.3.1  ✅ done (2026-09-27, #48 + #49)
 
 Cheshire was pinned to a raw commit, `4a270afccf27bed49779d11d88e4bbb69d335c8a` (2024-07-05), older than its first
 tagged release. It now sits at release **v0.3.1** (`5c76406da7dd0399bb4179f739d1d768cfaf2d8f`, 2025-06-16).
@@ -683,8 +683,15 @@ Change: `openspec/changes/bump-cheshire-v0-3-1`. The CVA6 pin (`pulp-v1.0.0`) is
   - Questa `ig-sim-rtl`: no Questa available. `fixture_iguana` instantiates the changed `vip_cheshire_soc`.
   - Verilator `ig-sim-verilator`: the model doesn't build on `main` either (Verilator 5.050 internal error at
     CVA6 `wt_axi_adapter.sv:139`), which is pre-existing.
-- [ ] **Synth-lane metrics** (cell count, area, DFFs, WNS vs `synth-baseline.json`). Expected movers: iDMA
-      0.6.3, the extra CVA6 execute region (SPM uncached split), and the now-live uncached-SPM remap.
+- [x] **Synth-lane metrics.** Run `36321657267`, against the PR image, passed with yosys `CHECK` at 0 problems. It is compared with the same-day `main` run `36306162671`, which reproduces `synth-baseline.json` exactly.
+
+  | metric | main (4a270af) | v0.3.1 | delta |
+  | --- | --- | --- | --- |
+  | cells | 735,953 | 735,837 | −0.02% |
+  | chip area (um²) | 17,774,827.51 | 17,776,378.83 | +0.01% |
+  | DFFs | 89,499 | 89,209 | −0.32% |
+
+  The drift is negligible, so the baseline is not reseeded; that is reserved for tool bumps. The fast lane's `sw` job needed the image packages on `:dev` before this could merge, so they landed first as #49.
 
 **Behavioural changes that ride along**:
 - The LLC's uncached-SPM remap (`AmSpmUnc`, `0x1400_0000`) was dead code at the old pin, because
