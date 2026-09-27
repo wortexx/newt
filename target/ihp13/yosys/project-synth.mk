@@ -31,7 +31,6 @@ export YOSYS_KEEP_HIER_INST :=  "*/gen_cva6_cores.__0.i_core_cva6" \
 								"*/float_regfile_gen*i_ariane_fp_regfile" \
 								"*/i_dbg_dmi_jtag" \
 								"*/i_dbg_dm_top" \
-								"*/gen_clic.i_clic" \
 								"*/i_plic" \
 								"*/i_clint" \
 								"*/gen_serial_link.i_serial_link" \
@@ -44,7 +43,7 @@ export YOSYS_KEEP_HIER_INST :=  "*/gen_cva6_cores.__0.i_core_cva6" \
 								"*/gen_vga.i_axi_vga" \
 								"*/gen_usb.i_spinal_usb_ohci" \
 								"*/gen_llc.i_llc" \
-								"*/gen_dma.i_dma" \
+								"*/gen_dma.i_idma" \
 								"t:*cheshire_reg_top*" \
 								"t:*cheshire_bootrom_part*" \
 								"t:*cdc*" \

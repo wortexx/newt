@@ -12,10 +12,15 @@ package:
     - "Philippe Sauter <phsauter@ethz.ch>"
 
 dependencies:
-  axi:                { git: https://github.com/pulp-platform/axi,                version: 0.39.2   }
-  cheshire:           { git: https://github.com/pulp-platform/cheshire,           rev:    4a270afccf27bed49779d11d88e4bbb69d335c8a }
+  # Held below Cheshire v0.3.1's apb_uart 0.2.3: 0.2.3 swaps in the OBI UART
+  # (obi_peripherals), whose obi_uart_tx has a signal-bounded for-loop that
+  # yosys's Verilog frontend rejects. reg_uart_wrap's interface is identical.
+  # See openspec/changes/bump-cheshire-v0-3-1 (design D6).
+  apb_uart:           { git: https://github.com/pulp-platform/apb_uart.git,       version: 0.2.1    }
+  axi:                { git: https://github.com/pulp-platform/axi,                version: 0.39.6   }
+  cheshire:           { git: https://github.com/pulp-platform/cheshire,           version: 0.3.1    }
   hyperbus:           { git: https://github.com/pulp-platform/hyperbus,           version: 0.0.4    }
-  register_interface: { git: https://github.com/pulp-platform/register_interface, version: 0.4.4    }
+  register_interface: { git: https://github.com/pulp-platform/register_interface, version: 0.4.5    }
 
 sources:
 

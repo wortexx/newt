@@ -180,9 +180,32 @@ jobs:
               [ "$p" = "$f" ] && continue # don't pass the linted file twice if it's itself a package file
               PKG_ARGS+=("$p")
             done
-            echo "::group::verilator --lint-only $f"
-            verilator --lint-only -Wall -Wno-fatal -Wno-MODMISSING "${FLAGS[@]}" "${PKG_ARGS[@]}" "$f" || status=1
-            echo "::endgroup::"
+            # Elaborate only from the linted file's own modules (each one in
+            # turn as --top-module), never from every module in the package
+            # files above: a package file can also hold unrelated modules,
+            # and without a top each of those becomes a lint root. Found when
+            # Cheshire v0.3.1 brought iDMA 0.6, whose generated
+            # idma_generated.sv mixes packages with ~50 REG_BUS-ported modules
+            # (every hw/*.sv lint then failed on "Cannot find file containing
+            # interface: 'REG_BUS'", and on Verilator UNSUPPORTED errors once
+            # REG_BUS was supplied). A package-only file has no module to
+            # start from, so it gets a throwaway top that imports its packages.
+            mapfile -t TOPS < <(grep -oE '^[[:space:]]*module[[:space:]]+[A-Za-z_][A-Za-z_0-9$]*' "$f" | awk '{print $2}')
+            EXTRA=()
+            if [ "${#TOPS[@]}" -eq 0 ]; then
+              {
+                echo "module lint_wrap_top;"
+                grep -oE '^[[:space:]]*package[[:space:]]+[A-Za-z_][A-Za-z_0-9$]*' "$f" | awk '{print "  import " $2 "::*;"}' || true
+                echo "endmodule"
+              } > /tmp/lint_wrap_top.sv
+              TOPS=(lint_wrap_top)
+              EXTRA=(/tmp/lint_wrap_top.sv)
+            fi
+            for top in "${TOPS[@]}"; do
+              echo "::group::verilator --lint-only $f (top: $top)"
+              verilator --lint-only -Wall -Wno-fatal -Wno-MODMISSING --top-module "$top" "${FLAGS[@]}" "${PKG_ARGS[@]}" "$f" "${EXTRA[@]}" || status=1
+              echo "::endgroup::"
+            done
           done <<< "${{ steps.changed.outputs.files }}"
           exit $status
 
