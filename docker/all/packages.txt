@@ -2,6 +2,7 @@ ca-certificates
 curl
 dbus
 gawk
+gdisk
 git
 unzip
 gdb

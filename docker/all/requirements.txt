@@ -1,3 +1,4 @@
+flatdict
 hjson
 Mako
 PyYAML
