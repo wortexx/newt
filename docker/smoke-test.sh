@@ -59,6 +59,21 @@ check "verible lint" verible-verilog-lint --version
 # above never would have caught this.
 check "gawk"         gawk --version
 check "unzip"        unzip -v
+# sgdisk (gdisk): Cheshire's sw.mk builds GPT test images with it. Before
+# Cheshire v0.3.1 a missing sgdisk went unnoticed - make ran recipes under
+# /bin/sh, where `sgdisk ... &> /dev/null` backgrounds the command and drops
+# its exit status. iDMA 0.6's idma.mk sets SHELL := /bin/bash for the whole
+# make run, so `make ig-sw-all` now fails outright without it.
+check "sgdisk"       sgdisk --version
+
+# Python modules the flow's RTL generators import at `make ig-hw-all` time
+# (register_interface/opentitan regtool: hjson, mako, yaml, tabulate; iDMA
+# 0.6's gen_idma.py: flatdict). A missing one fails hardware generation
+# minutes into a run - flatdict was found missing that way when Cheshire moved
+# to v0.3.1 (openspec/changes/bump-cheshire-v0-3-1).
+for mod in hjson mako yaml tabulate flatdict; do
+  check "python3 import $mod" python3 -c "import $mod"
+done
 
 # Yosys is upstream now, pinned by release tag in docker/yosys/Dockerfile
 # (openspec/changes/upgrade-yosys-upstream). Three assertions beyond "it runs",
