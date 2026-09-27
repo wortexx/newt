@@ -147,9 +147,16 @@ rotate credentials, and check for drift. Planning and rationale live in
 - **Naming**: `PROJ_NAME`/`RTL_NAME` must stay `basilisk` — many scripts and
   paths (e.g. `basilisk.sdc`, checkpoint/report paths) hardcode it. Do not
   rename, even though the design is internally called `iguana_chip`.
-- **Dependency changes**: `cheshire` and `cva6` are modified via forks pinned
-  in `Bender.yml` (by `git`/`rev`), not via local patches — prefer a fork
-  commit over anything beyond a one-line change.
+- **Dependency changes**: upstream IP is pinned in `Bender.yml` by released
+  `version:` (Cheshire is at `0.3.1`), with `Bender.lock` giving the exact
+  commit; Cheshire's dependency subtree is locked to the set Cheshire's own
+  release was tested with. `cheshire` and `cva6` are modified via forks pinned
+  by `git`/`rev`, not via local patches — prefer a fork commit over anything
+  beyond a one-line change. A package deliberately held below Cheshire's
+  version (currently `apb_uart` 0.2.1) carries a comment in `Bender.yml`
+  saying why. After moving any pin, check that every pickle patch/sed rule
+  and every `YOSYS_KEEP_HIER_INST` selector still matches — the flow does not
+  fail when one silently stops matching.
 - **Yosys is upstream**, pinned to a release tag in
   `docker/yosys/Dockerfile` (v0.69 since 2026-09; the custom fork it
   replaced is retired). Bump the tag only via a change that re-runs the

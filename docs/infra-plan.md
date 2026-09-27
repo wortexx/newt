@@ -53,6 +53,7 @@ Phase 5+6  ──►  Phase 9  ✅ (post-merge CI verification — gated on `ci-
 Phase 10 (Actions version upgrade)  — independent maintenance, any time
 Phase 12 (yosys fork retired -> upstream v0.69)  ✅  — unblocks Phase 8
 Phase 11 (backend routability)      — design work; gates a detail-routed DEF, nothing else
+Phase 13 (Cheshire 4a270af -> v0.3.1) — dependency maintenance; synth metrics pending the full-synth run
 ```
 
 **Do Phase 2 first among the technical work** — it is the long pole; everything meaningful
@@ -639,6 +640,65 @@ effort:
 Worth noting for thesis framing: the ~25% synthesis speed-up from parallel ABC is itself a result,
 and area and runtime are separate axes. None of the above is required for correctness; all of it is
 optional PPA work that can follow the coprocessor.
+
+## Phase 13 — Cheshire bumped to v0.3.1  🟡 in review — synth-lane metrics pending
+
+Cheshire was pinned to a raw commit, `4a270afccf27bed49779d11d88e4bbb69d335c8a` (2024-07-05), older than its first
+tagged release. It now sits at release **v0.3.1** (`5c76406da7dd0399bb4179f739d1d768cfaf2d8f`, 2025-06-16).
+Change: `openspec/changes/bump-cheshire-v0-3-1`. The CVA6 pin (`pulp-v1.0.0`) is unchanged.
+
+- [x] **Lock policy.** Cheshire's dependency subtree is locked to the exact set Cheshire v0.3.1's own
+      `Bender.lock` was released with, not the newest compatible patches. `bender update cheshire --recursive`
+      (bender 0.32) floated 12 packages past it, and the image's bender 0.27.4 has no selective update. The lock
+      is merged by hand and validated by `bender sources` under both versions. The existing `register_interface`
+      (hyperbus `^0.3.2`) and `axi` (cva6 `^0.31`, serial_link/irq_router `^0.38`) requirement conflicts still
+      need interactive resolution to the root pin on any future `bender update`.
+- [x] **apb_uart held at 0.2.1.** Cheshire's 0.2.3 replaces the UART with an OBI UART from `obi_peripherals`.
+      Its `obi_uart_tx` has a signal-bounded `for` loop that yosys's `read_verilog` rejects (*2nd expression of
+      procedural for-loop is not constant*). `reg_uart_wrap`'s interface is identical, so 0.2.1 is a drop-in.
+      Revisit when Phase 8 (`read_slang`) lands.
+- [x] **Silent-drop fixes.** None of these errored before.
+  - Keep-hierarchy selector `*/gen_dma.i_dma` → `*/gen_dma.i_idma`. Upstream renamed the instance; without the
+    fix the DMA would have been flattened silently.
+  - Obsolete after the bump, deleted: the `morty.sed` CVA6 ID-map rule (the text was rewritten upstream) and
+    `protocol_e_axi_renaming.patch` (iDMA 0.6 rewrote the enum). Yosys accepts both constructs unpatched.
+  - Already dead on `main`, deleted: `wt_axi_adapter.patch` (3/3 hunks failed, superseded by
+    `wt_axi_adapter2`), the `sv2v.sed` `i < advance` rule (never matched), and the `*/gen_clic.i_clic`
+    selector (CLIC is disabled).
+  - The pickle stage applies patches with `-patch`, so a failing hunk never fails the build. The only way to
+    find these is to sweep every rule against the stage it targets.
+- [x] **Checked without a 2.5 h synth run.** The check replays `yosys_synthesis.tcl` up to
+      `hierarchy -check -top iguana_chip` on the final pickle, in minutes. It passes, and all 24 keep-hierarchy
+      selectors match at least 1 instance.
+- [x] **Image.** Two additions, each now covered by a smoke-test check:
+  - `flatdict`: iDMA 0.6's `gen_idma.py` imports it during `ig-hw-all`.
+  - `gdisk` (`sgdisk`): iDMA 0.6's `idma.mk` sets `SHELL := /bin/bash`, so Cheshire's
+    `sgdisk … &> /dev/null` no longer silently backgrounds a missing binary.
+- [x] **CI lint.** The per-file `verilator --lint-only` step now elaborates from the linted file's own modules
+      (`--top-module`, plus a wrapper top for package-only files). iDMA 0.6's `idma_generated.sv` mixes
+      packages with ~50 `REG_BUS`-ported modules that otherwise all became lint roots.
+- [x] **Software.** `ig-sw-all` builds with 10 test ELFs, and the bootrom is rebuilt from v0.3.1's sources
+      (the split file keeps its size; its contents differ).
+- [ ] **Not verified here.**
+  - Questa `ig-sim-rtl`: no Questa available. `fixture_iguana` instantiates the changed `vip_cheshire_soc`.
+  - Verilator `ig-sim-verilator`: the model doesn't build on `main` either (Verilator 5.050 internal error at
+    CVA6 `wt_axi_adapter.sv:139`), which is pre-existing.
+- [ ] **Synth-lane metrics** (cell count, area, DFFs, WNS vs `synth-baseline.json`). Expected movers: iDMA
+      0.6.3, the extra CVA6 execute region (SPM uncached split), and the now-live uncached-SPM remap.
+
+**Behavioural changes that ride along**:
+- The LLC's uncached-SPM remap (`AmSpmUnc`, `0x1400_0000`) was dead code at the old pin, because
+  `a & ~M == b & ~M` parses as `a & (~M == b) & ~M`. It now works.
+- The CVA6 debug `ExceptionAddress` is `0x810` (relative to `DmBaseAddress`), previously `0x808`.
+
+**Follow-ups**:
+- `iguana_pkg`'s "and activated CLIC" comment is false: `gen_cheshire_cfg()` never sets `Clic`. This matters
+  for the CV-X-IF / interrupt work, and re-add the `gen_clic` keep-hierarchy selector if CLIC is enabled.
+- Local-dev note: on Docker Desktop's virtiofs bind mount, symlinks the flow creates (`ig-hw-fma-opt`,
+  `ig-hw-bootrom-split`) read back as `EPERM` inside the container. Build in a container-local volume, or on
+  native Linux.
+
+---
 
 ## Risks
 
