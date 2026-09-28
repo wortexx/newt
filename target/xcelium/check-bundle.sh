@@ -24,6 +24,7 @@ check_path() { # kind path
   case "$2" in
     /*)                  fail "absolute path in xrun.f: $2"; return ;;
     ../*|*/../*|*/..|..) fail "path escapes the bundle: $2"; return ;;
+    .*|*/.*)             fail "hidden path component (often dropped when copying): $2"; return ;;
   esac
   if [ "$1" = dir ]; then
     [ -d "$2" ] || fail "missing include directory: $2"

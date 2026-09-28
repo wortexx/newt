@@ -28,6 +28,7 @@ No synth or P&R runs anywhere in this change.
     - It records no riscv-gcc version: Cheshire's linker scripts drop `.comment`, so the ELFs cannot name their compiler. Each ELF's sha256 pins it instead.
     - The dirty flag also covers untracked files that end up in the bundle.
     - Staging is done by `scripts/stage.sh`. The check ships in the bundle as `check-bundle.sh`, so it also runs on the VM.
+    - **Found on the first VM transfer:** the VM reported every `.bender/...` include dir missing, although the archive contained them; the hidden `.bender/` tree did not survive the copy onto the VM. Staging now relocates `.bender/git/checkouts/` to `deps/`, and `check-bundle.sh` rejects any hidden path component. Verified: the archive has 0 hidden entries, and a `cp -R dir/*` copy of the extracted bundle still passes the check.
 - [x] 1.4 **[host]** Add the completeness check (design D3), run at the end of staging. Every non-option line in `xrun.f` must exist as a file in the bundle, every `+incdir+` must exist as a directory, and no entry may be absolute. `24FC1025.v` must contain a `module M24FC1025` definition, because the upstream `wget -o` rule can leave a log file in its place. Any failure exits non-zero, names the offending entry, and produces no archive.
   - Verify: delete one staged source and confirm the check fails naming that file.
   - Verify: inject one absolute path and confirm it fails.

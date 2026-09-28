@@ -47,6 +47,16 @@ $(grep '^/' "$listfile" | head -5)"
 fi
 (cd "$IG_ROOT" && tar -chf - -T "$listfile") | (cd "$STAGE" && tar -xf -)
 
+# Nothing in the bundle may live under a hidden directory: many copy paths to
+# the VM (GUI/portal uploads, `cp dir/*`, transfer filters) silently drop
+# dot-directories. Bender's checkouts move from .bender/git/checkouts/ to deps/.
+if [ -d "$STAGE/.bender/git/checkouts" ]; then
+  mv "$STAGE/.bender/git/checkouts" "$STAGE/deps"
+  rm -rf "$STAGE/.bender"
+  sed -e 's|^\(+incdir+\)\{0,1\}\.bender/git/checkouts/|\1deps/|' "$STAGE/xrun.f" > "$STAGE/xrun.f.tmp"
+  mv "$STAGE/xrun.f.tmp" "$STAGE/xrun.f"
+fi
+
 elf_list=""
 for e in $ELFS; do
   [ -f "$e" ] || die "test ELF not found: $e (run 'make ig-sw-all' first)"
