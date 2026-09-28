@@ -21,6 +21,7 @@ dependencies:
     - github/awesome-copilot/skills/docs-sync-audit
     - github/awesome-copilot/instructions/bicep-code-best-practices.instructions.md
     - github/awesome-copilot/instructions/github-actions-ci-cd-best-practices.instructions.md
+    - github/awesome-copilot/agents/adr-generator.agent.md
   mcp: []
 includes: auto
 scripts: {}

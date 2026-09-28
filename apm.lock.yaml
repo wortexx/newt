@@ -198,7 +198,29 @@ dependencies:
     .claude/skills/github-actions-hardening/references/supply-chain.md: sha256:f66f613dbd732ce87c1e76b88208efde8feae3ffe5a3ab405cde4ce3df66f605
     .claude/skills/github-actions-hardening/references/triggers-and-privilege.md: sha256:465f3f76517e9f5374a73e30f46cb47e1fe62ce9fd81f782808a3abbb2df2756
   content_hash: sha256:d826005e7e1f7792531836c747c78df9e9caac534dd027b8ad872725340e5df2
+- repo_url: github/awesome-copilot
+  name: awesome-copilot-adr-generator
+  host: github.com
+  resolved_commit: 4f4796f0bf30e105700f97ed8408c12b6aa95e06
+  version: 1.0.0
+  virtual_path: agents/adr-generator.agent.md
+  is_virtual: true
+  package_type: apm_package
+  deployed_files:
+  - .claude/agents/adr-generator.md
+  deployed_file_hashes:
+    .claude/agents/adr-generator.md: sha256:abbf07c6a768a21baa94a1aed858510c8038cb89866461d47ab64817e9f347ac
+  content_hash: sha256:870b03e1c10d26b2fd03b7369872ee7493abfca5f508d15406ad09116c39c52d
 deployments:
+- kind: project-relative
+  target: claude
+  value: .claude/agents/adr-generator.md
+  runtime: null
+  scope: project
+  owners:
+  - github/awesome-copilot/agents/adr-generator.agent.md
+  active_owner: github/awesome-copilot/agents/adr-generator.agent.md
+  content_hash: sha256:abbf07c6a768a21baa94a1aed858510c8038cb89866461d47ab64817e9f347ac
 - kind: project-relative
   target: claude
   value: .claude/agents/bicep-implement.md
