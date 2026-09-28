@@ -25,7 +25,13 @@ Cadence Xcelium (`xrun(64) 24.03-s004`) is now available, but only on a restrict
 - **Convenience target `ig-sim-xrun`.** It stages the same bundle and runs `run.sh` in place, for any machine that has `xrun` on `PATH`. Its `BINARY`/`BOOTMODE`/`PRELMODE` variables use the same names as the other lanes.
 - **Documentation.** A new `target/xcelium/README.md` describes the copy-in/run/copy-out procedure. `AGENTS.md` and `docs/infra-plan.md` gain a pointer to it. The Verilator change's design addendum gets the result of the DMSTATUS cross-check once it is observed.
 
-**Flow stages touched:** sim (new lane) and sw (the existing prebuilt ELFs are consumed but not changed). RTL, synth, backend and CI are not touched. Nothing is added to the Questa compile scripts, the Verilator file list, or the pickle/synth input.
+- **Cheshire moves to a project-owned fork (added during apply).** Xcelium 24.03 rejects two constant functions in `cheshire_soc.sv`: `gen_axi_map` and `gen_reg_map`. The code is legal SystemVerilog, and no tool option relaxes the restriction. The fork `wortexx/cheshire` gets a branch `newt/v0.3.1`, cut from v0.3.1, which builds both address maps as constant-driven signals instead. It is tagged `v0.3.1-newt.1`, and `Bender.yml` pins `cheshire` by `rev: v0.3.1-newt.1`. Later newt patches continue the series as `v0.3.1-newt.<N>`.
+
+**Flow stages touched:**
+- **sim:** the new lane.
+- **sw:** the existing prebuilt ELFs are consumed but not changed.
+- **RTL dependency pin:** the Cheshire fork. The change is value-identical: the same address-map constants, computed without a constant function. So the pickle/synth input changes textually in `cheshire_soc.sv` only, and synthesis is expected to produce the same netlist. That expectation is verified, not assumed; see tasks.
+- **Not touched:** backend and CI. Nothing is added to the Questa compile scripts, the Verilator file list, or the pickle patch set.
 
 ## Capabilities
 
@@ -35,7 +41,10 @@ Cadence Xcelium (`xrun(64) 24.03-s004`) is now available, but only on a restrict
 
 ### Modified Capabilities
 
-None. `ci-pipeline` is unchanged: this lane runs manually on a machine CI cannot reach, and adds no job or stub.
+- `rtl-dependencies`: "Cheshire is pinned to a released tag with an exact lock". The pin moves from upstream `version: 0.3.1` to the fork tag `v0.3.1-newt.1`. The requirement already permits a commit in a project-owned fork, so only the recorded values and their scenario change.
+  - *Merge note:* this capability is introduced by the not-yet-archived `bump-cheshire-v0-3-1` change. That change must archive first, so that this delta has a main spec to modify.
+
+`ci-pipeline` is unchanged: this lane runs manually on a machine CI cannot reach, and adds no job or stub.
 
 ## Impact
 

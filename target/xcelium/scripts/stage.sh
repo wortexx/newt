@@ -33,8 +33,8 @@ mkdir -p "$STAGE/elf"
   cat "$RAW_FLIST"
   for f in $EXTRA_SRCS; do echo "$f"; done
 } | sed -e "s|^\(+incdir+\)\{0,1\}${IG_ROOT}/|\1|" \
-  | grep -Ev "$EXCLUDE_PATTERN" \
-  | awk 'NF && !seen[$0]++' > "$STAGE/xrun.f"
+  | awk -v ex="$EXCLUDE_PATTERN" -v keep="${KEEP_PATTERN:-^$}" \
+      '($0 !~ ex || $0 ~ keep) && NF && !seen[$0]++' > "$STAGE/xrun.f"
 
 # Copy every referenced file and include directory, preserving repo-relative
 # paths. -h dereferences symlinks so the VM gets real files.
@@ -46,6 +46,13 @@ if grep -q '^/' "$listfile"; then
 $(grep '^/' "$listfile" | head -5)"
 fi
 (cd "$IG_ROOT" && tar -chf - -T "$listfile") | (cd "$STAGE" && tar -xf -)
+
+# Headers Bender lists as sources (CVA6's *_trace_item.svh) are `include`d by
+# the files that use them; compiling them standalone as well makes Xcelium
+# report every declaration twice (*E,DUPIDN). They stay in the bundle, reached
+# through +incdir+, but leave the compile list.
+grep -v '\.svh$' "$STAGE/xrun.f" > "$STAGE/xrun.f.tmp"
+mv "$STAGE/xrun.f.tmp" "$STAGE/xrun.f"
 
 # Nothing in the bundle may live under a hidden directory: many copy paths to
 # the VM (GUI/portal uploads, `cp dir/*`, transfer filters) silently drop

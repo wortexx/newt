@@ -80,6 +80,12 @@ No synth or P&R runs anywhere in this change.
 - [ ] 3.1 **[vm]** Round trip 1: compile and green light. Bundle, copy in, `./run.sh helloworld.spm.elf`, copy back.
   - Verify: `compile.log` elaborates `tb_newt_xrun`. Its log shows "Hello World!". `summary.txt` reports `PASS` with exit 0.
   - If compile fails: fix it with scoped, commented `-nowarn` entries or flags, or with exclusion patterns for test files that are not elaborated (design Risks). Never edit shared RTL. Record each fix here. Budget one extra round trip for this.
+  - **Round trip 1 (2026-09-28, over SSH to `sbidnyi@ip-10-0-92-146`, Xcelium 24.03-s004 via `tcsh -c`): compile fails, open.** Found and fixed within the lane:
+    - `run.sh` deleted `build/` and xrun will not create `-xmlibdirname`'s parent (`*E,NWRKDRA`); it now creates `build/` first.
+    - Bender lists CVA6's `ex_trace_item.svh`/`instr_trace_item.svh` as sources, and compiling them standalone as well as via `` `include `` gave `*E,DUPIDN`. Staging now keeps them in the bundle (reached through `+incdir+`) but out of `xrun.f`.
+    - `-disable_sem2009` (from CVA6's recipe) dropped; it was not the cause of the cheshire_soc errors below.
+  - **Blocker, shared RTL:** `cheshire_soc.sv`'s `gen_axi_map()`/`gen_reg_map()` constant functions (lines 213–221, 301–309) are rejected by Xcelium 24.03: 18× `CFBADP`, 10× `CFBADT`, 2× `SVNSTP`. Per `xmhelp` this is an Xcelium restriction on constant functions that use module-level localparams and types, and `SVNSTP` is a documented "not currently supported" limitation of type-parameter datatypes. The code is legal SV that Questa and VCS accept, and no flag relaxes it. Per design D6 this is surfaced before any fork.
+  - Remaining errors (13) are all in dependency standalone testbenches, which are never elaborated: `tb_axi_xbar`, `tb_axi_iw_converter`, `tb_axi_rt_unit_top`, `axi_riscv_atomics_tb`, `golden_memory`. They can be excluded within the lane.
 - [ ] 3.2 **[vm]** Round trip 2: whole bundle and failure paths, batched into one trip.
   - `./run.sh` with no arguments runs every bundled `*.spm.elf`.
   - `TIMEOUT_NS` is set far too low for one named test.
@@ -89,6 +95,26 @@ No synth or P&R runs anywhere in this change.
   - Record the other SPM tests' verdicts as observations, not as gates.
 - [ ] 3.3 **[vm]** DMSTATUS cross-check for the parked Verilator blocker, which can ride along with 3.1 or 3.2. Run `helloworld.spm.elf` with `WAVES=vcd`, then inspect `dmi_jtag`'s `state_q`/`error_q`/`dmi_req_valid`/`dmi_resp_valid` and the `DMSTATUS` read data on the host in GTKWave.
   - Verify: an entry is appended to `openspec/changes/verilator-sim-flow/design.md`'s addendum. It must say whether `DMSTATUS` changes under Xcelium with the reference driver, and therefore which side of the fork (Verilator harness vs. RTL/config) the Verilator bug is on.
+
+## 5. Cheshire fork pin (added during apply, see design D7)
+
+- [x] 5.1 **[edit]** Create branch `newt/v0.3.1` in `wortexx/cheshire` from upstream v0.3.1 (`5c76406`). Commit the address-map rewrite (`465e9e8`), tag it `v0.3.1-newt.1` (annotated), and push both.
+  - Verify: `git ls-remote` shows `refs/heads/newt/v0.3.1` and `refs/tags/v0.3.1-newt.1^{}` at `465e9e8`, with the fork's `main` unchanged.
+  - Done: pushed over SSH (HTTPS was refused for lack of the `workflow` token scope). The remote shows the branch and the peeled tag at `465e9e8`, and `main` is still at `21698d4`. No fork CI run was triggered.
+- [x] 5.2 **[host]** Repin `cheshire` in `Bender.yml` to `git: https://github.com/wortexx/cheshire.git, rev: v0.3.1-newt.1`, with an explanatory comment, and run `bender update cheshire`.
+  - Verify: the `Bender.lock` diff touches only the `cheshire` entry.
+  - Done: the lock diff is 3 lines: revision → `465e9e8…`, version → `0.3.1-newt.1`, source → the fork. Every other package is unchanged.
+- [x] 5.3 **[eda]** Regenerate hardware and ELFs for the new checkout (`ig-hw-all`, `ig-sw-all`). Confirm the Verilator lane is unaffected apart from the Cheshire path: the regenerated file list differs from the pre-pin one only in the Cheshire checkout directory name.
+  - Verify: normalised flist diff is empty.
+  - Done: `ig-hw-all` and `ig-sw-all` rebuilt the new checkout (`cheshire-b950f36a6e77f085`) with no tracked-file changes and 8 ELFs. The regenerated Verilator file list is identical to the pre-pin one (998 lines) once the Cheshire checkout directory name is normalised.
+- [x] 5.4 **[eda]** Pickle with the fork: `make pickle-all` completes in `newt-eda`, so the rewrite survives morty → svase → sv2v. Also run a full-design `verilator --lint-only` on the lane's file list.
+  - Verify: `pickle-all` exits 0, and Verilator lint reports no `%Error`. Value equivalence of the address maps is deliberately left to 5.5: synthesis matching the baseline exactly is a stronger check than diffing two pickles, and diffing would need a second full pickle with the old pin checked out.
+  - Done, with the forked Cheshire in `newt-eda`: the full-design `verilator --lint-only` exits 0 with 0 `%Error`, and `make pickle-all` exits 0 in 8m26s. `basilisk.sv2v.v` carries the rewrite as `gen_axi_map` blocks of `assign AxiMap[...]` driven from the `AxiOut` constant, for yosys to fold.
+  - Environment note, not a fork issue: on this macOS host the Docker bind mount cannot read or follow symlinks (`Operation not permitted`), and the flow creates two of them (`fpnew_fma.sv`, `cheshire_bootrom.sv`). Both runs therefore used a copy of the repo inside the container's own filesystem. That also made `ig-hw-bootrom-split`'s `cp -n` fail there, because the copy had skipped the unreadable link. Native Linux, such as the CI runner, is unaffected.
+- [ ] 5.5 **[long]** Synthesis equivalence on the CI synth lane (`full-synth` label on the PR, ~2 h on the Azure runner).
+  - Verify: cell count, chip area and DFF count match `synth-baseline.json`, and yosys `CHECK` reports 0 problems.
+- [ ] 5.6 **[vm]** Rebuild the bundle from the pinned fork, not a hand-patched copy, and re-run `helloworld.spm` on the VM.
+  - Verify: `PASS`, exit 0, the bundle's `MANIFEST` names the pinned `Bender.lock`, and its `cheshire_soc.sv` is the fork's.
 
 ## 4. Integration checks and docs
 

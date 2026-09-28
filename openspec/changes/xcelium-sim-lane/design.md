@@ -118,6 +118,18 @@ The bundle carries the `*.spm.elf` files from `$(CHS_ROOT)/sw/tests/`, overridab
 
 The Xcelium-specific code consists of the fixture, the testbench, `run.sh` and the flag set. It all lives under `target/xcelium/`. Any Xcelium-specific RTL workaround must be a `-nowarn` or flag in the argument file or `run.sh`, never an edit to shared sources, per the spec's coexistence requirement. A construct that Xcelium cannot compile even with flags is surfaced to the user before any fork is considered.
 
+### D7: Cheshire goes to a project fork for its address-map functions (added during apply)
+
+The first VM compile showed that Xcelium 24.03 rejects `cheshire_soc.sv`'s `gen_axi_map()` and `gen_reg_map()`: 18× `CFBADP`, 10× `CFBADT`, 2× `SVNSTP`. `xmhelp` documents these as a restriction on constant functions that use module-level localparams and types, plus a "not currently supported" limitation. No option relaxes them. The code is legal SystemVerilog: Questa, VCS, Verilator and slang all accept it.
+
+- **Fix, in `wortexx/cheshire`:** replace both constant functions with generate loops of constant continuous assignments to `AxiMap`/`RegMap`. Both maps only ever feed `addr_map_i` input ports, never a constant context, so the values are identical and synthesis folds them to the same constants. The fix was proven on the VM before anything was committed: with the rewrite, the bundle compiled and elaborated with 0 errors and `helloworld.spm` passed.
+- **Versioning:**
+  - Branch `newt/v0.3.1` is cut from upstream v0.3.1 (`5c76406`), not from the fork's `main`. `main` tracks upstream and is 49 commits and about 12k lines ahead, which would drag a large unrelated RTL update into every flow.
+  - Annotated tags follow `v0.3.1-newt.<N>`. The dotted counter keeps semver precedence numeric, so `newt.10` > `newt.2`.
+  - The pin is `rev: <tag>` rather than a `version:` range, because semver ranks the pre-release `0.3.1-newt.N` *below* `0.3.1`, and plain ranges do not match pre-releases.
+- *Alternative: patch `cheshire_soc.sv` inside the Xcelium bundle only.* Rejected. It breaks the project's "forks, not patches" rule, and the lane's DUT-parity requirement: Xcelium would simulate different source text than Verilator and synthesis. A CV-X-IF fork of Cheshire was expected for the thesis anyway.
+- *Push mechanics:* pushing the branch over HTTPS was refused because the `gh` token lacks the `workflow` scope, which is needed since the v0.3.1 base carries older `.github/workflows/*`. The push went over SSH as `wortexx`.
+
 ## Risks / Trade-offs
 
 - **Xcelium rejects or warns on constructs across Cheshire, iDMA or axi_llc that Questa tolerates.** → Start from CVA6's flag set plus `-disable_sem2009`. Treat the first round trip as a compile-cleanup iteration, and budget a second in tasks. Scoped `-nowarn` entries each get a comment. Errors are surfaced, not waived blindly.

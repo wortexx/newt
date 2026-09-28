@@ -27,14 +27,14 @@ XRUN_BENDER_DEFINES := FUNCTIONAL NO_HYPERBUS
 # - Second definitions of `sram` and `configurable_delay`. Questa lets the last
 #   one compiled win; excluding the extra copies keeps exactly the definitions
 #   the Verilator lane and synthesis use (sram_pulp.sv, target/ihp13 mc_delay).
-# - Standalone dependency testbenches that never elaborate here and that fail
-#   a strict (slang) parse, so they cannot cost a VM round trip.
+# - Every dependency's own test/ and tb/ sources: standalone testbenches that
+#   never elaborate here, several of which Xcelium or slang reject. The keep
+#   pattern below re-admits the one test-dir driver the VIP needs.
 XRUN_EXCLUDE_PATTERN := ^target/sim/src/(fixture|tb)_iguana\.sv$$
 XRUN_EXCLUDE_PATTERN := $(XRUN_EXCLUDE_PATTERN)|/common_cells-[^/]*/src/deprecated/sram\.sv$$
 XRUN_EXCLUDE_PATTERN := $(XRUN_EXCLUDE_PATTERN)|/hyperbus-[^/]*/models/configurable_delay\.behav\.sv$$
-XRUN_EXCLUDE_PATTERN := $(XRUN_EXCLUDE_PATTERN)|/apb-[^/]*/test/tb_apb_cdc\.sv$$
-XRUN_EXCLUDE_PATTERN := $(XRUN_EXCLUDE_PATTERN)|/common_cells-[^/]*/test/cdc_(fifo|2phase)_tb\.sv$$
-XRUN_EXCLUDE_PATTERN := $(XRUN_EXCLUDE_PATTERN)|/riscv-dbg-[^/]*/tb/jtag_dmi/tb_jtag_dmi\.sv$$
+XRUN_EXCLUDE_PATTERN := $(XRUN_EXCLUDE_PATTERN)|^\.bender/git/checkouts/[^/]+/(src/)?(test|tb)/
+XRUN_KEEP_PATTERN    := /riscv-dbg-[^/]*/tb/jtag_dmi/jtag_(test|intf)\.sv$$
 
 XRUN_VENDOR_MODELS := \
   $(CHS_ROOT)/target/sim/models/s25fs512s.v \
@@ -60,7 +60,7 @@ $(XRUN_RAW_F): Bender.yml Bender.lock $(XRUN_VENDOR_MODELS)
 
 ig-xrun-stage: $(XRUN_RAW_F) $(XRUN_TB_SRCS) $(XRUN_DPI_SRCS)
 	IG_ROOT='$(IG_ROOT)' STAGE='$(XRUN_STAGE)' RAW_FLIST='$(XRUN_RAW_F)' \
-	EXCLUDE_PATTERN='$(XRUN_EXCLUDE_PATTERN)' \
+	EXCLUDE_PATTERN='$(XRUN_EXCLUDE_PATTERN)' KEEP_PATTERN='$(XRUN_KEEP_PATTERN)' \
 	EXTRA_SRCS='$(XRUN_TB_SRCS) $(XRUN_DPI_SRCS)' \
 	ELFS='$(XRUN_ELFS)' BENDER='$(BENDER)' LANE_DIR='$(XRUN_DIR)' \
 		bash $(XRUN_DIR)/scripts/stage.sh

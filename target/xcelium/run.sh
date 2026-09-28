@@ -93,9 +93,11 @@ if [ -z "$setup_error" ]; then
   access=""
   [ "$WAVES" = none ] || access="-access +r"
   echo "run.sh: compiling (log: results/compile.log) ..."
+  # xrun creates -xmlibdirname itself but not its parent (*E,NWRKDRA).
   rm -rf build
+  mkdir -p build
   # shellcheck disable=SC2086  # $access / $XRUN_COMP_ARGS are word lists
-  if "$XRUN" -64bit -elaborate -sv -timescale 1ns/1ps -disable_sem2009 \
+  if "$XRUN" -64bit -elaborate -sv -timescale 1ns/1ps \
       -xmlibdirname "$LIBDIR" -top "$TOP" -f xrun.f $access \
       -l results/compile.log $XRUN_COMP_ARGS > /dev/null 2>&1; then
     compile=OK
