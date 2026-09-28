@@ -31,7 +31,8 @@ Cadence Xcelium (`xrun(64) 24.03-s004`) is now available, but only on a restrict
 - **sim:** the new lane.
 - **sw:** the existing prebuilt ELFs are consumed but not changed.
 - **RTL dependency pin:** the Cheshire fork. The change is value-identical: the same address-map constants, computed without a constant function. So the pickle/synth input changes textually in `cheshire_soc.sv` only, and synthesis is expected to produce the same netlist. That expectation is verified, not assumed; see tasks.
-- **Not touched:** backend and CI. Nothing is added to the Questa compile scripts, the Verilator file list, or the pickle patch set.
+- **CI (added during apply):** the fast lane's per-file `verilator --lint-only` step skips `target/xcelium/src/`. Verible still lints those files. See design D8.
+- **Not touched:** backend. Nothing is added to the Questa compile scripts, the Verilator file list, or the pickle patch set.
 
 ## Capabilities
 
@@ -44,7 +45,7 @@ Cadence Xcelium (`xrun(64) 24.03-s004`) is now available, but only on a restrict
 - `rtl-dependencies`: "Cheshire is pinned to a released tag with an exact lock". The pin moves from upstream `version: 0.3.1` to the fork tag `v0.3.1-newt.1`. The requirement already permits a commit in a project-owned fork, so only the recorded values and their scenario change.
   - *Merge note:* this capability is introduced by the not-yet-archived `bump-cheshire-v0-3-1` change. That change must archive first, so that this delta has a main spec to modify.
 
-`ci-pipeline` is unchanged: this lane runs manually on a machine CI cannot reach, and adds no job or stub.
+`ci-pipeline` requirements are unchanged: this lane runs manually on a machine CI cannot reach, and adds no job or stub. The one lint-step adjustment (design D8) keeps the existing "lint changed RTL" requirement meaningful for a testbench that Verilator cannot lint per file; it does not change the requirement.
 
 ## Impact
 

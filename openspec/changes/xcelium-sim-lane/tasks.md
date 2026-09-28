@@ -77,7 +77,7 @@ No synth or P&R runs anywhere in this change.
 
 ## 3. First runs on the VM
 
-- [ ] 3.1 **[vm]** Round trip 1: compile and green light. Bundle, copy in, `./run.sh helloworld.spm.elf`, copy back.
+- [x] 3.1 **[vm]** Round trip 1: compile and green light. Bundle, copy in, `./run.sh helloworld.spm.elf`, copy back.
   - Verify: `compile.log` elaborates `tb_newt_xrun`. Its log shows "Hello World!". `summary.txt` reports `PASS` with exit 0.
   - If compile fails: fix it with scoped, commented `-nowarn` entries or flags, or with exclusion patterns for test files that are not elaborated (design Risks). Never edit shared RTL. Record each fix here. Budget one extra round trip for this.
   - **Round trip 1 (2026-09-28, over SSH to `sbidnyi@ip-10-0-92-146`, Xcelium 24.03-s004 via `tcsh -c`): compile fails, open.** Found and fixed within the lane:
@@ -86,15 +86,22 @@ No synth or P&R runs anywhere in this change.
     - `-disable_sem2009` (from CVA6's recipe) dropped; it was not the cause of the cheshire_soc errors below.
   - **Blocker, shared RTL:** `cheshire_soc.sv`'s `gen_axi_map()`/`gen_reg_map()` constant functions (lines 213–221, 301–309) are rejected by Xcelium 24.03: 18× `CFBADP`, 10× `CFBADT`, 2× `SVNSTP`. Per `xmhelp` this is an Xcelium restriction on constant functions that use module-level localparams and types, and `SVNSTP` is a documented "not currently supported" limitation of type-parameter datatypes. The code is legal SV that Questa and VCS accept, and no flag relaxes it. Per design D6 this is surfaced before any fork.
   - Remaining errors (13) are all in dependency standalone testbenches, which are never elaborated: `tb_axi_xbar`, `tb_axi_iw_converter`, `tb_axi_rt_unit_top`, `axi_riscv_atomics_tb`, `golden_memory`. They can be excluded within the lane.
-- [ ] 3.2 **[vm]** Round trip 2: whole bundle and failure paths, batched into one trip.
+  - **Green light reached.** With the Cheshire fork, first on a hand-patched experiment bundle and then from the pinned `v0.3.1-newt.1` bundle (5.6), `helloworld.spm` passes: JTAG halt → preload → resume, `[UART] Hello World!`, `RESULT EXIT=0` at 2.19 ms simulated time. Compile+elaborate takes ~47 s on the 2-core, 7 GB VM, and the run ~40 s. Access was over SSH once available; Xcelium's environment comes from `~/.tcshrc`, so commands run as `tcsh -c`.
+- [x] 3.2 **[vm]** Round trip 2: whole bundle and failure paths, batched into one trip.
   - `./run.sh` with no arguments runs every bundled `*.spm.elf`.
   - `TIMEOUT_NS` is set far too low for one named test.
   - `PRELMODE=7` is used for one named test.
   - Verify: the summary reports `TIMEOUT` and `ERROR` for those two, and `run.sh` exits non-zero.
   - Verify: the compile step ran once, per the log count.
   - Record the other SPM tests' verdicts as observations, not as gates.
-- [ ] 3.3 **[vm]** DMSTATUS cross-check for the parked Verilator blocker, which can ride along with 3.1 or 3.2. Run `helloworld.spm.elf` with `WAVES=vcd`, then inspect `dmi_jtag`'s `state_q`/`error_q`/`dmi_req_valid`/`dmi_resp_valid` and the `DMSTATUS` read data on the host in GTKWave.
+  - Done in one batch from the pinned bundle (`newt-xrun-5ec4197-dirty`):
+    - `./run.sh` over all 8 ELFs compiled exactly once. `helloworld`, `dma_2d` and `spm_uncached` gave `PASS`. `axirt_budget`, `axirt_budget_isolate`, `axirt_hello`, `clic_basic` and `clic_multiple` gave `TIMEOUT` at 10 ms. These are observations, not gates: all five hang after resume with no UART output because they target AXI-RT and CLIC, which `CheshireCfg` leaves at Cheshire's defaults (`AxiRt: 0`, `Clic: 0`, despite `iguana_pkg`'s "activated CLIC" comment). This is a SoC configuration fact, not a lane or DUT defect.
+    - `TIMEOUT_NS=100000` gave `TIMEOUT`.
+    - `PRELMODE=7` gave `ERROR UNSUPPORTED PRELMODE=7`.
+    - `run.sh` exited non-zero whenever any test was not `PASS`, and each invocation left its own results archive.
+- [x] 3.3 **[vm]** DMSTATUS cross-check for the parked Verilator blocker, which can ride along with 3.1 or 3.2. Run `helloworld.spm.elf` with `WAVES=vcd`, then inspect `dmi_jtag`'s `state_q`/`error_q`/`dmi_req_valid`/`dmi_resp_valid` and the `DMSTATUS` read data on the host in GTKWave.
   - Verify: an entry is appended to `openspec/changes/verilator-sim-flow/design.md`'s addendum. It must say whether `DMSTATUS` changes under Xcelium with the reference driver, and therefore which side of the fork (Verilator harness vs. RTL/config) the Verilator bug is on.
+  - Done: the `WAVES=vcd` run of `helloworld.spm` passed, with a 36 MB archive / 1.2 GB VCD scoped to the debug path. `DMSTATUS` goes `0xc0c82` (running) → `0xc0382` (allhalted, 49.0 µs, after `haltreq` at 34.1 µs drives CVA6 `debug_req_i`) → `0xf0c82` (allresumeack, ~486 µs). There were 336 DMI requests and `dmi_jtag.error_q` was never set. Every real `DMSTATUS` has low byte `0x82`, so the Verilator harness's frozen `0x00000011` is not a value this DM can produce: the Verilator bug lies in its C++ DMI read path, not in the RTL or config. Recorded in `openspec/changes/verilator-sim-flow/design.md`'s addendum, with the Xcelium VCD named as the reference trace.
 
 ## 5. Cheshire fork pin (added during apply, see design D7)
 
@@ -113,8 +120,9 @@ No synth or P&R runs anywhere in this change.
   - Environment note, not a fork issue: on this macOS host the Docker bind mount cannot read or follow symlinks (`Operation not permitted`), and the flow creates two of them (`fpnew_fma.sv`, `cheshire_bootrom.sv`). Both runs therefore used a copy of the repo inside the container's own filesystem. That also made `ig-hw-bootrom-split`'s `cp -n` fail there, because the copy had skipped the unreadable link. Native Linux, such as the CI runner, is unaffected.
 - [ ] 5.5 **[long]** Synthesis equivalence on the CI synth lane (`full-synth` label on the PR, ~2 h on the Azure runner).
   - Verify: cell count, chip area and DFF count match `synth-baseline.json`, and yosys `CHECK` reports 0 problems.
-- [ ] 5.6 **[vm]** Rebuild the bundle from the pinned fork, not a hand-patched copy, and re-run `helloworld.spm` on the VM.
+- [x] 5.6 **[vm]** Rebuild the bundle from the pinned fork, not a hand-patched copy, and re-run `helloworld.spm` on the VM.
   - Verify: `PASS`, exit 0, the bundle's `MANIFEST` names the pinned `Bender.lock`, and its `cheshire_soc.sv` is the fork's.
+  - Done: the bundle rebuilt from the committed pin (`5ec4197`, `Bender.lock` → `465e9e8`) carries the fork's `cheshire_soc.sv` (the `gen_axi_map` generate block), and `helloworld.spm` gives `PASS`, exit 0 (see 3.1/3.2). Its `MANIFEST` names the pinned lock's sha256.
 
 ## 4. Integration checks and docs
 

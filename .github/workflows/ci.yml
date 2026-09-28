@@ -175,6 +175,17 @@ jobs:
           while IFS= read -r f; do
             [ -z "$f" ] && continue
             [ -f "$f" ] || continue # skip files deleted in this diff
+            # The Xcelium lane's testbench drives Cheshire's VIP through
+            # hierarchical task calls (fix.vip.jtag_init(), as tb_iguana
+            # does); a dotted reference into a module outside the linted
+            # file is a hard Verilator error no -Wno-* waives, and the VIP
+            # (classes, DPI, vendor models) is not verilatable anyway.
+            # Verible above still lints these files; Xcelium compiles them.
+            case "$f" in
+              target/xcelium/src/*)
+                echo "skip (Xcelium-only testbench, see comment): $f"
+                continue ;;
+            esac
             PKG_ARGS=()
             for p in "${PKG_FILES[@]}"; do
               [ "$p" = "$f" ] && continue # don't pass the linted file twice if it's itself a package file

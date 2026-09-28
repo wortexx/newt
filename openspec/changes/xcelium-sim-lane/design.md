@@ -130,6 +130,14 @@ The first VM compile showed that Xcelium 24.03 rejects `cheshire_soc.sv`'s `gen_
 - *Alternative: patch `cheshire_soc.sv` inside the Xcelium bundle only.* Rejected. It breaks the project's "forks, not patches" rule, and the lane's DUT-parity requirement: Xcelium would simulate different source text than Verilator and synthesis. A CV-X-IF fork of Cheshire was expected for the thesis anyway.
 - *Push mechanics:* pushing the branch over HTTPS was refused because the `gh` token lacks the `workflow` scope, which is needed since the v0.3.1 base carries older `.github/workflows/*`. The push went over SSH as `wortexx`.
 
+### D8: The fast lane's per-file Verilator lint skips the Xcelium testbench (added during apply)
+
+PR #51's `lint` job, a required check, failed on `tb_newt_xrun.sv`. The testbench drives Cheshire's VIP through hierarchical task calls (`fix.vip.jtag_init()`, the same pattern `tb_iguana` uses), and under the step's deliberately per-file lint the dotted reference into a module outside the file is a hard Verilator error. `-Wno-MODMISSING` covers missing instances but not dotted references, and the VIP (classes, DPI, vendor models) is not verilatable anyway. `fixture_newt_xrun.sv` linted clean.
+
+The step now skips `target/xcelium/src/*`, with a comment. Verible still lints those files, and they are checked for real by Xcelium and by the host-side slang elaboration.
+
+- *Alternative: restructure the testbench to avoid dotted calls.* Not possible without re-implementing the VIP; merging fixture and TB still leaves `vip.*` pointing into a module outside the per-file scope.
+
 ## Risks / Trade-offs
 
 - **Xcelium rejects or warns on constructs across Cheshire, iDMA or axi_llc that Questa tolerates.** → Start from CVA6's flag set plus `-disable_sem2009`. Treat the first round trip as a compile-cleanup iteration, and budget a second in tasks. Scoped `-nowarn` entries each get a comment. Errors are surfaced, not waived blindly.
