@@ -92,6 +92,11 @@ make ig-sim-rtl        # or ig-sim-sv2v / ig-sim-synth, each with an optional -g
 # (see target/verilator/README.md for status/plusargs/coverage — not yet
 # passing end-to-end as of this writing)
 make ig-sim-verilator
+
+# or Cadence Xcelium on the restricted VM: build one self-contained archive
+# here, run ./run.sh inside it on the VM, copy one results archive back
+# (see target/xcelium/README.md)
+make ig-xrun-bundle
 ```
 
 `make ig-all` runs the Cheshire hardware + full simulation chain in one shot.
@@ -113,7 +118,7 @@ drifts from it.
 | --- | --- |
 | `hw/` | Top-level SystemVerilog sources (`iguana_chip`, `iguana_soc`, `iguana_pkg`) |
 | `target/ihp13/` | IHP13-specific synth/backend flow (Yosys, OpenROAD scripts) |
-| `target/sim/`, `target/verilator/` | Questa and Verilator simulation setups |
+| `target/sim/`, `target/verilator/`, `target/xcelium/` | Questa, Verilator and Xcelium (restricted-VM bundle) simulation setups |
 | `docker/` | Multi-stage `newt-eda` tooling image (pickle, yosys, openroad, riscv64) |
 | `scripts/` | Standalone Python utilities (bootrom split, bisect/verify helpers) |
 | `docs/` | Living planning docs: thesis plan, CI/infra plan, P&R pipeline reference |

@@ -249,6 +249,7 @@ IG_SIM_ALL += $(IG_SIM_DIR)/vsim/compile.ihp13.gate.tcl
 ######################################
 
 include $(IG_ROOT)/target/verilator/verilator.mk
+include $(IG_ROOT)/target/xcelium/xcelium.mk
 
 
 ######################

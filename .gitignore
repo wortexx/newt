@@ -32,6 +32,11 @@ target/verilator/obj_dir/
 # CVA6's tracer writes here when the model is run from the repo root
 /trace_hart_*.dasm
 
+# target/xcelium (bundles and results carry non-free vendor models)
+target/xcelium/build/
+target/xcelium/out/
+newt-xrun-*
+
 # Editor fun
 .dvt
 dvt_build.log
