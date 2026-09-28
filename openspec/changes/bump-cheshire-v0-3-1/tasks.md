@@ -102,8 +102,21 @@ Legend: **[edit]** plain editing · **[eda]** needs the `newt-eda` tools (minute
   Done, on the image with `gdisk` added. `ig-sw-all` exits 0 and produces `helloworld.spm.elf` and 10 test ELFs (9 on `main`).
 
   The first attempt failed with exit 127 on `helloworld.gpt.bin`. iDMA 0.6's `idma.mk` sets `SHELL := /bin/bash`, and under bash Cheshire's `sgdisk … &> /dev/null` really runs. On `main`, `/bin/sh` backgrounds the command and silently drops the missing `sgdisk`. Per the user's decision, `gdisk` goes into `docker/all/packages.txt`, with an `sgdisk --version` smoke check and the `eda-tooling-image` delta.
-- [ ] 4.2 **[eda]** Run Questa `make ig-sim-rtl` with `helloworld.spm.elf` (BOOTMODE 0 / PRELMODE 0). If `vip_cheshire_soc`'s parameters/ports changed, adapt `target/sim/src/fixture_iguana.sv`. Verify: "Hello World!" and an EOC return code of 0 appear in the transcript. If Questa is unavailable in this environment, record that, and 4.3 becomes the only sim gate.
-  **Not run: Questa is not available in this environment or in `newt-eda`.** `fixture_iguana.sv`'s `vip_cheshire_soc` instantiation is not exercised here. It remains a check for whoever has Questa (`make ig-sim-rtl`). This task stays open.
+- [x] 4.2 **[eda]** Run Questa `make ig-sim-rtl` with `helloworld.spm.elf` (BOOTMODE 0 / PRELMODE 0). If `vip_cheshire_soc`'s parameters/ports changed, adapt `target/sim/src/fixture_iguana.sv`. Verify: "Hello World!" and an EOC return code of 0 appear in the transcript. If Questa is unavailable in this environment, record that, and 4.3 becomes the only sim gate.
+  **Done with Xcelium instead of Questa (user decision, 2026-09-28).** Questa is not available.
+  - **Functional evidence.** The functional check is the `xcelium-sim-lane` change's VM round trips (its tasks 3.1–3.3 and 5.6, Xcelium 24.03). They ran on the post-bump RTL: Cheshire v0.3.1 plus the fork's address-map-only patch, `v0.3.1-newt.1`, driven by v0.3.1's `vip_cheshire_soc`. Results:
+    - `helloworld.spm` passes (JTAG halt → preload → resume, `Hello World!`, exit 0).
+    - `dma_2d` passes, which exercises the iDMA 0.6 wrapper.
+    - `spm_uncached` passes, which exercises the uncached-SPM remap that was dead code at the old pin.
+    - `DMSTATUS` behaves correctly throughout.
+    - The AXI-RT and CLIC tests time out because those units are disabled in `CheshireCfg`, a configuration fact.
+  - **Current `main` is covered.** It has the same RTL as the bundle that passed (`5ec4197`), so no new VM run was needed.
+  - **`fixture_iguana` itself is not compiled**, because its hyperram vendor model is unavailable. Instead its `vip_cheshire_soc` hookup (`.*` plus 7 named parameters) was checked statically against the VIP header at both Cheshire revisions:
+    - One parameter was added, `UseDramSys`, which defaults to 0 and is not needed.
+    - The I2C and SPI ports changed from `logic` to `wire`.
+    - No port was added or removed.
+
+    So the fixture's by-name hookup is unchanged.
 - [x] 4.3 **[eda]** Run `make ig-sim-verilator` with `helloworld.spm.elf`. Verify: the model builds. Record whether the 3.1 debug-module symptom in `verilator-sim-flow` (stuck `DMSTATUS`) changes. This change neither requires nor claims a fix. Add a one-line note to `verilator-sim-flow/tasks.md` 3.1 with the outcome.
   Done, with a pre-existing limitation. The model **does not build on either side**, and `main` fails identically with Verilator 5.050 in the current `:dev`: `%Error: Internal Error: ../V3Number.h:242` at CVA6 `wt_axi_adapter.sv:139`, the negative-width replication `{{CVA6Cfg.AxiAddrWidth-riscv::PLEN{1'b0}}, …}`. That makes it CVA6 plus Verilator and independent of this bump. As a result, the stuck-`DMSTATUS` symptom could not be compared. The outcome is noted in `verilator-sim-flow/tasks.md` 3.1.
 - [x] 4.4 **[eda]** Run `verilator --lint-only` over `hw/iguana_*.sv` with the new `bender script verilator` flist, the same invocation the fast-lane `lint` job uses. Verify: exit 0, with no new `%Error` compared to the pre-bump lint.
