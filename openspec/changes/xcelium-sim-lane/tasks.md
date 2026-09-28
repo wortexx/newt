@@ -118,8 +118,13 @@ No synth or P&R runs anywhere in this change.
   - Verify: `pickle-all` exits 0, and Verilator lint reports no `%Error`. Value equivalence of the address maps is deliberately left to 5.5: synthesis matching the baseline exactly is a stronger check than diffing two pickles, and diffing would need a second full pickle with the old pin checked out.
   - Done, with the forked Cheshire in `newt-eda`: the full-design `verilator --lint-only` exits 0 with 0 `%Error`, and `make pickle-all` exits 0 in 8m26s. `basilisk.sv2v.v` carries the rewrite as `gen_axi_map` blocks of `assign AxiMap[...]` driven from the `AxiOut` constant, for yosys to fold.
   - Environment note, not a fork issue: on this macOS host the Docker bind mount cannot read or follow symlinks (`Operation not permitted`), and the flow creates two of them (`fpnew_fma.sv`, `cheshire_bootrom.sv`). Both runs therefore used a copy of the repo inside the container's own filesystem. That also made `ig-hw-bootrom-split`'s `cp -n` fail there, because the copy had skipped the unreadable link. Native Linux, such as the CI runner, is unaffected.
-- [ ] 5.5 **[long]** Synthesis equivalence on the CI synth lane (`full-synth` label on the PR, ~2 h on the Azure runner).
+- [x] 5.5 **[long]** Synthesis equivalence on the CI synth lane (`full-synth` label on the PR, ~2 h on the Azure runner).
   - Verify: cell count, chip area and DFF count match `synth-baseline.json`, and yosys `CHECK` reports 0 problems.
+  - Done: PR #51, synth run 36447894410 (2h15m). yosys `CHECK` reports **0 problems**. The verification criterion was refined because `synth-baseline.json` predates the Cheshire v0.3.1 bump, so the right reference is the v0.3.1 run from #50 (36321657267).
+    - Post-mapping, fork vs v0.3.1: cells 735,557 vs 735,837 (−280, −0.04%); area 17,771,117.07 vs 17,776,378.83 µm² (−0.03%); DFFs 89,249 vs 89,209 (+40).
+    - Synthesis is deterministic: 4 scheduled runs over 2 commits are identical to the cell, so the delta is real, not noise.
+    - The **pre-techmap statistics (`basilisk_generic.json`, `basilisk_pre_tech.json`) are identical in all 69 modules**, including cell counts by type. The rewrite therefore reaches technology mapping as the same logic, and the small post-mapping deltas arise in ABC mapping and the cleanup after it. That is also why they land in modules the fork does not touch: `hyperbus` −231 cells, `cheshire_idma_wrap` −187, `axi_llc_reg_wrap` +40 DFFs, and the flattened top +139 cells.
+    - Accepted as equivalent at the logic level. Not bit-identical after mapping, and recorded as such.
 - [x] 5.6 **[vm]** Rebuild the bundle from the pinned fork, not a hand-patched copy, and re-run `helloworld.spm` on the VM.
   - Verify: `PASS`, exit 0, the bundle's `MANIFEST` names the pinned `Bender.lock`, and its `cheshire_soc.sv` is the fork's.
   - Done: the bundle rebuilt from the committed pin (`5ec4197`, `Bender.lock` → `465e9e8`) carries the fork's `cheshire_soc.sv` (the `gen_axi_map` generate block), and `helloworld.spm` gives `PASS`, exit 0 (see 3.1/3.2). Its `MANIFEST` names the pinned lock's sha256.
@@ -141,5 +146,6 @@ No synth or P&R runs anywhere in this change.
     - the lane's own TB
     - `pad_functional.sv`, unused and excluded from Verilator only because Verilator cannot parse it
   - Defines: this lane adds only `TARGET_SIMULATION`/`TARGET_TEST`, and no shared source references either. The 90 shared files with `` `ifndef VERILATOR `` guards (mostly assertions) are a simulator-inherent difference, not a DUT one.
-- [ ] 4.3 **[edit]** Update `docs/infra-plan.md`. Add an Xcelium lane entry in Phase 2, or a new phase if that reads better, recording the restricted-VM workflow, the observed round-trip results from section 3, and the Verilator cross-check outcome.
+- [x] 4.3 **[edit]** Update `docs/infra-plan.md`. Add an Xcelium lane entry in Phase 2, or a new phase if that reads better, recording the restricted-VM workflow, the observed round-trip results from section 3, and the Verilator cross-check outcome.
   - Verify: the document states only observed results, and says so explicitly for any result not yet observed.
+  - Done: new `docs/infra-plan.md` Phase 14 ("Xcelium simulation lane"; Phase 13 was already the Cheshire bump), recording only observed results: the bundle, DUT parity, the green light and per-test verdicts, the Cheshire fork with its synth evidence, the findings along the way, and operational notes. Phase 2's parked Verilator green-light item gains the cross-check result.

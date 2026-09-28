@@ -155,6 +155,11 @@ Questa stays as a local-only waveform-debug target. Full record:
       so it's parked as follow-up work rather than a Phase 2 gate; see the change's tasks.md
       (3.1) and design.md's addendum for the full investigation log. Phase 3's `sim-soc` job is
       scaffolded against this and gated/skipped until it lands.
+      **Cross-checked 2026-09-28 (Phase 14).** On the same DUT under Xcelium, the reference driver
+      halts and resumes the hart normally: `DMSTATUS` goes `0xc0c82` → `0xc0382` → `0xf0c82`.
+      Every real `DMSTATUS` on this DM has low byte `0x82`, so the frozen `0x00000011` read here
+      cannot come from the RTL. The bug is in this lane's C++ DMI read path. The Xcelium VCD is the
+      reference trace for fixing it.
 - [ ] Coprocessor **unit testbench** (Verilator or cocotb) driving the CV-X-IF / instruction
       interface directly with NIST KAT vectors. **Descoped from this phase** — moved to
       Phase 7 (depends on the still-open CV-X-IF-vs-`Zknh` decision and coprocessor RTL that
@@ -704,6 +709,51 @@ Change: `openspec/changes/bump-cheshire-v0-3-1`. The CVA6 pin (`pulp-v1.0.0`) is
 - Local-dev note: on Docker Desktop's virtiofs bind mount, symlinks the flow creates (`ig-hw-fma-opt`,
   `ig-hw-bootrom-split`) read back as `EPERM` inside the container. Build in a container-local volume, or on
   native Linux.
+
+## Phase 14 — Xcelium simulation lane  ✅ done (2026-09-28, #51)
+
+The first licensed simulator this project has actually run. Cadence Xcelium (`xrun` 24.03-s004) lives on a
+restricted AWS VM (`ip-10-0-92-146.eu-central-1.compute.internal`, 2 cores, 7 GB) with no git, Bender, Docker or
+internet. Change: `openspec/changes/xcelium-sim-lane`. How to use it: `target/xcelium/README.md`.
+
+- [x] **Bundle, not checkout.** `make ig-xrun-bundle` builds one ~1.4 MB archive: the Bender closure (570 files,
+      bundle-relative paths under `deps/`), Cheshire's VIP and vendor models, the IHP13 behavioral macros, the DPI
+      ELF loader, the test ELFs, `run.sh` and a provenance `MANIFEST`. A completeness check runs before archiving
+      and again on the VM. On the VM, `./run.sh [tests]` compiles once, runs each ELF, and packs per-test
+      `PASS`/`FAIL`/`TIMEOUT`/`ERROR` verdicts into one results archive.
+- [x] **DUT parity.** It simulates `iguana_soc` with `NO_HYPERBUS`, the same unit as the Verilator lane, driven by
+      Cheshire's `vip_cheshire_soc`. 539 of the Verilator lane's 542 file-list entries are shared; the rest are
+      the Verilator harness itself.
+- [x] **Green light.** `helloworld.spm` passes: JTAG halt → preload → resume, `Hello World!`, exit 0 at 2.19 ms
+      simulated time. It takes ~47 s to compile and ~40 s to run. `dma_2d` and `spm_uncached` also pass.
+      `axirt_*` and `clic_*` time out by design: `CheshireCfg` leaves AXI-RT and CLIC disabled (see Phase 13's
+      CLIC follow-up).
+- [x] **Cheshire now comes from a project fork.** Xcelium rejects `cheshire_soc.sv`'s `gen_axi_map()`/
+      `gen_reg_map()` constant functions (`CFBADP`/`CFBADT`/`SVNSTP`). The code is legal SV, and no option
+      relaxes it.
+  - `wortexx/cheshire` branch `newt/v0.3.1` (cut from v0.3.1) builds the maps as constant-driven signals.
+    It is tagged **`v0.3.1-newt.1`** (`465e9e8`) and pinned by `rev:`. Later patches continue as
+    `v0.3.1-newt.<N>`, which is the fork line the CV-X-IF work will extend.
+  - Synthesis (PR #51, run `36447894410`): yosys `CHECK` reports 0 problems, and pre-techmap statistics are
+    identical in all 69 modules. Post-mapping, compared with v0.3.1: cells 735,557 (−0.04%), area
+    17,771,117.07 µm² (−0.03%), DFFs 89,249 (+40). These come from ABC mapping sensitivity and land in untouched
+    modules. Synthesis itself is deterministic run to run, so these are real but not logic changes.
+  - `synth-baseline.json` is not reseeded.
+- [x] **Found along the way.**
+  - Bender lists two things `xrun` must not compile: duplicate module definitions that Questa silently
+    overrides (`sram`, `configurable_delay`), and CVA6 headers that get compiled twice.
+  - A copy to the VM silently dropped the hidden `.bender/` tree. That is why dependencies live under
+    `deps/` in the bundle.
+  - macOS bsdtar embeds xattrs that GNU tar warns about.
+  - The fast-lane per-file Verilator lint cannot handle the testbench's hierarchical VIP calls, so it
+    skips `target/xcelium/src/`.
+- **Operational notes.**
+  - SSH access is `ssh xcelium-vm` (key login for `sbidnyi`). Xcelium's environment comes from
+    `~/.tcshrc`, so non-interactive commands need `tcsh -c`.
+  - The VM has only a private `10.0.x` address. It became unreachable mid-session once, when the host's
+    network route dropped.
+  - Label-triggered synth runs (`full-synth`) wait for a deallocated runner VM. `synth.yml` has no
+    start step, so start the VM (`az vm start`) or wait for `pnr.yml`.
 
 ---
 
