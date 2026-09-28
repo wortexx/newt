@@ -684,10 +684,7 @@ Change: `openspec/changes/bump-cheshire-v0-3-1`. The CVA6 pin (`pulp-v1.0.0`) is
       packages with ~50 `REG_BUS`-ported modules that otherwise all became lint roots.
 - [x] **Software.** `ig-sw-all` builds with 10 test ELFs, and the bootrom is rebuilt from v0.3.1's sources
       (the split file keeps its size; its contents differ).
-- [ ] **Not verified here.**
-  - Questa `ig-sim-rtl`: no Questa available. `fixture_iguana` instantiates the changed `vip_cheshire_soc`.
-  - Verilator `ig-sim-verilator`: the model doesn't build on `main` either (Verilator 5.050 internal error at
-    CVA6 `wt_axi_adapter.sv:139`), which is pre-existing.
+- [x] **Simulation, with Xcelium in place of Questa.** The `xcelium-sim-lane` VM runs used the post-bump RTL and passed `helloworld.spm`, `dma_2d` (iDMA 0.6) and `spm_uncached` (the now-live remap). `fixture_iguana`'s `vip_cheshire_soc` hookup was checked statically: no port changes, and one new parameter that defaults to 0. Verilator still fails to build on `main` too, for a pre-existing reason.
 - [x] **Synth-lane metrics.** Run `36321657267`, against the PR image, passed with yosys `CHECK` at 0 problems. It is compared with the same-day `main` run `36306162671`, which reproduces `synth-baseline.json` exactly.
 
   | metric | main (4a270af) | v0.3.1 | delta |
