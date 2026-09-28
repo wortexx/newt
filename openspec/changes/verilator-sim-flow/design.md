@@ -137,3 +137,19 @@ no-halt `DMSTATUS`-only poll, described above) straight out of this
 Verilator harness and inspect `dmi_jtag.sv`'s `state_q`/`error_q`/
 `dmi_req_valid`/`dmi_resp_valid` directly - this is a small, fast repro,
 not the full boot sequence.
+
+**Cross-check result (2026-09-28, Xcelium lane — `openspec/changes/xcelium-sim-lane` task 3.3):**
+the same DUT (`iguana_soc`, `NO_HYPERBUS`, Cheshire `v0.3.1-newt.1`) run under
+Xcelium 24.03 with Cheshire's `vip_cheshire_soc` / reference `jtag_test::riscv_dbg`
+driver passes `helloworld.spm` end to end, and a VCD of the debug path shows the
+Debug Module behaving exactly per spec: `DMSTATUS` = `0xc0c82` out of reset
+(version 2, authenticated, running), `haltreq` at 34.1 us drives CVA6
+`debug_req_i`, `allhalted` (`0xc0382`) at 49.0 us, `allresumeack` + running
+(`0xf0c82`) after resume at ~486 us; 336 DMI requests with `dmi_jtag.error_q`
+never set. Every real `DMSTATUS` value on this DM has low byte `0x82`
+(version=2, authenticated=1), so this harness's frozen `0x00000011` is not a
+`DMSTATUS` value the RTL can produce at all: **the fault is in this lane's C++
+JTAG-DTM/DMI read path (what it shifts or which bits it captures), not in the
+RTL or `CheshireCfg`.** Next step for whoever resumes this: diff this harness's
+DMI read bit-stream against the Xcelium trace (`dmi_jtag.state_q` transitions and
+the DR shifts around one `DMSTATUS` read) — the Xcelium VCD is the reference.
