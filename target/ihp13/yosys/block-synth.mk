@@ -60,7 +60,7 @@ synth-coproc-block:
 	python3 $(YOSYS_DIR)/scripts/block_metrics.py \
 		--area $(BLOCK_DIR)/reports/$(BLOCK_NAME)_area.json \
 		--check $(BLOCK_DIR)/reports/$(BLOCK_NAME)_synth.rpt \
-		--sta $(BLOCK_DIR)/sta.rpt --period-ns $(BLOCK_PERIOD_NS) \
+		--sta $(BLOCK_DIR)/sta.rpt --log $(BLOCK_DIR)/yosys.log --period-ns $(BLOCK_PERIOD_NS) \
 		--block $(BLOCK) --rounds-per-cycle $(ROUNDS_PER_CYCLE) \
 		--out $(BLOCK_DIR)/metrics.json
 

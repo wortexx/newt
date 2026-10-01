@@ -7,7 +7,15 @@
 Reads the yosys `stat -json` area report and `check` report with the synth
 lane's own parsers (synth_metrics.py, so cell/area/DFF counting is identical
 to the full-SoC lane), plus the block STA report (block_sta.tcl), and writes
-one JSON record. Exits non-zero if yosys `check` found any problem.
+one JSON record.
+
+Exits non-zero if yosys `check` found any problem, counting both the final
+`check` report and the structural warnings the flow's earlier `check` passes
+print to the log (logic loop, conflicting drivers, used-but-undriven wire).
+The final report alone is not enough: by the time it runs on the mapped
+netlist, earlier passes have resolved loops and undriven nets, so it reports
+0 problems for RTL that has them (found with a deliberate negative test,
+openspec change sha3-cvxif-coprocessor task 2.6).
 """
 
 import argparse
@@ -30,11 +38,17 @@ def parse_block_sta(text):
     return float(slack.group(1)), (max(arrivals) if arrivals else None)
 
 
+STRUCTURAL_WARNINGS = re.compile(
+    r"^Warning: (found logic loop|multiple conflicting drivers|Wire .* is used but has no driver)",
+    re.MULTILINE)
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--area", required=True)
     p.add_argument("--check", required=True)
     p.add_argument("--sta", required=True)
+    p.add_argument("--log", required=True, help="yosys log of the synthesis run")
     p.add_argument("--period-ns", type=float, required=True)
     p.add_argument("--block", required=True)
     p.add_argument("--rounds-per-cycle", type=int, required=True)
@@ -44,6 +58,7 @@ def main(argv=None):
     cells, area, dffs = synth_metrics.parse_area_report(
         synth_metrics.read_report(a.area, "area"))
     problems = synth_metrics.parse_check_report(synth_metrics.read_report(a.check, "check"))
+    structural = STRUCTURAL_WARNINGS.findall(Path(a.log).read_text(errors="replace"))
     slack, arrival = parse_block_sta(Path(a.sta).read_text())
 
     record = {
@@ -53,6 +68,7 @@ def main(argv=None):
         "area_um2": area,
         "dffs": dffs,
         "check_problems": problems,
+        "structural_check_warnings": len(structural),
         "clock_period_ns": a.period_ns,
         "worst_slack_ns": slack,
         "critical_path_ns": arrival,
@@ -62,8 +78,9 @@ def main(argv=None):
     }
     Path(a.out).write_text(json.dumps(record, indent=2) + "\n")
     print(json.dumps(record, indent=2))
-    if problems:
-        print(f"block_metrics: yosys check reported {problems} problem(s)", file=sys.stderr)
+    if problems or structural:
+        print(f"block_metrics: yosys check reported {problems} problem(s) in the final report "
+              f"and {len(structural)} structural warning(s) in the log", file=sys.stderr)
         return 1
     return 0
 
