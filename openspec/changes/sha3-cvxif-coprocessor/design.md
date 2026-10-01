@@ -172,6 +172,16 @@ There is no AXI manager in the accelerator. Reusing iDMA gives the "accelerator 
 - **`synth-coproc`.** It runs the standalone block-synthesis target and fails on any `CHECK` problem.
 - **Branch protection.** Both jobs are added to `main`'s required checks. That is a repository-settings action, recorded as a manual task.
 
+### D10 — Synthesis frontend held fixed during measurement (user decision, 2026-10-02)
+
+All PPA numbers in this change (groups 5 and 8) are measured on the **current** frontend, `morty → svase → sv2v → yosys read_verilog`, against the current `synth-baseline.json`. The planned `replace-svase-sv2v-with-read-slang` change (infra-plan Phase 8) lands **after** this change's measurements, not before or in between.
+
+That migration changes cell counts and netlist naming (`gen_cva6_cores.__0` becomes `gen_cva6_cores[0]`). Landing it between the first full-SoC synthesis (task 5.3) and later PPA runs would mix a frontend delta into the coprocessor delta.
+
+**Rejected: migrate first, then measure.** That order is cleaner long-term, but it puts a BREAKING image/CI/backend change that is still at proposal stage on the thesis's critical path. Nothing in this change needs slang. The current chain pickles `keccak_cvxif` cleanly (task 3.2).
+
+Whether the hypervisor extension (ON in the baseline, infra-plan Phase 15) is turned off is the other baseline-moving question. It too must be settled before task 5.3.
+
 ## Risks / Trade-offs
 
 - **[Pre-1.0 CV-X-IF handshake bugs in this CVA6 release]** → Task 1 is a smoke test on the Xcelium lane with the stock example coprocessor before any Keccak RTL. If the handshake proves unusable, stop and revisit D1. Changing D1 is a scope decision, not a silent fallback.

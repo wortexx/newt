@@ -383,6 +383,8 @@ Executed as `openspec/changes/sha3-cvxif-coprocessor/`; its `tasks.md` is the de
 
 ## Phase 8 — Replace svase+sv2v with `yosys-slang`  *(exploratory, not blocking)*
 
+> **Sequencing (2026-10-02, user decision):** this migration lands **after** the `sha3-cvxif-coprocessor` PPA measurements. That change measures on the current svase/sv2v frontend against the current baseline, so no frontend delta mixes into the coprocessor delta (its design D10).
+
 > **Prerequisite met (2026-09-17).** This needed yosys ≥ 0.67, the first release with the slang
 > frontend built in (the standalone plugin supports only 0.52–0.66). The toolchain is now on
 > upstream v0.69 and the image asserts `read_slang` is available, so the prototype below can start.

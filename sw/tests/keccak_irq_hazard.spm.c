@@ -9,11 +9,15 @@
 // at may already have changed the Keccak state before it is flushed and
 // re-executed after mret. This test measures whether that happens.
 //
-// The interrupt is the CLINT machine software interrupt (MSIP): its arrival
-// is a fixed number of cycles after the triggering store, so a swept spin
-// delay before the coprocessor sequence walks the arrival point through the
-// sequence one position at a time. (A CLINT timer interrupt is too coarse:
-// mtime advances at the RTC rate, many core cycles per tick.)
+// The interrupt is the CLINT machine software interrupt (MSIP). The trigger
+// store is posted WITHOUT a fence, so the interrupt arrives a bus round trip
+// after the store, while the core has already moved on; a swept spin delay
+// (0..NUM_PADS-1) between the store and the coprocessor sequence walks that
+// arrival point backwards through the start of the sequence. (A first
+// version fenced the store: the core then waited for the write, the interrupt
+// was always taken before the sequence began, and no trial landed inside it.
+// A CLINT timer interrupt is too coarse: mtime advances at the RTC rate, many
+// core cycles per tick.)
 //
 //   A: 64 x kxor into lane 0, the k-th XORing (1 << k). The final lane XOR
 //      all-ones is a bit mask of exactly the instructions whose effect was
@@ -31,15 +35,21 @@
 #include "newt_test.h"
 #include "regs/clint.h"
 
-#define NUM_PADS 160
+#define NUM_PADS 64
 #define MAX_REPORT 8
 
 static volatile uint64_t irq_epc;
 static volatile unsigned irq_count;
 
-static inline void msip_set(uint32_t v) {
-    *reg32(&__base_clint, CLINT_MSIP_REG_OFFSET) = v;
+// Raise MSIP: a plain posted store, deliberately not fenced (see above).
+static inline void msip_raise(void) { *reg32(&__base_clint, CLINT_MSIP_REG_OFFSET) = 1; }
+
+// Clear MSIP and wait until the clear is visible, so mret does not re-enter.
+static inline void msip_clear(void) {
+    *reg32(&__base_clint, CLINT_MSIP_REG_OFFSET) = 0;
     fence();
+    while (*reg32(&__base_clint, CLINT_MSIP_REG_OFFSET) & 1) {
+    }
 }
 
 // Overrides crt0's weak trap_vector. Only the software interrupt is expected.
@@ -50,9 +60,7 @@ void trap_vector(void) {
     if (cause == ((1ull << 63) | 3)) {
         irq_epc = epc;
         irq_count = irq_count + 1;
-        msip_set(0);
-        while (*reg32(&__base_clint, CLINT_MSIP_REG_OFFSET) & 1) {
-        }
+        msip_clear();
         return;  // resume at mepc: the interrupted instruction re-executes
     }
     printf("unexpected trap: mcause 0x%lx mepc 0x%lx\r\n", cause, epc);
@@ -121,18 +129,18 @@ static int trial(seq_fn seq, uint64_t pad, uint64_t *epc_off) {
     irq_count = 0;
     irq_epc = 0;
     set_mie(1);
-    msip_set(1);
+    msip_raise();
     spin(pad);
     seq(&start, &end);
     set_mie(0);
-    if (irq_count == 0) {  // arrived after the sequence: take it now, ignore
+    if (irq_count == 0) {  // arrives after the sequence: wait for it, ignore the trial
         set_mie(1);
         while (irq_count == 0) {
         }
         set_mie(0);
         return 0;
     }
-    *epc_off = irq_epc - start;
+    *epc_off = irq_epc - start;  // as signed: < 0 before, >= end - start after
     return irq_epc >= start && irq_epc < end;
 }
 
@@ -154,6 +162,10 @@ int main(void) {
             int in = trial(seq_a, pad, &off);
             uint64_t mask = keccak_krd(0) ^ ~0ull;
             inside += in;
+            // Arrival-point diagnostic: where the interrupt was taken relative
+            // to the sequence start (bytes; negative = before the sequence).
+            if (pad == 0 || pad == 1 || pad == 2 || pad == 4 || pad == 8 || pad == 16 || pad == 32)
+                printf("A pad %lu: irq at seq%+ld bytes (inside=%d)\r\n", pad, (long)off, in);
             if (mask) {
                 corrupted++;
                 if (reported++ < MAX_REPORT)
