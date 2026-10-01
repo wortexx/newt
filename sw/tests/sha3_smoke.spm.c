@@ -16,7 +16,7 @@ int main(void) {
     newt_uart_init();
     set_mie(0);
     const uint8_t msg[3] = {'a', 'b', 'c'};
-    for (unsigned impl = 0; impl < SHA3_NUM_IMPLS; impl++) {
+    for (unsigned impl = SHA3_FIRST_ISE; impl < SHA3_FIRST_SW; impl++) {
         uint8_t d[32];
         sha3_hash(SHA3_256, (sha3_impl_t)impl, msg, sizeof(msg), d);
         int ok = 1;

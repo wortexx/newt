@@ -16,7 +16,16 @@ static const unsigned kRate[SHA3_NUM_VARIANTS] = {144, 136, 104, 72};
 static const unsigned kDigest[SHA3_NUM_VARIANTS] = {28, 32, 48, 64};
 static const char *const kVariantName[SHA3_NUM_VARIANTS] = {"SHA3-224", "SHA3-256",
                                                              "SHA3-384", "SHA3-512"};
-static const char *const kImplName[SHA3_NUM_IMPLS] = {"ise-kperm", "ise-shatr"};
+static const char *const kImplName[SHA3_NUM_IMPLS] = {"ise-kperm", "ise-shatr", "sw-rvcrypto",
+                                                       "sw-xkcp-ref64", "sw-xkcp-opt64"};
+
+// Software baselines (sw/lib/sha3_sw_*.c, vendored code under sw/vendor/).
+void sha3_sw_rvcrypto_hash(unsigned rate, unsigned digest, const uint8_t *msg, size_t len,
+                           uint8_t *out);
+void sha3_sw_xkcp_ref64_hash(unsigned rate, unsigned digest, const uint8_t *msg, size_t len,
+                             uint8_t *out);
+void sha3_sw_xkcp_opt64_hash(unsigned rate, unsigned digest, const uint8_t *msg, size_t len,
+                             uint8_t *out);
 
 unsigned sha3_rate_bytes(sha3_variant_t v) { return kRate[v]; }
 unsigned sha3_digest_bytes(sha3_variant_t v) { return kDigest[v]; }
@@ -83,6 +92,15 @@ int sha3_hash(sha3_variant_t v, sha3_impl_t impl, const uint8_t *msg, size_t len
             return 0;
         case SHA3_IMPL_ISE_SHATR:
             sponge_ise_shatr(kRate[v], kDigest[v], msg, len, out);
+            return 0;
+        case SHA3_IMPL_SW_RVCRYPTO:
+            sha3_sw_rvcrypto_hash(kRate[v], kDigest[v], msg, len, out);
+            return 0;
+        case SHA3_IMPL_SW_XKCP_REF64:
+            sha3_sw_xkcp_ref64_hash(kRate[v], kDigest[v], msg, len, out);
+            return 0;
+        case SHA3_IMPL_SW_XKCP_OPT64:
+            sha3_sw_xkcp_opt64_hash(kRate[v], kDigest[v], msg, len, out);
             return 0;
         default:
             return -1;

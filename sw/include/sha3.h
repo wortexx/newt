@@ -4,10 +4,12 @@
 //
 // SHA3-224/256/384/512 (FIPS 202) over several Keccak-f[1600] back-ends, so
 // tests and benchmarks run the identical sponge on each implementation:
-//   SHA3_IMPL_ISE_KPERM  coprocessor, one kperm per block
-//   SHA3_IMPL_ISE_SHATR  coprocessor, 24 shatr per block (arXiv:2508.20653)
-// Further back-ends (software baselines, MMIO accelerator) are added by the
-// sha3-cvxif-coprocessor change in later tasks.
+//   SHA3_IMPL_ISE_KPERM       coprocessor, one kperm per block
+//   SHA3_IMPL_ISE_SHATR       coprocessor, 24 shatr per block (arXiv:2508.20653)
+//   SHA3_IMPL_SW_RVCRYPTO     riscv-crypto reference SHA-3, its own sponge
+//   SHA3_IMPL_SW_XKCP_REF64   XKCP KeccakP-1600 ref-64bits (Keccak Team reference)
+//   SHA3_IMPL_SW_XKCP_OPT64   XKCP KeccakP-1600 opt64 (generic64)
+// The software baselines are vendored under sw/vendor/ (design D7).
 
 #pragma once
 
@@ -25,8 +27,15 @@ typedef enum {
 typedef enum {
     SHA3_IMPL_ISE_KPERM = 0,
     SHA3_IMPL_ISE_SHATR = 1,
+    SHA3_IMPL_SW_RVCRYPTO = 2,
+    SHA3_IMPL_SW_XKCP_REF64 = 3,
+    SHA3_IMPL_SW_XKCP_OPT64 = 4,
     SHA3_NUM_IMPLS
 } sha3_impl_t;
+
+// Implementations [SHA3_FIRST_ISE, SHA3_FIRST_SW) use the coprocessor.
+#define SHA3_FIRST_ISE SHA3_IMPL_ISE_KPERM
+#define SHA3_FIRST_SW SHA3_IMPL_SW_RVCRYPTO
 
 // Rate (bytes) and digest length (bytes) of a variant.
 unsigned sha3_rate_bytes(sha3_variant_t v);
