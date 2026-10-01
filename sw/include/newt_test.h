@@ -27,7 +27,7 @@ static inline void newt_uart_init(void) {
 static inline void newt_uart_flush(void) { uart_write_flush(&__base_uart); }
 
 // Number of failed checks so far; a test returns it (0 = PASS).
-static int newt_fails;
+static int newt_fails __attribute__((unused));
 
 #define NEWT_CHECK(cond, ...)                                    \
     do {                                                         \

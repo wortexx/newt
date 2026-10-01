@@ -14,9 +14,8 @@
 //      all-zero halfwords, each the canonical illegal instruction: 2 traps,
 //      mtval = 0 each
 //   2. 0x0000507B - custom-3 with funct3 = 101, claimed by no coprocessor
-//      (the stock example accepts only custom-1/custom-2; the Keccak ISE uses
-//      custom-1): 1 trap, mtval = 0x507B. This is the coprocessor's
-//      reject path.
+//      (the Keccak coprocessor accepts only custom-1): 1 trap,
+//      mtval = 0x507B. This is the coprocessor's reject path.
 //   3. 0x0000500B - custom-0. The pinned CVA6 decodes the whole custom-0
 //      opcode as PULP's FENCE.T, so this must execute without trapping; the
 //      test pins that fact down because the ISE's opcode choice depends on it.

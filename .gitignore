@@ -77,3 +77,4 @@ hw/coproc/build/
 
 # Standalone hw/coproc block synthesis outputs (target/ihp13/yosys/block-synth.mk)
 target/ihp13/yosys/block/
+sw/**/*.a

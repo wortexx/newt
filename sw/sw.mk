@@ -15,13 +15,29 @@ NEWT_SW_SRCS  := $(wildcard $(NEWT_SW_DIR)/tests/*.spm.c)
 NEWT_SW_TESTS := $(NEWT_SW_SRCS:.c=.elf)
 NEWT_SW_DUMPS := $(NEWT_SW_SRCS:.c=.dump)
 
-# Project headers only for project programs; Cheshire's own tests are unaffected.
-$(NEWT_SW_DIR)/%.o: CHS_SW_INCLUDES += -I$(NEWT_SW_DIR)/include
+# Project library (sw/lib/*.c): archived like libcheshire (same archiver and
+# LTO plugin flags) and linked into every project program ahead of it.
+NEWT_SW_LIB_SRCS := $(wildcard $(NEWT_SW_DIR)/lib/*.c)
+NEWT_SW_LIB      := $(NEWT_SW_DIR)/lib/libnewt.a
+
+$(NEWT_SW_LIB): $(NEWT_SW_LIB_SRCS:.c=.o)
+	rm -f $@
+	$(CHS_SW_AR) $(CHS_SW_ARFLAGS) -rcsv $@ $^
+
+# Project headers only for project objects; Cheshire's own tests are unaffected.
+$(NEWT_SW_DIR)/%.o: CHS_SW_INCLUDES += -I$(NEWT_SW_DIR)/include -I$(NEWT_SW_DIR)/vectors
+
+# Cheshire's link rule links `$*.o $(CHS_SW_LIBS)`; for project programs the
+# library list is prefixed with libnewt (prerequisite stated explicitly, as a
+# target-specific value does not reach the rule's prerequisite list).
+$(NEWT_SW_TESTS): $(NEWT_SW_LIB)
+$(NEWT_SW_TESTS): CHS_SW_LIBS := $(NEWT_SW_LIB) $(CHS_SW_LIBS)
 
 .PHONY: ig-sw-newt ig-sw-newt-clean
 ig-sw-newt: $(NEWT_SW_TESTS) $(NEWT_SW_DUMPS)
 
 ig-sw-newt-clean:
-	rm -f $(NEWT_SW_DIR)/tests/*.o $(NEWT_SW_DIR)/tests/*.elf $(NEWT_SW_DIR)/tests/*.dump
+	rm -f $(NEWT_SW_DIR)/tests/*.o $(NEWT_SW_DIR)/tests/*.elf $(NEWT_SW_DIR)/tests/*.dump \
+		$(NEWT_SW_DIR)/lib/*.o $(NEWT_SW_LIB)
 
 ig-sw-all: ig-sw-newt

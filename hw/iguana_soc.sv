@@ -263,13 +263,14 @@ module iguana_soc import iguana_pkg::*; import cheshire_pkg::*; (
     .cvxif_resp_i       ( cvxif_rsp )
   );
 
-  // CV-X-IF bring-up: CVA6's example coprocessor (adds rs1 + rs2 on custom-2).
-  // Temporary scaffolding, replaced by the Keccak coprocessor.
-  cvxif_example_coprocessor i_cvxif_example (
-    .clk_i        ( clk_i     ),
+  // Keccak-f[1600] coprocessor on core 0's CV-X-IF port (hw/coproc/).
+  keccak_cvxif #(
+    .RoundsPerCycle ( iguana_pkg::KeccakRoundsPerCycle )
+  ) i_keccak_cvxif (
+    .clk_i        ( clk_i        ),
     .rst_ni       ( synced_rst_n ),
-    .cvxif_req_i  ( cvxif_req ),
-    .cvxif_resp_o ( cvxif_rsp )
+    .cvxif_req_i  ( cvxif_req    ),
+    .cvxif_resp_o ( cvxif_rsp    )
   );
 
   `ifndef NO_HYPERBUS
