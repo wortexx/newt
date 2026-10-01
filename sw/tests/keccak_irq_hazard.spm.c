@@ -195,5 +195,5 @@ int main(void) {
     printf("keccak_irq_hazard: %s\r\n",
            exercised ? "DONE (window exercised)" : "FAIL (no interrupt landed inside a sequence)");
     newt_uart_flush();
-    return exercised ? 0 : 1;
+    return newt_exit_code(!exercised);
 }

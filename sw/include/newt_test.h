@@ -26,8 +26,17 @@ static inline void newt_uart_init(void) {
 
 static inline void newt_uart_flush(void) { uart_write_flush(&__base_uart); }
 
-// Number of failed checks so far; a test returns it (0 = PASS).
+// Number of failed checks so far.
 static int newt_fails __attribute__((unused));
+
+// Exit code for a test that saw `fails` failures: 0 for PASS, otherwise an
+// EVEN code (2 * fails). An odd exit code hangs the JTAG-preload flow:
+// crt0's _exit writes (code << 1) | 1 to SCRATCH[2] and returns into the
+// bootrom's passive-boot loop, which takes SCRATCH[2] bit 1 as its "start"
+// flag (cheshire_bootrom.c boot_passive), clears the register and jumps to
+// a stale entry, so the testbench never sees the end-of-computation bit and
+// reports TIMEOUT. See docs/infra-plan.md (Xcelium lane finding).
+static inline int newt_exit_code(int fails) { return fails ? 2 * fails : 0; }
 
 #define NEWT_CHECK(cond, ...)                                    \
     do {                                                         \

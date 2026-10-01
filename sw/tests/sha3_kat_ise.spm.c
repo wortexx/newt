@@ -96,7 +96,7 @@ int main(void) {
                        sha3_variant_name(t->variant), sha3_impl_name((sha3_impl_t)impl), k,
                        (unsigned)t->len);
                 newt_uart_flush();
-                return 1;
+                return newt_exit_code(1);
             }
         }
     }
@@ -105,5 +105,5 @@ int main(void) {
     int fails = check_rd_nonzero_rejected();
     printf("sha3_kat_ise: %s (%d failures)\r\n", fails ? "FAIL" : "PASS", fails);
     newt_uart_flush();
-    return fails;
+    return newt_exit_code(fails);
 }

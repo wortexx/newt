@@ -762,6 +762,35 @@ internet. Change: `openspec/changes/xcelium-sim-lane`. How to use it: `target/xc
 
 ---
 
+## Phase 16 — Odd exit codes hang the JTAG-preload flow *(finding, 2026-10-01, worked around)*
+
+Found on the Xcelium lane (`sha3-cvxif-coprocessor`): a program that returns an **odd** exit
+code is reported `TIMEOUT`, not `FAIL`. Exit probes: `return 0` → `PASS`, `return 2` →
+`FAIL 2`, `return 1` → `TIMEOUT`.
+
+Cause, in upstream Cheshire (v0.3.1):
+
+- crt0's `_exit` writes `(code << 1) | 1` to `SCRATCH[2]` and then `ret`s into its caller.
+  Under JTAG preload, that caller is the bootrom's passive-boot loop.
+- That loop (`hw/bootrom/cheshire_bootrom.c`, `boot_passive`) takes **bit 1** of `SCRATCH[2]`
+  as its "start" flag, which is bit 0 of the exit code. When it sees the flag it clears
+  `SCRATCH[2]` and jumps to the entry in `SCRATCH[1:0]`.
+- So every odd exit code is erased before the VIP's end-of-computation poll (bit 0) sees it,
+  and the run hangs until the simulated-time bound.
+
+This affects every lane that uses the JTAG-preload flow: Xcelium, and Questa through the same
+VIP. It violates the `xcelium-sim` spec's "Failing program reported as FAIL" scenario for odd
+codes; even codes are fine.
+
+- [x] Workaround in the project's own programs: `sw/include/newt_test.h` `newt_exit_code()`
+      returns `2 × failures`, which is always even.
+- [ ] Proper fix through the Cheshire fork (ADR-0002): either have crt0 not return into the
+      bootrom after reporting, or have `boot_passive` use a flag bit that cannot collide with
+      the EOC encoding. Upstream Cheshire tests all `return 0` on success, which is why this
+      never showed there.
+
+---
+
 ## Phase 15 — `IG_CVA6_PKG_PARAMS` only partly reaches the core *(finding, 2026-10-01, not acted on)*
 
 Found while enabling CV-X-IF (`sha3-cvxif-coprocessor` task 1.1). CVA6's configuration has two layers:

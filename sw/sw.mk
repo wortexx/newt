@@ -33,11 +33,18 @@ $(NEWT_SW_DIR)/%.o: CHS_SW_INCLUDES += -I$(NEWT_SW_DIR)/include -I$(NEWT_SW_DIR)
 $(NEWT_SW_TESTS): $(NEWT_SW_LIB)
 $(NEWT_SW_TESTS): CHS_SW_LIBS := $(NEWT_SW_LIB) $(CHS_SW_LIBS)
 
+# Build provenance for the evaluation (scripts/sha3_eval.py): Cheshire's link
+# scripts drop .comment, so the ELFs cannot name their compiler themselves.
+NEWT_SW_BUILD_INFO := $(NEWT_SW_DIR)/tests/BUILD_INFO
+$(NEWT_SW_BUILD_INFO): $(NEWT_SW_TESTS)
+	{ echo "compiler: $$($(CHS_SW_CC) --version | head -1)"; \
+	  echo "flags:    $(CHS_SW_FLAGS)"; } > $@
+
 .PHONY: ig-sw-newt ig-sw-newt-clean
-ig-sw-newt: $(NEWT_SW_TESTS) $(NEWT_SW_DUMPS)
+ig-sw-newt: $(NEWT_SW_TESTS) $(NEWT_SW_DUMPS) $(NEWT_SW_BUILD_INFO)
 
 ig-sw-newt-clean:
 	rm -f $(NEWT_SW_DIR)/tests/*.o $(NEWT_SW_DIR)/tests/*.elf $(NEWT_SW_DIR)/tests/*.dump \
-		$(NEWT_SW_DIR)/lib/*.o $(NEWT_SW_LIB)
+		$(NEWT_SW_DIR)/lib/*.o $(NEWT_SW_LIB) $(NEWT_SW_BUILD_INFO)
 
 ig-sw-all: ig-sw-newt

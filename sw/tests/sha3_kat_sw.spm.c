@@ -31,7 +31,7 @@ int main(void) {
                        sha3_variant_name(t->variant), sha3_impl_name((sha3_impl_t)impl), k,
                        (unsigned)t->len);
                 newt_uart_flush();
-                return 1;
+                return newt_exit_code(1);
             }
         }
         printf("sha3_kat_sw: %s passes all %u vectors\r\n", sha3_impl_name((sha3_impl_t)impl),

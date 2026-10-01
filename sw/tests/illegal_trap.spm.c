@@ -97,5 +97,5 @@ int main(void) {
 
     printf("illegal_trap: %s (%d failures)\r\n", newt_fails ? "FAIL" : "PASS", newt_fails);
     newt_uart_flush();
-    return newt_fails;
+    return newt_exit_code(newt_fails);
 }

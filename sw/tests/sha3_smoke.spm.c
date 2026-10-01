@@ -25,5 +25,5 @@ int main(void) {
     }
     printf("sha3_smoke: %s (%d failures)\r\n", newt_fails ? "FAIL" : "PASS", newt_fails);
     newt_uart_flush();
-    return newt_fails;
+    return newt_exit_code(newt_fails);
 }
