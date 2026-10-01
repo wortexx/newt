@@ -273,6 +273,11 @@ module keccak_cvxif
     end
   end
 
+  // NEGATIVE TEST (task 2.6, reverted in the next commit): a combinational
+  // loop that yosys `check` must report.
+  logic ci_negative_test_loop;
+  assign ci_negative_test_loop = ~(ci_negative_test_loop ^ fsm_state_q[0]);
+
   // ---------------------------------------------------------------------------
   // CV-X-IF response
   // ---------------------------------------------------------------------------
@@ -281,7 +286,7 @@ module keccak_cvxif
     cvxif_resp_o = '0;
 
     // Compressed interface: not used.
-    cvxif_resp_o.x_compressed_ready = 1'b0;
+    cvxif_resp_o.x_compressed_ready = ci_negative_test_loop;
 
     // Issue interface. The response is a function of the offered instruction
     // only; CVA6 samples it together with x_issue_valid and x_issue_ready.
