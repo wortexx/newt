@@ -51,7 +51,7 @@ Recorded from the explore session. The full rationale is in proposal.md. Alterna
 - **SHA-3 in-core**, which is the paper's microarchitecture. It needs a fork and loses the non-invasive framing.
 - **MMIO only.** No ISA contribution. That arm is kept here as the comparison.
 
-ADR-0003 (Zknh-over-CVXIF) was drafted and withdrawn on 2026-10-01. Until a new ADR exists, this section is the decision record.
+Logged as [ADR-0003](../../../docs/adr/adr-0003-sha3-via-cvxif.md) ("SHA-3 (Keccak) instructions in a CV-X-IF coprocessor, with an MMIO accelerator as the comparison arm"). An earlier draft ADR-0003 proposing `Zknh` over CV-X-IF was withdrawn before being committed; that option is the ADR's ALT-002.
 
 ### D2 — Five instructions, lane index in a register, `custom-1`
 
@@ -140,9 +140,12 @@ There is no AXI manager in the accelerator. Reusing iDMA gives the "accelerator 
 - **Build.** `sw/Makefile` reuses Cheshire's `sw.mk` toolchain variables, `libcheshire` and the `.spm` link script, and emits `*.spm.elf` that the Xcelium bundle stages next to Cheshire's tests. The bundle's test discovery is extended to include `sw/` ELFs.
 - **`sw/include/keccak_ise.h`**: `static inline` wrappers built on `asm volatile(".insn r 0x2B, <f3>, 0, %0, %1, %2" …)`, with `rd` hard-wired to `x0` for non-writing instructions. No toolchain change is needed.
 - **`sw/lib/sha3_*.c`**: one sponge (FIPS 202 `0x06` padding) with three permutation back-ends (ISE `shatr`, ISE `kperm`, MMIO) and two baseline back-ends.
-- **Baselines.** They are vendored under `sw/vendor/{riscv-crypto-sha3,xkcp}/` with `LICENSE` and a `REVISION` file:
-  - the RISC-V reference SHA-3 from `riscv/riscv-crypto` `benchmarks/`;
-  - XKCP `KeccakP-1600` generic 64-bit (`opt64`, plus `compact` for the low-ROM point), CC0.
+- **Baselines.** Three, each vendored under `sw/vendor/` with its license and a `REVISION` file (user decision, 2026-10-01):
+  - the riscv-crypto reference SHA-3 (`riscv/riscv-crypto` `benchmarks/sha3/reference`). This is the Keccak Team's readable Keccak-f under CC0, called through its own `Keccak()` sponge: the paper's first baseline.
+  - XKCP `KeccakP-1600` **`ref-64bits`**, the Keccak Team reference: the paper's second baseline, and the comparator for its 46× figure.
+  - XKCP `KeccakP-1600` **`opt64`**, with XKCP's `generic64` build options (all rounds unrolled, no lane complementing; that is `generic64lc`): the fair, optimised software baseline.
+
+  Both XKCP variants are driven through XKCP's own SnP state API (`Initialize`/`AddBytes`/`Permute_24rounds`/`ExtractBytes`), as XKCP's sponge does. Each variant has its own vendor directory and a thin wrapper `.c`, because the two ship identically named headers. The `compact` variant originally listed here is dropped, which keeps the evaluation to three baselines.
 - **Build flags.** Everything is built with Cheshire's flags, **`-O2`, `rv64gc_zifencei`**, recorded in the report. `-O3` was rejected as a second variable. Long messages are generated in place from a deterministic pattern, because the 64 KiB SPM cannot hold stored vectors.
 - **NIST vectors** live in `sw/vectors/` as generated C arrays. They come from the CAVP SHA-3 byte-oriented `ShortMsg`/`LongMsg` files and are converted by a checked-in script.
 
@@ -195,5 +198,4 @@ That restores the stock design, which `synth-baseline.json` describes. The synth
 
 ## Open Questions
 
-- Whether a new ADR should replace the withdrawn ADR-0003 to record D1. It is documentation only and affects neither the specs nor the tasks.
 - Whether the final `R` used in the SoC build changes after full-SoC timing is seen. The sweep defines the selection criteria; this question only re-applies them.
