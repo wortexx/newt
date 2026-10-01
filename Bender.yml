@@ -20,8 +20,10 @@ dependencies:
   axi:                { git: https://github.com/pulp-platform/axi,                version: 0.39.6   }
   # Fork of v0.3.1 carrying newt patches, pinned by tag v0.3.1-newt.<N> (branch
   # newt/v0.3.1). newt.1: address maps built without constant functions, which
-  # Xcelium rejects. See openspec/changes/xcelium-sim-lane.
-  cheshire:           { git: https://github.com/wortexx/cheshire.git,             rev: v0.3.1-newt.1 }
+  # Xcelium rejects. See openspec/changes/xcelium-sim-lane. newt.2: core 0's
+  # CV-X-IF port exposed on cheshire_soc plus the Cva6CvxifEn config field.
+  # See openspec/changes/sha3-cvxif-coprocessor.
+  cheshire:           { git: https://github.com/wortexx/cheshire.git,             rev: v0.3.1-newt.2 }
   hyperbus:           { git: https://github.com/pulp-platform/hyperbus,           version: 0.0.4    }
   register_interface: { git: https://github.com/pulp-platform/register_interface, version: 0.4.5    }
 
@@ -36,6 +38,8 @@ sources:
 
   - target: rtl
     files:
+      - hw/coproc/keccak_pkg.sv
+      - hw/coproc/keccak_round.sv
       - hw/iguana_pkg.sv
       - hw/iguana_soc.sv
       - hw/iguana_chip.sv

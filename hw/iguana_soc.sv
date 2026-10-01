@@ -74,6 +74,9 @@ module iguana_soc import iguana_pkg::*; import cheshire_pkg::*; (
   reg_req_t [CheshireCfg.RegExtNumSlv-1:0] reg_ext_slv_req;
   reg_rsp_t [CheshireCfg.RegExtNumSlv-1:0] reg_ext_slv_rsp;
 
+  cvxif_pkg::cvxif_req_t  cvxif_req;
+  cvxif_pkg::cvxif_resp_t cvxif_rsp;
+
   logic [CheshireCfg.VgaRedWidth-1  :0] vga_red;
   logic [CheshireCfg.VgaGreenWidth-1:0] vga_green;
   logic [CheshireCfg.VgaBlueWidth-1 :0] vga_blue;
@@ -145,7 +148,7 @@ module iguana_soc import iguana_pkg::*; import cheshire_pkg::*; (
       gpio_en_o[6] = usb_dm_oe_o[3];
       gpio_en_o[7] = usb_dp_oe_o[3];
      end
-     
+
   end
 
   // Global reset synchronizer
@@ -254,7 +257,19 @@ module iguana_soc import iguana_pkg::*; import cheshire_pkg::*; (
     .usb_dm_oe_o,
     .usb_dp_i,
     .usb_dp_o,
-    .usb_dp_oe_o
+    .usb_dp_oe_o,
+    // CV-X-IF coprocessor port of core 0
+    .cvxif_req_o        ( cvxif_req ),
+    .cvxif_resp_i       ( cvxif_rsp )
+  );
+
+  // CV-X-IF bring-up: CVA6's example coprocessor (adds rs1 + rs2 on custom-2).
+  // Temporary scaffolding, replaced by the Keccak coprocessor.
+  cvxif_example_coprocessor i_cvxif_example (
+    .clk_i        ( clk_i     ),
+    .rst_ni       ( synced_rst_n ),
+    .cvxif_req_i  ( cvxif_req ),
+    .cvxif_resp_o ( cvxif_rsp )
   );
 
   `ifndef NO_HYPERBUS

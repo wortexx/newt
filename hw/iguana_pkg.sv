@@ -66,6 +66,9 @@ package iguana_pkg;
     // cheshire (RegOut.num_out) in the patch at target/ihp13/picle/patch/svase/svase.sed
     ret.BusErr = 0; // too large
 
+    // CV-X-IF coprocessor port of core 0 (Keccak ISE, see hw/coproc/)
+    ret.Cva6CvxifEn = 1;
+
     // Hyberbus configuration port
     ret.RegExtNumSlv          = 1;
     ret.RegExtNumRules        = 1;

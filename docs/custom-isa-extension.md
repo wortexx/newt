@@ -4,6 +4,8 @@ Working title: *A CV-X-IF Crypto Coprocessor for CVA6 in Basilisk: From RTL to S
 
 Target repo: [`pulp-platform/cheshire-ihp130-o`](https://github.com/pulp-platform/cheshire-ihp130-o) (Basilisk / Iguana), CVA6 host core, IHP SG13G2 130nm open PDK, Yosys + OpenROAD flow.
 
+> **Decision (2026-10-01): SHA-3 (Keccak) through a CV-X-IF coprocessor, with a memory-mapped Keccak accelerator as a comparison arm.** The instruction semantics follow arXiv:2508.20653 (`shatr`, one Keccak-f[1600] round per instruction). On this CVA6 the instruction needs four companions (`kclr`, `kxor`, `krd`, `kperm`), because CV-X-IF carries 2×64 bits in, 64 bits out, and has no memory channel. `Zknh` was rejected for two reasons. Its speedup is ~1.4–2.3× on SHA-256, and its hardware (~2.5k gates, no flip-flops) is at the flow's synthesis noise level, so it could not yield a measurable PPA result. The MMIO arm answers "why an ISE and not an accelerator?" with a measured message-length crossover. The full rationale, the specs and the task list are in [`openspec/changes/sha3-cvxif-coprocessor/`](../openspec/changes/sha3-cvxif-coprocessor/) (design D1). Sections 3–7 below are the original plan and are kept as written. Where they conflict with this decision, the decision wins.
+
 ## 1. Problem statement
 
 CVA6 — the 64-bit RISC-V core Basilisk uses as its host core — does not implement any custom instructions today. The CVA6 documentation states this directly:
@@ -52,14 +54,14 @@ Recommendation: lean crypto, since it has the most directly comparable, recent p
 - *"AES-RV: Hardware-Efficient RISC-V Accelerator with Low-Latency AES Instruction Extension for IoT Security,"* arXiv:2505.11880.
 - *"Microarchitecture Design and Benchmarking of Custom SHA-3 Instruction for RISC-V,"* arXiv:2508.20653.
 - *"Power Side-Channel Analysis of the CVA6 RISC-V Core at the RTL Level Using VeriSide,"* arXiv:2512.21362 — useful methodology reference if any side-channel characterization is attempted as a stretch goal.
-- IEEE Xplore paper(s) on RISC-V scalar cryptography extensions (Zkne/Zknh) reporting concrete numbers: ~10% die-area overhead, 42.57x/44.81x cycle-count gains for AES-128/256, 27.81x/28.91x energy-efficiency gains — good target baseline to compare against once Phase 6 numbers are in.
+- IEEE Xplore paper(s) on RISC-V scalar cryptography extensions (Zkne/Zknh) reporting concrete numbers: ~10% die-area overhead, 42.57x/44.81x cycle-count gains for AES-128/256, 27.81x/28.91x energy-efficiency gains. **Correction (2026-10-01): these are AES (`Zkne`) figures, not SHA figures.** AES gains are large because software AES needs table lookups. SHA-2 with `Zknh` is a ~1.3–2× story in the literature. Neither is an expectation for this thesis's SHA-3 extension. The like-for-like anchor for that is arXiv:2508.20653 (8.02× / 46.31× on FPGA).
 - *"Implementation of a 32-Bit RISC-V Processor with Cryptography Accelerators on FPGA and ASIC,"* IEEE Xplore: ieeexplore.ieee.org/document/9852060/ — directly comparable in that it reports both FPGA and ASIC numbers for a crypto-accelerated RISC-V core, useful as a structural template for how to present this thesis's own FPGA-vs-ASIC (if simulated)/ASIC-only PPA comparison.
 - *"Improving the Efficiency of Cryptography Algorithms on Resource-Constrained Embedded Systems via RISC-V Instruction Set Extensions,"* IEEE Xplore: ieeexplore.ieee.org/document/10261964/.
 - Basilisk's own EDA-tooling papers (arXiv:2406.15107, arXiv:2405.04257) for the baseline flow context (synthesis/P&R runtime and QoR figures for the unmodified SoC) — useful for distinguishing "cost of the SoC" from "cost of the added coprocessor" in the final area/timing breakdown.
 
 ## 6. Evaluation metrics
 
-- **Area overhead**: standalone coprocessor area, and as a fraction of total SoC area (compare against the ~10% die-area-overhead figure reported for Zkne/Zknh extensions elsewhere, as a sanity check).
+- **Area overhead**: standalone coprocessor area, and as a fraction of total SoC area (the ~10% die-area figure reported for Zkne/Zknh above is an AES-dominated number and is only a loose sanity bound here; arXiv:2508.20653's +11.51% LUT / +15.09% FF on FPGA is the like-for-like reference, keeping in mind that FPGA fabric and ASIC cell area do not scale alike).
 - **Timing impact**: change (if any) to achievable Fmax for the whole SoC, plus the coprocessor's own critical path.
 - **Power**: coprocessor power vs. total SoC power, idle vs. active.
 - **Workload-level gains**: cycle-count and energy-efficiency improvement for the target crypto operation vs. a pure-software (RV64 base ISA) implementation, ideally reported the same way as the Zkne/Zknh comparison numbers above (cycle-count multiplier, energy-efficiency multiplier).

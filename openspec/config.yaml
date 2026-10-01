@@ -4,9 +4,10 @@ context: |
   Project "newt": a master-thesis fork of Basilisk (pulp-platform/cheshire-ihp130-o),
   a Linux-capable RV64 SoC (CVA6 host core via Cheshire) targeting IHP's SG13G2
   130nm open-source PDK with a fully open EDA flow.
-  Thesis goal: add SHA crypto instructions to CVA6 — via a CV-X-IF coprocessor or
-  the Zknh standard extension (decision pending) — and carry them end-to-end through
-  the real flow for silicon-realistic PPA numbers. See docs/custom-isa-extension.md
+  Thesis goal: add SHA crypto instructions to CVA6 and carry them end-to-end through
+  the real flow for silicon-realistic PPA numbers. Decided 2026-10-01: SHA-3 (Keccak)
+  instructions in a CV-X-IF coprocessor, plus an MMIO Keccak accelerator as the
+  comparison arm (change sha3-cvxif-coprocessor); Zknh rejected. See docs/custom-isa-extension.md
   (thesis plan) and docs/infra-plan.md (CI/infra plan, living document).
 
   Copyright 2026 Kyiv School of Economics.
@@ -25,7 +26,9 @@ context: |
   - Upstream is dormant (since 2024-10); we own all tooling decisions
   - PROJ_NAME/RTL_NAME stay "basilisk" — many scripts hardcode it; do not rename
   - Modify dependencies (cheshire, cva6) via forks pinned in Bender.yml, not patches
-  - CVA6 config: cv64a6_imafdcsclic_sv39; CV-X-IF exists but is disabled/tied off
+  - CVA6 config: cv64a6_imafdcsclic_sv39; struct-level cva6_cfg_t fields (CvxifEn,
+    RVB, RVH) come from Cheshire's gen_cva6_cfg(), not IG_CVA6_PKG_PARAMS; CV-X-IF
+    is enabled via the Cheshire fork's Cva6CvxifEn field in hw/iguana_pkg.sv
   - Licensing: Solderpad 0.51 for hardware/scripts, Apache-2.0 for software;
     keep SPDX headers in new files
   - Synth needs >35 GB RAM, ~2.5 h; backend >24 h and does not close timing
