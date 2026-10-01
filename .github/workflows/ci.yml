@@ -1,16 +1,18 @@
 # CI fast lane — docs/infra-plan.md Phase 3.
 #
-# `lint` and `sw` are real, blocking checks (required status checks on
-# `main`). `sim-unit`, `sim-soc`, and `synth-coproc` are intentionally
-# scaffolded stubs: each runs its real precondition check every time and
-# reports which named blocker is still open (Phase 7 coprocessor RTL not
-# landed yet, or the verilator-sim-flow JTAG-DM bug — see that change's
-# tasks.md task 3.1), but always exits 0 and is NOT a required status
-# check while stubbed. A green checkmark on one of the three stub jobs
-# means "ran, the tracked blocker is still open" — not "passed a
-# meaningful test." A stub graduates to a real, gating check only via a
-# deliberate follow-up change, never automatically just because its
-# blocker clears (see openspec/changes/ci-fast-lane/design.md D3 and
+# `lint`, `sw`, `sim-unit` and `synth-coproc` are real, blocking checks
+# (required status checks on `main`). `sim-unit` and `synth-coproc`
+# graduated from stubs when the Keccak coprocessor RTL landed under
+# hw/coproc/ (openspec change sha3-cvxif-coprocessor, task 2.6; spec
+# ci-pipeline "A stub job graduates to gating only via an explicit
+# follow-up"). `sim-soc` is still an intentionally scaffolded stub: it runs
+# its real precondition check every time and reports the named blocker that
+# is still open (the verilator-sim-flow JTAG-DM bug, see that change's
+# tasks.md task 3.1), but always exits 0 and is NOT a required status check
+# while stubbed. A green checkmark on it means "ran, the tracked blocker is
+# still open" - not "passed a meaningful test." It graduates only via a
+# deliberate follow-up change, never automatically just because its blocker
+# clears (see openspec/changes/ci-fast-lane/design.md D3 and
 # specs/ci-pipeline/spec.md for the full contract).
 name: CI
 
@@ -252,21 +254,41 @@ jobs:
 
   sim-unit:
     runs-on: ubuntu-latest
+    container: ghcr.io/wortexx/newt-eda:dev
     steps:
       - uses: actions/checkout@v7
 
-      - name: Coprocessor unit testbench (stub)
+      - name: Allow git to operate on the checked-out tree
+        run: git config --global --add safe.directory '*'
+
+      - name: Coprocessor unit testbenches (make ig-coproc-unit)
         run: |
-          # Non-gating by design (spec: "Stubbed jobs ... never gate
-          # merges"): this job must exit 0 either way. If hw/coproc has
-          # started to land, that's a loud (but non-failing) signal that
-          # this job's body needs to be rewritten to run the real unit TB
-          # - not a reason to fail PRs until someone does that on purpose.
-          if [ -d hw/coproc ]; then
-            echo "::warning::hw/coproc now exists but sim-unit is still the stub implementation - update .github/workflows/ci.yml (see openspec/changes/ci-fast-lane/design.md D3) to run the real coprocessor unit TB and add sim-unit to main's required status checks."
-          else
-            echo "stub: pending Phase 7 coprocessor RTL (docs/infra-plan.md Phase 7) - hw/coproc does not exist yet, nothing to test."
-          fi
+          # Verilator models of every hw/coproc block, each driven by a
+          # self-checking C++ harness against the independent reference in
+          # hw/coproc/tb/keccak_ref.h (hw/coproc/coproc.mk). Exits non-zero
+          # on any mismatch, so a real regression fails the PR.
+          #
+          # ig-hw-cva6 first, so the CVA6 packages the CV-X-IF types come
+          # from carry the SoC's configuration (scoreboard depth sets the
+          # CV-X-IF id width). Same retry rationale as lint's bender-sources
+          # step: the first make in a fresh workspace triggers the flaky
+          # dependency checkout.
+          retry() {
+            local attempt=1 max=3
+            until "$@"; do
+              if [ "$attempt" -ge "$max" ]; then
+                echo "::error::giving up after $max attempts: $*"
+                return 1
+              fi
+              echo "Attempt $attempt/$max failed - retrying with a clean .bender/ in 20s (see the lint job's bender-sources step for why)."
+              rm -rf .bender
+              sleep 20
+              attempt=$((attempt + 1))
+            done
+          }
+          try() { make ig-hw-cva6; }
+          retry try
+          make ig-coproc-unit
 
   sim-soc:
     runs-on: ubuntu-latest
@@ -314,13 +336,69 @@ jobs:
 
   synth-coproc:
     runs-on: ubuntu-latest
+    container: ghcr.io/wortexx/newt-eda:dev
     steps:
       - uses: actions/checkout@v7
 
-      - name: Coprocessor-only synthesis (stub)
+      - name: Allow git to operate on the checked-out tree
+        run: git config --global --add safe.directory '*'
+
+      - name: Fetch the SG13G2 liberty files (sparse, pinned PDK submodule commit)
         run: |
-          if [ -d hw/coproc ]; then
-            echo "::warning::hw/coproc now exists but synth-coproc is still the stub implementation - update .github/workflows/ci.yml (see openspec/changes/ci-fast-lane/design.md D3) to run the real yosys synth-only check and add synth-coproc to main's required status checks."
-          else
-            echo "stub: pending Phase 7 coprocessor RTL (docs/infra-plan.md Phase 7) - hw/coproc does not exist yet, nothing to synthesize."
-          fi
+          # The flow reads only the standard-cell and SRAM liberty files out
+          # of the IHP-Open-PDK submodule. A full submodule clone is several
+          # GB, so fetch exactly the commit the superproject pins, shallow and
+          # blob-filtered, with only those two directories checked out.
+          pdk=target/ihp13/pdk/ihp-sg13g2
+          sha=$(git ls-tree HEAD "$pdk" | awk '{print $3}')
+          url=$(git config -f .gitmodules --get submodule.target/ihp13/pdk.url)
+          echo "PDK $url @ $sha"
+          rm -rf "$pdk" && mkdir -p "$pdk"
+          git -C "$pdk" init -q
+          git -C "$pdk" remote add origin "$url"
+          git -C "$pdk" sparse-checkout set --no-cone \
+            /ihp-sg13g2/libs.ref/sg13g2_stdcell/lib/ \
+            /ihp-sg13g2/libs.ref/sg13g2_sram/lib/
+          git -C "$pdk" fetch -q --depth 1 --filter=blob:none origin "$sha"
+          git -C "$pdk" checkout -q FETCH_HEAD
+          ls "$pdk"/ihp-sg13g2/libs.ref/sg13g2_stdcell/lib/sg13g2_stdcell_typ_1p20V_25C.lib
+
+      - name: Coprocessor block synthesis (make synth-coproc-all)
+        run: |
+          # Standalone synthesis of every hw/coproc block through the chip
+          # flow's own yosys script and liberty, plus block STA at 11 ns
+          # (target/ihp13/yosys/block-synth.mk). Fails on any synthesis
+          # error or yosys CHECK problem. Same retry rationale as sim-unit
+          # for the dependency checkout.
+          retry() {
+            local attempt=1 max=3
+            until "$@"; do
+              if [ "$attempt" -ge "$max" ]; then
+                echo "::error::giving up after $max attempts: $*"
+                return 1
+              fi
+              echo "Attempt $attempt/$max failed - retrying with a clean .bender/ in 20s (see the lint job's bender-sources step for why)."
+              rm -rf .bender
+              sleep 20
+              attempt=$((attempt + 1))
+            done
+          }
+          try() { make ig-hw-cva6; }
+          retry try
+          make synth-coproc-all
+
+      - name: Block metrics summary
+        if: always()
+        run: |
+          shopt -s nullglob
+          files=(target/ihp13/yosys/block/*/metrics.json)
+          [ "${#files[@]}" -gt 0 ] || { echo "no metrics.json produced"; exit 0; }
+          {
+            echo "### Coprocessor block synthesis"
+            echo
+            echo '| block | R | cells | area (um^2) | DFFs | CHECK | slack @ 11 ns (ns) | reg-reg path (ns) |'
+            echo '|---|---|---|---|---|---|---|---|'
+            for f in "${files[@]}"; do
+              python3 -c 'import json,sys; m=json.load(open(sys.argv[1])); print("| {block} | {rounds_per_cycle} | {cells} | {area_um2:.0f} | {dffs} | {check_problems} | {worst_slack_ns} | {critical_path_ns} |".format(**m))' "$f"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"

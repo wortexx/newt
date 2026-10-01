@@ -63,3 +63,13 @@ synth-coproc-block:
 		--sta $(BLOCK_DIR)/sta.rpt --period-ns $(BLOCK_PERIOD_NS) \
 		--block $(BLOCK) --rounds-per-cycle $(ROUNDS_PER_CYCLE) \
 		--out $(BLOCK_DIR)/metrics.json
+
+# Every synthesizable hw/coproc block, each at its default parameters - the
+# CI `synth-coproc` gate (fails if any block fails or reports a CHECK problem).
+COPROC_SYNTH_BLOCKS ?= keccak_cvxif
+
+.PHONY: synth-coproc-all
+synth-coproc-all:
+	@set -e; for b in $(COPROC_SYNTH_BLOCKS); do \
+		$(MAKE) --no-print-directory synth-coproc-block BLOCK=$$b; \
+	done
