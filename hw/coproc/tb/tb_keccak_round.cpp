@@ -46,7 +46,7 @@ int main(int argc, char **argv) {
     int fails = 0;
 
     // FIPS 202 / Keccak team intermediate values: Keccak-f[1600](0), lanes 0..4.
-    static const uint64_t kZeroPerm[5] = {0xF1258F7940E1DDE6ull, 0x84D5CCF933C0478Aull,
+    static const uint64_t kZeroPerm[5] = {0xF1258F7940E1DDE7ull, 0x84D5CCF933C0478Aull,
                                           0xD598261EA65AA9EEull, 0xBD1547306F80494Dull,
                                           0x8B284E056253D057ull};
 
