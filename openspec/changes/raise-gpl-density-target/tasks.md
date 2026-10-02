@@ -17,10 +17,10 @@ Tags:
 - [x] 1.2 **[edit]** Set the same `0.72` in `scripts/chip.tcl`'s `GPL_ARGS` and `GPL2_ARGS`,
   with a comment pointing to `scripts/pnr/common.tcl` as the value the CI lane uses. Verify that
   `grep -rn "density 0.65" target/ihp13/openroad/scripts/` returns nothing.
-- [ ] 1.3 **[edit]** Add an optional `workflow_dispatch` input, `gpl_density`, to `pnr.yml`. Pass
+- [x] 1.3 **[edit]** Add an optional `workflow_dispatch` input, `gpl_density`, to `pnr.yml`. Pass
   it to the `pnr` job as `PNR_GPL_DENSITY` (empty means the default), next to `stop_after`, and
   document it in `docs/pnr-pipeline.md`'s input list. Verify the workflow parses (`gh workflow
-  view pnr.yml` lists the input after push) and that `run_pnr.sh`'s header lists the variable.
+  view pnr.yml` lists the input after push) and that `run_pnr.sh`'s header lists the variable. — done. After push, `gh workflow view pnr.yml --ref raise-gpl-density-target --yaml` shows the `gpl_density` input and the `PNR_GPL_DENSITY=` plumbing; `run_pnr.sh`'s header lists `PNR_GPL_DENSITY`.
 
 ## 2. Headroom warning
 
