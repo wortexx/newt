@@ -17,3 +17,30 @@ Stage: block synthesis (yosys + OpenSTA, no placement). Corner: `typ_1p20V_25C` 
 **Selected: R = 6** (`iguana_pkg::KeccakRoundsPerCycle`). Rule: the largest R whose critical path leaves ≥ 20 % slack at 11.0 ns, i.e. ≥ 2.2 ns. Eligible: 1, 2, 3, 4, 6.
 
 Caveats: the timing is pre-placement. Wires and placement will cut the slack, which the SoC-level place and route (task 5.4) measures. The selected R buys the shortest `kperm` for the most area: about 3.5× the R = 1 block. The per-block cycle effect is in `docs/results/sha3-ise.md`, measured at this R.
+
+## SoC synthesis (task 5.3)
+
+Synth lane run 37005575294 (SoC with `keccak_cvxif`, R = 6) against run 36447894410, the same flow on the tree just before the coprocessor (Cheshire fork `v0.3.1-newt.1`, CV-X-IF off). Stage: Yosys synthesis, `typ_1p20V_25C`. CVA6 `cv64a6_imafdcsclic_sv39`, hypervisor extension on (ADR-0004). Yosys `CHECK` problems: 0 (reference: 0).
+
+| | reference | with coprocessor | delta | vs `synth-baseline.json` |
+|---|---:|---:|---:|---:|
+| cells | 735,557 | 801,008 | +65,451 (+8.90 %) | +65,055 (+8.84 %) |
+| area (µm²) | 17,771,117 | 18,610,805 | +839,688 (+4.73 %) | +835,978 (+4.70 %) |
+| flip-flops | 89,249 | 91,344 | +2,095 (+2.35 %) | +1,845 (+2.06 %) |
+
+`i_keccak_cvxif` is its own instance (kept hierarchy): **65,365 cells, 867,261 µm², 2,006 flip-flops**, 4.66 % of the SoC area.
+
+Modules whose area moved by ≥ 500 µm² (reference → with coprocessor):
+
+| module | delta (µm²) |
+|---|---:|
+| `keccak_cvxif` | +867,261 |
+| `cva6` | -34,152 |
+| `spinal_usb_ohci` | +1,530 |
+| `hyperbus` | +1,023 |
+| `axi_llc_reg_wrap` | -931 |
+| `cheshire_idma_wrap` | +724 |
+
+`cva6` shrinking while CV-X-IF is switched on (its `cvxif_fu` becomes live) is beyond the ±0.04 % ABC noise seen on untouched modules; its cause has not been investigated. The SoC delta therefore differs from the coprocessor's own area by that amount.
+
+`synth-baseline.json` (2026-09-17) predates the Cheshire v0.3.1 bump; the reference run is within 0.05 % of it on every metric, so that bump moved the SoC by noise only. Timing (WNS) is not available from the synth lane's STA (a known gap in `basilisk.sdc`, also unavailable in the baseline); SoC timing comes from P&R (task 5.4).

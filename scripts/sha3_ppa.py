@@ -12,7 +12,18 @@ flip-flops, critical path, slack and kperm latency, and applies the selection
 rule: the largest R whose critical path leaves >= 20 % slack at the 11.0 ns
 constraint. The script fails if the SoC's R is not the one the rule selects.
 
+With --soc RUN_DIR --soc-ref REF_DIR (task 5.3) it adds the SoC synthesis
+section. Each directory holds a synth lane run's `synth-reports` artifact
+(`gh run download <id> -n synth-reports -D <dir>`). RUN_DIR is the SoC with
+the coprocessor, and REF_DIR is the same flow on the tree just before it. The
+section gives totals, CHECK problems and the coprocessor instance. It also
+gives the delta against the reference and against synth-baseline.json, plus
+the modules whose area moved. The totals and the CHECK count are parsed by
+the CI lane's own target/ihp13/yosys/scripts/synth_metrics.py.
+
 Usage: scripts/sha3_ppa.py [--out docs/results/sha3-ppa.md]
+                           [--soc RUN_DIR --soc-ref REF_DIR]
+                           [--soc-run-id N --soc-ref-run-id N]
 """
 
 import argparse
@@ -22,6 +33,8 @@ import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO / "target" / "ihp13" / "yosys" / "scripts"))
+import synth_metrics  # noqa: E402  (the CI lane's parsers)
 BLOCK_DIR = REPO / "target" / "ihp13" / "yosys" / "block"
 ROUNDS = [1, 2, 3, 4, 6]
 MIN_SLACK_FRACTION = 0.20
@@ -44,11 +57,95 @@ def tool_versions(r):
             f"OpenSTA {opensta.group(1)}" if opensta else "OpenSTA (unknown)")
 
 
+def reports_dir(d):
+    d = Path(d)
+    return d / "reports" if (d / "reports" / "basilisk_area.json").exists() else d
+
+
+def soc_metrics(d):
+    """Totals, CHECK problems and per-module area (by module base name)."""
+    r = reports_dir(d)
+    cells, area, dffs = synth_metrics.parse_area_report((r / "basilisk_area.json").read_text())
+    check = synth_metrics.parse_check_report((r / "basilisk_synth.rpt").read_text())
+    modules = {}
+    for name, m in json.loads((r / "basilisk_area.json").read_text())["modules"].items():
+        base = re.sub(r"__\d+$", "", name.lstrip("\\"))
+        modules[base] = modules.get(base, 0.0) + float(m.get("area") or 0.0)
+    keccak = None
+    text = (r / "basilisk_area.rpt").read_text()
+    m = re.search(r"=== (keccak_cvxif\S*) ===(.*?)Chip area for module '\\\1': ([\d.]+)",
+                  text, re.S)
+    if m:
+        kc = re.search(r"^\s+(\d+)\s+\S+\s+cells$", m.group(2), re.M)
+        kd = sum(int(n) for n, cell in re.findall(r"^\s+(\d+)\s+\S+\s+(sg13g2_\w*df\w*)$",
+                                                     m.group(2), re.M))
+        keccak = (int(kc.group(1)) if kc else None, float(m.group(3)), kd)
+    return {"cells": cells, "area": area, "dffs": dffs, "check": check, "modules": modules,
+            "keccak": keccak}
+
+
+def pct(cur, ref):
+    return f"{cur - ref:+,.0f} ({(cur - ref) / ref * 100:+.2f} %)"
+
+
+def soc_section(run, ref, run_id, ref_id):
+    base = json.loads((REPO / "target" / "ihp13" / "yosys" / "synth-baseline.json").read_text())
+    kc, ka, kd = run["keccak"] or (None, None, None)
+    out = [
+        "## SoC synthesis (task 5.3)",
+        "",
+        f"Synth lane run {run_id or '?'} (SoC with `keccak_cvxif`, R = {soc_rounds_per_cycle()}) "
+        f"against run {ref_id or '?'}, the same flow on the tree just before the coprocessor "
+        "(Cheshire fork `v0.3.1-newt.1`, CV-X-IF off). Stage: Yosys synthesis, "
+        "`typ_1p20V_25C`. CVA6 `cv64a6_imafdcsclic_sv39`, hypervisor extension on (ADR-0004). "
+        f"Yosys `CHECK` problems: {run['check']} (reference: {ref['check']}).",
+        "",
+        "| | reference | with coprocessor | delta | vs `synth-baseline.json` |",
+        "|---|---:|---:|---:|---:|",
+        f"| cells | {ref['cells']:,} | {run['cells']:,} | {pct(run['cells'], ref['cells'])} | "
+        f"{pct(run['cells'], base['cells'])} |",
+        f"| area (µm²) | {ref['area']:,.0f} | {run['area']:,.0f} | "
+        f"{pct(run['area'], ref['area'])} | {pct(run['area'], base['chip_area_um2'])} |",
+        f"| flip-flops | {ref['dffs']:,} | {run['dffs']:,} | {pct(run['dffs'], ref['dffs'])} | "
+        f"{pct(run['dffs'], base['dffs'])} |",
+        "",
+    ]
+    if kc is not None:
+        out += [f"`i_keccak_cvxif` is its own instance (kept hierarchy): **{kc:,} cells, "
+                f"{ka:,.0f} µm², {kd:,} flip-flops**, {ka / run['area'] * 100:.2f} % of the "
+                "SoC area.", ""]
+    moved = sorted(((run["modules"].get(k, 0) - ref["modules"].get(k, 0), k)
+                    for k in set(run["modules"]) | set(ref["modules"])
+                    if k not in ("iguana_chip",)), key=lambda x: -abs(x[0]))
+    moved = [(d, k) for d, k in moved if abs(d) >= 500][:8]
+    out += ["Modules whose area moved by ≥ 500 µm² (reference → with coprocessor):", "",
+            "| module | delta (µm²) |", "|---|---:|"]
+    out += [f"| `{k}` | {d:+,.0f} |" for d, k in moved]
+    out += ["",
+            "`cva6` shrinking while CV-X-IF is switched on (its `cvxif_fu` becomes live) is "
+            "beyond the ±0.04 % ABC noise seen on untouched modules; its cause has not been "
+            "investigated. The SoC delta therefore differs from the coprocessor's own area by "
+            "that amount.",
+            "",
+            "`synth-baseline.json` (2026-09-17) predates the Cheshire v0.3.1 bump; the reference "
+            "run is within 0.05 % of it on every metric, so that bump moved the SoC by noise "
+            "only. Timing (WNS) is not available from the synth lane's STA (a known gap in "
+            "`basilisk.sdc`, also unavailable in the baseline); SoC timing comes from P&R "
+            "(task 5.4).", ""]
+    return out
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--out", default=str(REPO / "docs" / "results" / "sha3-ppa.md"))
+    ap.add_argument("--soc", help="synth-reports artifact dir of the SoC run (task 5.3)")
+    ap.add_argument("--soc-ref", help="synth-reports artifact dir of the reference run")
+    ap.add_argument("--soc-run-id", help="synth lane run id of --soc, for the report")
+    ap.add_argument("--soc-ref-run-id", help="synth lane run id of --soc-ref, for the report")
     a = ap.parse_args(argv)
+    if bool(a.soc) != bool(a.soc_ref):
+        sys.exit("sha3_ppa: --soc and --soc-ref go together")
 
     rows = []
     for r in ROUNDS:
@@ -108,6 +205,9 @@ def main(argv=None):
         "in `docs/results/sha3-ise.md`, measured at this R.",
         "",
     ]
+    if a.soc:
+        out += soc_section(soc_metrics(a.soc), soc_metrics(a.soc_ref), a.soc_run_id,
+                           a.soc_ref_run_id)
     Path(a.out).parent.mkdir(parents=True, exist_ok=True)
     Path(a.out).write_text("\n".join(out))
     print(f"sha3_ppa: wrote {a.out} (selected R={selected})")
