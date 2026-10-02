@@ -36,7 +36,7 @@ module keccak_round
 
   // theta: C[x] = xor over y of A[x, y]; D[x] = C[x-1] ^ rot(C[x+1], 1);
   // A[x, y] ^= D[x].
-  always_comb begin
+  always_comb begin : theta_block
     for (int unsigned x = 0; x < 5; x++) begin
       column_parity[x] = state_i[x] ^ state_i[x + 5] ^ state_i[x + 10] ^
                          state_i[x + 15] ^ state_i[x + 20];
@@ -51,7 +51,7 @@ module keccak_round
   end
 
   // rho and pi: B[y, 2x + 3y] = rot(A[x, y], r[x, y]).
-  always_comb begin
+  always_comb begin : rho_and_pi_block
     for (int unsigned x = 0; x < 5; x++) begin
       for (int unsigned y = 0; y < 5; y++) begin
         pi_state[y + 5 * ((2 * x + 3 * y) % 5)] =
@@ -61,7 +61,7 @@ module keccak_round
   end
 
   // chi: A[x, y] = B[x, y] ^ (~B[x+1, y] & B[x+2, y]).
-  always_comb begin
+  always_comb begin : chi_block
     for (int unsigned x = 0; x < 5; x++) begin
       for (int unsigned y = 0; y < 5; y++) begin
         chi_state[x + 5 * y] = pi_state[x + 5 * y] ^
@@ -71,7 +71,7 @@ module keccak_round
   end
 
   // iota: lane (0, 0) ^= RC.
-  always_comb begin
+  always_comb begin : iota_block
     state_o    = chi_state;
     state_o[0] = chi_state[0] ^ round_constant_i;
   end

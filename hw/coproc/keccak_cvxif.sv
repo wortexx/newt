@@ -238,7 +238,7 @@ module keccak_cvxif
   // Next-state logic
   // ---------------------------------------------------------------------------
 
-  always_comb begin
+  always_comb begin : next_state_logic
     fsm_state_d   = fsm_state_q;
     state_d       = state_q;
     perm_count_d  = perm_count_q;
@@ -316,7 +316,7 @@ module keccak_cvxif
     endcase
   end
 
-  always_ff @(posedge clk_i or negedge rst_ni) begin
+  always_ff @(posedge clk_i or negedge rst_ni) begin : sequential_logic
     if (!rst_ni) begin
       fsm_state_q   <= ST_IDLE;
       state_q       <= '0;
@@ -342,7 +342,7 @@ module keccak_cvxif
   // CV-X-IF response
   // ---------------------------------------------------------------------------
 
-  always_comb begin
+  always_comb begin : cvxif_response_logic
     cvxif_resp_o = '0;
 
     // Compressed interface: not used.
