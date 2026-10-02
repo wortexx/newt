@@ -11,7 +11,7 @@ microarchitecture is design D2–D5.
 |---|---|
 | `keccak_pkg.sv` | Lane/state types and the 24 FIPS 202 round constants |
 | `keccak_round.sv` | One combinational Keccak-f[1600] round (θ ρ π χ ι), round constant as an input |
-| `keccak_cvxif.sv` | The CV-X-IF coprocessor: 1600-bit state, FSM, `RoundsPerCycle` chained rounds |
+| `keccak_cvxif.sv` | The CV-X-IF coprocessor: 1600-bit state, in-order issue queue, FSM, `RoundsPerCycle` chained rounds |
 | `tb/` | Verilator unit testbenches and the independent C++ reference (`keccak_ref.h`) |
 | `coproc.mk` | `make ig-coproc-unit`: build and run every unit testbench (the CI `sim-unit` job) |
 
@@ -81,9 +81,17 @@ software: 25 `krd`, then later `kclr` and 25 `kxor`. There is no OS integration.
 
 ## Timing
 
-At most one instruction is in flight. `x_issue_ready` stays low until the result has been
-handed back, which keeps program order without a FIFO. `kclr`, `kxor`, `krd` and `shatr`
-deliver a registered result one cycle after issue. `kperm` takes
+Accepted instructions enter an in-order issue queue (`fifo_v3`, fall-through) and execute
+one at a time from its head. The queue is as deep as CVA6's scoreboard
+(`ariane_pkg::NR_SB_ENTRIES`, 4 here). Every offloaded instruction holds a scoreboard entry
+until its result is written back, so the queue never fills and `x_issue_ready` stays high.
+It has to: CVA6's issue stage dispatches on the previous cycle's `x_issue_ready` and sends
+`x_issue_valid` as a one-cycle pulse it never repeats. A coprocessor that drops ready while
+busy therefore loses the second of two back-to-back instructions, and the core hangs
+waiting for its result (found when the optimised sponge first placed `kperm` right after a
+`kxor`). An instruction reaching an empty queue with the datapath idle executes in its
+issue cycle, so `kclr`, `kxor`, `krd` and `shatr` still deliver a registered result one
+cycle after issue. `kperm` takes
 `24 / RoundsPerCycle + 1` cycles, i.e. 25 / 13 / 9 / 7 / 5 for `RoundsPerCycle` = 1 / 2 / 3 / 4 / 6
 (`iguana_pkg::KeccakRoundsPerCycle` selects the SoC value).
 
@@ -102,4 +110,20 @@ raise a synchronous exception after a coprocessor instruction is offloaded. In M
 without paging, this means no access to an invalid address. Every test and benchmark in
 `sw/` runs under this constraint.
 
-**Measured:** _filled in from `sw/tests/keccak_irq_hazard.spm.c` (task 3.7)._
+**Measured** (`sw/tests/keccak_irq_hazard.spm.c`, task 3.7, SoC RTL on the Xcelium lane,
+2026-10-01). A CLINT machine software interrupt is raised by a store placed after *j*
+coprocessor instructions, with *j* swept across each sequence:
+
+| Experiment | Trials | Interrupt taken inside the sequence | State corrupted |
+|---|---:|---:|---:|
+| A: 64 × `kxor` into lane 0, bit *k* in the *k*-th | 17 | 16 | 0 |
+| B: 5 × `kxor` then 8 × `shatr`, compared with an uninterrupted run | 14 | 11 | 0 |
+
+No interrupted sequence applied any instruction twice. The mechanism is visible in CVA6's
+`decoder.sv`. A pending interrupt is decoded as an exception *on the instruction in decode*.
+Therefore no younger instruction is issued, and that instruction itself is never offloaded.
+Asynchronous interrupts thus cannot reach the no-kill window in this core. The window
+remains open for a **synchronous exception of an older instruction**, for example a load
+fault detected after a younger coprocessor instruction was issued. The test does not
+exercise that case. The constraint above is therefore kept as stated. Relaxing its interrupt
+half would be a spec change backed by this measurement and the decoder argument.

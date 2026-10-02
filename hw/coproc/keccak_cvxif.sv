@@ -23,13 +23,23 @@
 // - a lane index >= 25 or a round index >= 24 (register values) completes
 //   with an illegal-instruction exception and leaves the state unchanged.
 //
-// Microarchitecture (design D3): at most one instruction in flight
-// (x_issue_ready is low until its result has been handed over), which keeps
-// program order without a FIFO. kclr/kxor/krd/shatr execute in the issue
-// cycle and present a registered result in the next cycle; kperm runs
-// NumRounds / RoundsPerCycle cycles through RoundsPerCycle chained rounds.
-// Results are always registered, so neither the lane multiplexer nor the
-// round logic sits on CVA6's issue-to-writeback path.
+// Microarchitecture (design D3): accepted instructions enter an in-order
+// issue queue and execute one at a time from its head. kclr/kxor/krd/shatr
+// execute in one cycle and present a registered result in the next cycle;
+// kperm runs NumRounds / RoundsPerCycle cycles through RoundsPerCycle
+// chained rounds. Results are always registered, so neither the lane
+// multiplexer nor the round logic sits on CVA6's issue-to-writeback path.
+//
+// Why a queue: CVA6's issue stage decides to dispatch from x_issue_ready in
+// cycle t but drives x_issue_valid in cycle t+1, as a one-cycle pulse it
+// never repeats. If x_issue_ready is low in t+1 the instruction is lost and
+// the core waits forever for its result (two back-to-back coprocessor
+// instructions did exactly that when this block held one instruction at a
+// time). The queue is as deep as CVA6's scoreboard: every offloaded
+// instruction holds a scoreboard entry until its result is written back, so
+// at most NR_SB_ENTRIES are ever outstanding and x_issue_ready stays high.
+// With fall-through, an instruction reaching an empty queue and an idle
+// datapath starts executing in its issue cycle, as before.
 //
 // The commit interface is ignored: this CVA6 never kills an offloaded
 // instruction (x_commit_kill is tied to 0). The memory interface is unused.
@@ -72,6 +82,21 @@ module keccak_cvxif
 
   localparam logic [5:0] ExcIllegalInstr = 6'd2;
 
+  // Outstanding offloads are bounded by CVA6's scoreboard (see header).
+  localparam int unsigned IssueDepth = ariane_pkg::NR_SB_ENTRIES;
+
+  // What execution needs from an accepted instruction. The lane index is
+  // range-checked at issue (only its low bits are kept); the shatr round
+  // index is the full rs1, which kxor needs as data anyway.
+  typedef struct packed {
+    keccak_op_e                       op;
+    logic [cvxif_pkg::X_ID_WIDTH-1:0] id;
+    logic [4:0]                       rd;
+    riscv::xlen_t                     rs1;
+    lane_idx_t                        lane;
+    logic                             lane_ok;
+  } issue_entry_t;
+
   // ---------------------------------------------------------------------------
   // Issue decode
   // ---------------------------------------------------------------------------
@@ -83,7 +108,7 @@ module keccak_cvxif
   logic                 op_known;
   logic                 op_writes_rd;
   logic                 issue_accept;
-  logic                 issue_fire;
+  logic                 issue_push;
   riscv::xlen_t         operand_rs1;
   riscv::xlen_t         operand_rs2;
 
@@ -112,6 +137,47 @@ module keccak_cvxif
                         (op_writes_rd || (instr_rd == 5'd0));
 
   // ---------------------------------------------------------------------------
+  // Issue queue
+  // ---------------------------------------------------------------------------
+
+  issue_entry_t                           issue_entry, head;
+  logic                                   queue_full, queue_empty;
+  logic [$clog2(IssueDepth)-1:0]          queue_usage;
+  logic                                   exec_fire;
+
+  assign issue_entry = '{
+    op:      keccak_op_e'(funct3),
+    id:      cvxif_req_i.x_issue_req.id,
+    rd:      instr_rd,
+    rs1:     operand_rs1,
+    lane:    lane_idx_t'(operand_rs2),
+    lane_ok: (operand_rs2 < riscv::xlen_t'(NumLanes))
+  };
+  assign issue_push = cvxif_req_i.x_issue_valid && issue_accept;
+
+  fifo_v3 #(
+    .FALL_THROUGH ( 1'b1          ),
+    .DEPTH        ( IssueDepth    ),
+    .dtype        ( issue_entry_t )
+  ) i_issue_queue (
+    .clk_i,
+    .rst_ni,
+    .flush_i    ( 1'b0        ),
+    .testmode_i ( 1'b0        ),
+    .full_o     ( queue_full  ),
+    .empty_o    ( queue_empty ),
+    .usage_o    ( queue_usage ),
+    .data_i     ( issue_entry ),
+    .push_i     ( issue_push  ),
+    .data_o     ( head        ),
+    .pop_i      ( exec_fire   )
+  );
+
+  // The fill level is not needed: x_issue_ready is derived from full_o.
+  logic unused_queue_usage;
+  assign unused_queue_usage = ^queue_usage;
+
+  // ---------------------------------------------------------------------------
   // State, FSM and result registers
   // ---------------------------------------------------------------------------
 
@@ -127,8 +193,8 @@ module keccak_cvxif
   logic issue_ready;
   logic result_valid;
 
-  assign issue_ready  = (fsm_state_q == ST_IDLE);
-  assign issue_fire   = cvxif_req_i.x_issue_valid && issue_ready && issue_accept;
+  assign issue_ready  = !queue_full;
+  assign exec_fire    = !queue_empty && (fsm_state_q == ST_IDLE);
   assign result_valid = (fsm_state_q == ST_RESULT);
 
   // ---------------------------------------------------------------------------
@@ -141,13 +207,13 @@ module keccak_cvxif
   lane_t  [RoundsPerCycle-1:0] stage_round_constant;
   logic                       shatr_issue;
 
-  assign shatr_issue    = issue_fire && (funct3 == OP_SHATR);
+  assign shatr_issue    = exec_fire && (head.op == OP_SHATR);
   assign round_state[0] = state_q;
 
   for (genvar j = 0; j < RoundsPerCycle; j++) begin : gen_rounds
     if (j == 0) begin : gen_first
       assign stage_round_constant[j] = shatr_issue ?
-          round_constant_of(operand_rs1) :
+          round_constant_of(head.rs1) :
           round_constant_of(riscv::xlen_t'(perm_count_q) * RoundsPerCycle);
     end else begin : gen_chained
       assign stage_round_constant[j] =
@@ -184,36 +250,35 @@ module keccak_cvxif
 
     unique case (fsm_state_q)
       ST_IDLE: begin
-        if (issue_fire) begin
-          result_id_d   = cvxif_req_i.x_issue_req.id;
-          result_rd_d   = instr_rd;
+        if (exec_fire) begin
+          result_id_d   = head.id;
+          result_rd_d   = head.rd;
           result_we_d   = 1'b0;
           result_exc_d  = 1'b0;
           result_data_d = '0;
           fsm_state_d   = ST_RESULT;
 
-          unique case (funct3)
+          unique case (head.op)
             OP_KCLR: begin
               state_d = '0;
             end
             OP_KXOR: begin
-              if (operand_rs2 < riscv::xlen_t'(NumLanes)) begin
-                state_d[lane_idx_t'(operand_rs2)] =
-                    state_q[lane_idx_t'(operand_rs2)] ^ operand_rs1;
+              if (head.lane_ok) begin
+                state_d[head.lane] = state_q[head.lane] ^ head.rs1;
               end else begin
                 result_exc_d = 1'b1;
               end
             end
             OP_KRD: begin
-              if (operand_rs2 < riscv::xlen_t'(NumLanes)) begin
-                result_data_d = state_q[lane_idx_t'(operand_rs2)];
+              if (head.lane_ok) begin
+                result_data_d = state_q[head.lane];
                 result_we_d   = 1'b1;
               end else begin
                 result_exc_d = 1'b1;
               end
             end
             OP_SHATR: begin
-              if (operand_rs1 < riscv::xlen_t'(NumRounds)) begin
+              if (head.rs1 < riscv::xlen_t'(NumRounds)) begin
                 state_d = round_state[1];
               end else begin
                 result_exc_d = 1'b1;
@@ -224,7 +289,7 @@ module keccak_cvxif
               fsm_state_d  = ST_PERM;
             end
             default: begin
-              // Not reachable: issue_accept excludes unknown funct3 values.
+              // Not reachable: only accepted (known) ops enter the queue.
               result_exc_d = 1'b1;
             end
           endcase
@@ -283,8 +348,10 @@ module keccak_cvxif
     // Compressed interface: not used.
     cvxif_resp_o.x_compressed_ready = 1'b0;
 
-    // Issue interface. The response is a function of the offered instruction
-    // only; CVA6 samples it together with x_issue_valid and x_issue_ready.
+    // Issue interface. accept/writeback are a function of the offered
+    // instruction only; CVA6 samples them together with x_issue_valid and
+    // x_issue_ready. x_issue_ready is high unless the queue is full, which
+    // the scoreboard bound rules out (IssueQueueReady_A).
     cvxif_resp_o.x_issue_ready            = issue_ready;
     cvxif_resp_o.x_issue_resp.accept      = issue_accept;
     cvxif_resp_o.x_issue_resp.writeback   = issue_accept && op_writes_rd;
@@ -321,6 +388,10 @@ module keccak_cvxif
 
   // Only krd ever requests a register write.
   `ASSERT(OnlyKrdWrites_A,
-          issue_fire && (funct3 != OP_KRD) |=> !result_we_q, clk_i, !rst_ni)
+          exec_fire && (head.op != OP_KRD) |=> !result_we_q, clk_i, !rst_ni)
+
+  // CVA6 never retries an offload, so every one must find the queue ready:
+  // a lost instruction would leave the core waiting forever.
+  `ASSERT(IssueQueueReady_A, cvxif_req_i.x_issue_valid |-> issue_ready, clk_i, !rst_ni)
 
 endmodule

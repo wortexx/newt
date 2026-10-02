@@ -31,7 +31,8 @@ BLOCK_NET    := $(BLOCK_DIR)/$(BLOCK_NAME).yosys.v
 BLOCK_WRAP   := $(BLOCK_DIR)/$(BLOCK_TOP).sv
 
 # Same sources as the hw/coproc unit tests (hw/coproc/coproc.mk).
-BLOCK_SRCS_keccak_cvxif = $(COPROC_CVA6_PKGS) $(COPROC_KECCAK_SRCS) $(COPROC_DIR)/keccak_cvxif.sv
+BLOCK_SRCS_keccak_cvxif = $(COPROC_CVA6_PKGS) $(COPROC_KECCAK_SRCS) $(COPROC_CC_DIR)/src/fifo_v3.sv \
+                          $(COPROC_DIR)/keccak_cvxif.sv
 
 SV2V ?= sv2v
 

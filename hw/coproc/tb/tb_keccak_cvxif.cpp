@@ -16,10 +16,15 @@
 //     seeded random states
 //   - krd issued right after kperm sees the permuted state
 //   - the result id echoes the issue id; a result is held while not ready
+//   - back-to-back bursts driven like CVA6's issue stage (dispatch on the
+//     previous cycle's x_issue_ready, a one-cycle valid pulse that is never
+//     repeated, at most NR_SB_ENTRIES outstanding): no offload is lost, results
+//     return in order, and the state matches the reference
 // Also reports kperm's latency for this RoundsPerCycle build.
 
 #include <cstdio>
 #include <random>
+#include <vector>
 
 #include "Vkeccak_cvxif_tb_top.h"
 #include "keccak_ref.h"
@@ -37,10 +42,17 @@ enum Funct3 : uint32_t { KCLR = 0, KXOR = 1, KRD = 2, SHATR = 3, KPERM = 4 };
 
 constexpr uint32_t kCustom1 = 0x2B;
 constexpr uint32_t kRs1 = 10, kRs2 = 11;  // register numbers are don't-care for the copro
+constexpr unsigned kScoreboard = 4;        // CVA6 NR_SB_ENTRIES (cv64a6_imafdcsclic_sv39)
 
 uint32_t encode(uint32_t funct3, uint32_t rd, uint32_t funct7 = 0, uint32_t opcode = kCustom1) {
     return (funct7 << 25) | (kRs2 << 20) | (kRs1 << 15) | (funct3 << 12) | (rd << 7) | opcode;
 }
+
+struct Op {
+    uint32_t instr;
+    uint64_t rs1 = 0;
+    uint64_t rs2 = 0;
+};
 
 struct Result {
     bool accepted = false;
@@ -142,6 +154,77 @@ class Bench {
         if (r.id != id) { std::printf("FAIL: result id %u, issued %u\n", r.id, id); fails++; }
         tick();  // handshake
         return r;
+    }
+
+    // Drives `ops` the way CVA6's issue stage does: an instruction is
+    // dispatched when x_issue_ready was high in the previous cycle and fewer
+    // than kScoreboard results are outstanding; x_issue_valid is then a
+    // one-cycle pulse, never repeated, whatever x_issue_ready does. Returns
+    // the results of the accepted instructions in completion order and checks
+    // that they complete in issue order.
+    std::vector<Result> stream(const std::vector<Op> &ops) {
+        std::vector<Result> out;
+        std::vector<unsigned> ids;  // ids of accepted instructions, in issue order
+        size_t next = 0;
+        unsigned outstanding = 0, guard = 0;
+        dut.clk_i = 0;
+        dut.issue_valid_i = 0;
+        dut.result_ready_i = 1;
+        dut.eval();
+        bool ready_prev = dut.issue_ready_o;
+        while (next < ops.size() || outstanding > 0) {
+            bool send = next < ops.size() && ready_prev && outstanding < kScoreboard;
+            unsigned id = 0;
+            dut.issue_valid_i = send;
+            if (send) {
+                id = (next_id++) & 0x3;
+                dut.issue_instr_i = ops[next].instr;
+                dut.issue_id_i = id;
+                dut.issue_rs1_i = ops[next].rs1;
+                dut.issue_rs2_i = ops[next].rs2;
+            }
+            dut.eval();
+            if (send) {
+                if (!dut.issue_ready_o) {
+                    std::printf("FAIL: offload %zu lost (x_issue_ready low on its valid pulse)\n",
+                                next);
+                    fails++;
+                } else if (dut.issue_accept_o) {
+                    ids.push_back(id);
+                    outstanding++;
+                }
+                next++;
+            }
+            if (dut.result_valid_o) {
+                Result r;
+                r.accepted = r.valid = true;
+                r.id = dut.result_id_o;
+                r.data = dut.result_data_o;
+                r.rd = dut.result_rd_o;
+                r.we = dut.result_we_o;
+                r.exc = dut.result_exc_o;
+                r.exccode = dut.result_exccode_o;
+                if (out.size() >= ids.size() || r.id != ids[out.size()]) {
+                    std::printf("FAIL: burst result %zu has id %u, out of issue order\n",
+                                out.size(), r.id);
+                    fails++;
+                }
+                out.push_back(r);
+                outstanding--;
+            }
+            ready_prev = dut.issue_ready_o;  // what the issue stage sees this cycle
+            tick();
+            dut.clk_i = 0;
+            if (++guard > 20000) {
+                std::printf("FAIL: burst stuck with %u outstanding\n", outstanding);
+                fails++;
+                break;
+            }
+        }
+        dut.issue_valid_i = 0;
+        dut.issue_instr_i = 0;
+        dut.eval();
+        return out;
     }
 
     // Convenience wrappers; non-writing ops use rd = x0 as the ISA requires.
@@ -302,6 +385,42 @@ int main(int argc, char **argv) {
         b.kxor(0xDEADBEEFull, 3);
         Result r = b.exec(encode(KRD, 4), 0, 3, /*hold_cycles=*/5);
         b.check(r.valid && r.data == 0xDEADBEEFull && r.we, "krd under back-pressure");
+    }
+
+    // --- Back-to-back bursts, driven like CVA6 --------------------------------
+    // The sponge's absorb tail (kxor, kxor, kperm, krd...) and a shatr loop,
+    // with no gap between coprocessor instructions, plus a rejected encoding
+    // in mid-burst (it must neither be queued nor stall the burst).
+    for (unsigned n = 0; n < 4; n++) {
+        State s{};
+        for (auto &l : s) l = rng();
+        const bool use_shatr = (n & 1) != 0;
+        std::vector<Op> ops;
+        ops.push_back({encode(KCLR, 0)});
+        for (unsigned i = 0; i < 25; i++) ops.push_back({encode(KXOR, 0), s[i], i});
+        if (n == 2) ops.push_back({encode(5, 0)});  // rejected: unassigned funct3
+        if (use_shatr)
+            for (unsigned ir = 0; ir < 24; ir++) ops.push_back({encode(SHATR, 0), ir});
+        else
+            ops.push_back({encode(KPERM, 0)});
+        for (unsigned i = 0; i < 25; i++) ops.push_back({encode(KRD, 5), 0, i});
+        std::vector<Result> res = b.stream(ops);
+        const size_t accepted = ops.size() - (n == 2 ? 1 : 0);
+        if (res.size() != accepted) {
+            std::printf("FAIL: burst %u: %zu results for %zu accepted instructions\n", n,
+                        res.size(), accepted);
+            b.fails++;
+            continue;
+        }
+        State got{};
+        for (unsigned i = 0; i < 25; i++) got[i] = res[res.size() - 25 + i].data;
+        b.check_state(got, keccak_ref::permute(s), use_shatr ? "burst shatr" : "burst kperm");
+        for (size_t k = 0; k + 25 < res.size(); k++)
+            if (res[k].exc || res[k].we) {
+                std::printf("FAIL: burst %u result %zu: exc=%d we=%d\n", n, k, res[k].exc,
+                            res[k].we);
+                b.fails++;
+            }
     }
 
     std::printf("tb_keccak_cvxif[R=%d]: %s (%d failures; kperm latency %u cycles, %llu cycles total)\n",

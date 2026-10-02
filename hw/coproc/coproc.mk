@@ -38,7 +38,7 @@ COPROC_TB_keccak_round    := $(COPROC_TB)/tb_keccak_round.cpp
 
 define coproc_cvxif_test
 COPROC_TOP_keccak_cvxif_r$(1)   := keccak_cvxif_tb_top
-COPROC_SRCS_keccak_cvxif_r$(1)   = $$(COPROC_CVA6_PKGS) $$(COPROC_KECCAK_SRCS) \
+COPROC_SRCS_keccak_cvxif_r$(1)   = $$(COPROC_CVA6_PKGS) $$(COPROC_KECCAK_SRCS) $$(COPROC_CC_DIR)/src/fifo_v3.sv \
                                    $(COPROC_DIR)/keccak_cvxif.sv $(COPROC_TB)/keccak_cvxif_tb_top.sv
 COPROC_TB_keccak_cvxif_r$(1)    := $(COPROC_TB)/tb_keccak_cvxif.cpp
 COPROC_FLAGS_keccak_cvxif_r$(1) := -GRoundsPerCycle=$(1) -CFLAGS -DROUNDS_PER_CYCLE=$(1)
