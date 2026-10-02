@@ -81,8 +81,10 @@ package iguana_pkg;
   localparam cheshire_cfg_t CheshireCfg = gen_cheshire_cfg();
 
   // Keccak coprocessor: kperm rounds per cycle (1, 2, 3, 4 or 6). Selected by
-  // the sweep in openspec change sha3-cvxif-coprocessor, task 5.1.
-  localparam int unsigned KeccakRoundsPerCycle = 1;
+  // the sweep in openspec change sha3-cvxif-coprocessor, task 5.1: the largest
+  // R whose block critical path leaves >= 20 % slack at 11.0 ns
+  // (docs/results/sha3-ppa.md).
+  localparam int unsigned KeccakRoundsPerCycle = 6;
 
   localparam int unsigned VgaOutRedWidth   = 3;
   localparam int unsigned VgaOutGreenWidth = 3;
