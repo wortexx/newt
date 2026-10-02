@@ -4,6 +4,7 @@
 //
 // Testbench-only wrapper: exposes keccak_cvxif's CV-X-IF structs as flat
 // ports so the C++ harness does not depend on the packed struct layout.
+// With KECCAK_GL defined it drives the gate-level model instead of the RTL.
 // Drives the request fields CVA6's cvxif_fu drives (issue + commit in the
 // same cycle, result always ready unless the harness says otherwise).
 
@@ -50,6 +51,17 @@ module keccak_cvxif_tb_top #(
     cvxif_req.x_result_ready           = result_ready_i;
   end
 
+`ifdef KECCAK_GL
+  // Gate-level model of the synthesized block (block-synth.mk power flow):
+  // keccak_cvxif_gl wraps the netlist's bit-blasted ports. RoundsPerCycle is
+  // fixed by the netlist, so the parameter only has to match it.
+  keccak_cvxif_gl i_dut (
+    .clk_i,
+    .rst_ni,
+    .cvxif_req_i  ( cvxif_req  ),
+    .cvxif_resp_o ( cvxif_resp )
+  );
+`else
   keccak_cvxif #(
     .RoundsPerCycle ( RoundsPerCycle )
   ) i_dut (
@@ -58,6 +70,7 @@ module keccak_cvxif_tb_top #(
     .cvxif_req_i  ( cvxif_req  ),
     .cvxif_resp_o ( cvxif_resp )
   );
+`endif
 
   // Interfaces the harness does not observe (compressed, issue-resp flags
   // other than accept/writeback, memory) and the unused high id bits.

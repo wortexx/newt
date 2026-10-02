@@ -18,6 +18,25 @@ Stage: block synthesis (yosys + OpenSTA, no placement). Corner: `typ_1p20V_25C` 
 
 Caveats: the timing is pre-placement. Wires and placement will cut the slack, which the SoC-level place and route (task 5.4) measures. The selected R buys the shortest `kperm` for the most area: about 3.5× the R = 1 block. The per-block cycle effect is in `docs/results/sha3-ise.md`, measured at this R.
 
+## Block power (task 5.2)
+
+Stage: block synthesis netlist, gate-level simulation (Verilator) + OpenSTA. Corner: `typ_1p20V_25C`. Clock: 11.0 ns, ideal (no clock tree, so the clock-network power is 0 here). Activity: annotated from SAIF of the workload below (not default activity); **235,093 of 235,093 pins annotated (100.0 %)** from the SAIF of a gate-level simulation of the synthesized netlist (yosys cell models from the liberty, Verilator `--trace-saif`, OpenSTA `read_saif`).
+
+Workload: SHA3-256 absorb, SoC-paced, R = 6. 32 blocks of 135 cycles: 17 `kxor` one every 7 cycles, then `kperm`, then idle to the block's end, which is the per-block cycle count measured on the SoC (`docs/results/sha3-ise.md`). Traced window: 4,320 cycles. Gate-level functional check after the window (all 25 lanes against the reference): PASS.
+
+| | power (mW) | share |
+|---|---:|---:|
+| internal | 10.320 | 79.9 % |
+| switching | 2.581 | 20.0 % |
+| leakage | 0.012 | 0.1 % |
+| sequential | 7.895 | 61.1 % |
+| combinational | 5.018 | 38.9 % |
+| **total** | **12.913** | |
+
+**Energy per block: 19.18 nJ** (average power × 135 cycles × 11.0 ns), i.e. 141.0 pJ per absorbed byte at the SHA3-256 rate (136 B), coprocessor only. The CPU's share is not included (task 5.5).
+
+Caveats: there is no clock tree, so a real clock network adds power on top of the sequential share. The flip-flops are not clock-gated, so they draw internal power every cycle, idle cycles included, which is why the sequential share dominates. The corner is typical. The P&R-stage figure is task 5.4.
+
 ## SoC synthesis (task 5.3)
 
 Synth lane run 37005575294 (SoC with `keccak_cvxif`, R = 6) against run 36447894410, the same flow on the tree just before the coprocessor (Cheshire fork `v0.3.1-newt.1`, CV-X-IF off). Stage: Yosys synthesis, `typ_1p20V_25C`. CVA6 `cv64a6_imafdcsclic_sv39`, hypervisor extension on (ADR-0004). Yosys `CHECK` problems: 0 (reference: 0).

@@ -21,6 +21,11 @@ gives the delta against the reference and against synth-baseline.json, plus
 the modules whose area moved. The totals and the CHECK count are parsed by
 the CI lane's own target/ihp13/yosys/scripts/synth_metrics.py.
 
+If target/ihp13/yosys/block/keccak_cvxif_r<R>/power.json exists for the
+selected R (make power-coproc-block, task 5.2), it adds the block power
+section: activity-annotated power of the block netlist under a SoC-paced
+SHA3-256 workload, with its annotated fraction and energy per block.
+
 Usage: scripts/sha3_ppa.py [--out docs/results/sha3-ppa.md]
                            [--soc RUN_DIR --soc-ref REF_DIR]
                            [--soc-run-id N --soc-ref-run-id N]
@@ -135,6 +140,55 @@ def soc_section(run, ref, run_id, ref_id):
     return out
 
 
+def power_section(p):
+    w = p["workload"]
+    period = w["clock_period_ns"]
+    total = p["power_w"]
+
+    def mw(x):
+        return f"{x * 1e3:.3f}"
+
+    return [
+        "## Block power (task 5.2)",
+        "",
+        f"Stage: {p['stage']}. Corner: `{p['corner']}`. Clock: {period:.1f} ns, ideal (no "
+        "clock tree, so the clock-network power is 0 here). Activity: "
+        f"{p['activity']}; **{p['annotated_pins']:,} of "
+        f"{p['annotated_pins'] + p['unannotated_pins']:,} pins annotated "
+        f"({p['annotated_fraction'] * 100:.1f} %)** from the SAIF of a gate-level simulation of "
+        "the synthesized netlist (yosys cell models from the liberty, Verilator "
+        "`--trace-saif`, OpenSTA `read_saif`).",
+        "",
+        f"Workload: {w['workload']}, R = {p['rounds_per_cycle']}. {w['blocks']} blocks of "
+        f"{w['block_cycles']} cycles: 17 `kxor` one every {w['lane_gap']} cycles, then "
+        "`kperm`, then idle to the block's end, which is the per-block cycle count measured "
+        "on the SoC (`docs/results/sha3-ise.md`). Traced window: "
+        f"{w['traced_cycles']:,} cycles. Gate-level functional check after the window (all 25 "
+        f"lanes against the reference): {w['functional_check']}.",
+        "",
+        "| | power (mW) | share |",
+        "|---|---:|---:|",
+        f"| internal | {mw(p['internal_w'])} | {p['internal_w'] / total * 100:.1f} % |",
+        f"| switching | {mw(p['switching_w'])} | {p['switching_w'] / total * 100:.1f} % |",
+        f"| leakage | {mw(p['leakage_w'])} | {p['leakage_w'] / total * 100:.1f} % |",
+        f"| sequential | {mw(p['sequential_w'])} | {p['sequential_w'] / total * 100:.1f} % |",
+        f"| combinational | {mw(p['combinational_w'])} | "
+        f"{p['combinational_w'] / total * 100:.1f} % |",
+        f"| **total** | **{mw(total)}** | |",
+        "",
+        f"**Energy per block: {p['energy_per_block_j'] * 1e9:.2f} nJ** (average power × "
+        f"{w['block_cycles']} cycles × {period:.1f} ns), i.e. "
+        f"{p['energy_per_block_j'] * 1e12 / 136:.1f} pJ per absorbed byte at the SHA3-256 rate "
+        "(136 B), coprocessor only. The CPU's share is not included (task 5.5).",
+        "",
+        "Caveats: there is no clock tree, so a real clock network adds power on top of the "
+        "sequential share. The flip-flops are not clock-gated, so they draw internal power "
+        "every cycle, idle cycles included, which is why the sequential share dominates. The "
+        "corner is typical. The P&R-stage figure is task 5.4.",
+        "",
+    ]
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -205,6 +259,9 @@ def main(argv=None):
         "in `docs/results/sha3-ise.md`, measured at this R.",
         "",
     ]
+    power = BLOCK_DIR / f"keccak_cvxif_r{selected}" / "power.json"
+    if power.exists():
+        out += power_section(json.loads(power.read_text()))
     if a.soc:
         out += soc_section(soc_metrics(a.soc), soc_metrics(a.soc_ref), a.soc_run_id,
                            a.soc_ref_run_id)
