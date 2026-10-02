@@ -18,6 +18,11 @@
 #include "sha3.h"
 #include "sha3_kat_vectors.h"
 
+#define KAT_MAX_LEN 512u
+
+static uint8_t msg_buf[KAT_MAX_LEN + 8] __attribute__((aligned(8)));
+static uint8_t md_buf[64 + 8] __attribute__((aligned(8)));
+
 static volatile unsigned n_traps;
 static volatile uint64_t last_cause;
 
@@ -81,9 +86,18 @@ int main(void) {
     for (unsigned k = 0; k < SHA3_NUM_KATS; k++) {
         const sha3_kat_t *t = &sha3_kats[k];
         unsigned n = sha3_digest_bytes(t->variant);
-        for (unsigned impl = SHA3_FIRST_ISE; impl < SHA3_FIRST_SW; impl++) {
-            uint8_t d[64];
-            sha3_hash(t->variant, (sha3_impl_t)impl, t->msg, t->len, d);
+        if (t->len > KAT_MAX_LEN) {
+            printf("FAIL vector %u: len %u exceeds the copy buffer\r\n", k, (unsigned)t->len);
+            newt_uart_flush();
+            return newt_exit_code(1);
+        }
+        // Offset 0 runs the sponge's aligned whole-lane path, offset 1 its
+        // byte-load fallback (for both the message and the digest buffer).
+        for (unsigned impl = SHA3_FIRST_ISE; impl < SHA3_FIRST_SW; impl++)
+        for (unsigned off = 0; off < 2; off++) {
+            uint8_t *m = msg_buf + off, *d = md_buf + off;
+            for (unsigned b = 0; b < t->len; b++) m[b] = t->msg[b];
+            sha3_hash(t->variant, (sha3_impl_t)impl, m, t->len, d);
             uint8_t want_first = t->md[0];
 #ifdef SHA3_KAT_CORRUPT_VECTOR
             // One-off negative test build: expect a wrong digest for one vector.
@@ -92,15 +106,16 @@ int main(void) {
             int ok = (d[0] == want_first);
             for (unsigned b = 1; b < n; b++) ok &= (d[b] == t->md[b]);
             if (!ok) {
-                printf("FAIL %s %s vector %u (len %u): digest mismatch\r\n",
+                printf("FAIL %s %s vector %u (len %u, %s): digest mismatch\r\n",
                        sha3_variant_name(t->variant), sha3_impl_name((sha3_impl_t)impl), k,
-                       (unsigned)t->len);
+                       (unsigned)t->len, off ? "unaligned" : "aligned");
                 newt_uart_flush();
                 return newt_exit_code(1);
             }
         }
     }
-    printf("sha3_kat_ise: all %u vectors pass on both implementations\r\n", SHA3_NUM_KATS);
+    printf("sha3_kat_ise: all %u vectors pass on both implementations, aligned and unaligned\r\n",
+           SHA3_NUM_KATS);
 
     int fails = check_rd_nonzero_rejected();
     printf("sha3_kat_ise: %s (%d failures)\r\n", fails ? "FAIL" : "PASS", fails);

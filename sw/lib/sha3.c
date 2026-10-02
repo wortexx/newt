@@ -44,31 +44,64 @@ static inline void store64_le(uint8_t *p, uint64_t v, unsigned n) {
     for (unsigned k = 0; k < n; k++) p[k] = (uint8_t)(v >> (8 * k));
 }
 
+// One `ld`/`sd` for an 8-byte-aligned lane (RV64 is little-endian, so this
+// equals load64_le/store64_le). memcpy keeps it free of aliasing UB.
+static inline uint64_t load64_aligned(const uint8_t *p) {
+    uint64_t v;
+    __builtin_memcpy(&v, __builtin_assume_aligned(p, 8), 8);
+    return v;
+}
+
+static inline void store64_aligned(uint8_t *p, uint64_t v) {
+    __builtin_memcpy(__builtin_assume_aligned(p, 8), &v, 8);
+}
+
+static inline int is_aligned8(const void *p) { return ((uintptr_t)p & 7u) == 0; }
+
 // Generates `static void <name>(rate, digest, msg, len, out)` from four
 // back-end operations: INIT(), XOR_LANE(lane_index, value), PERMUTE(),
-// READ_LANE(lane_index) -> uint64_t.
+// READ_LANE(lane_index) -> uint64_t. Lanes of an 8-byte-aligned message are
+// loaded whole; an unaligned message falls back to byte loads. The final
+// block absorbs only the lanes that carry message bytes or padding.
 #define SHA3_DEFINE_SPONGE(name, INIT, XOR_LANE, PERMUTE, READ_LANE)                     \
     static void name(unsigned rate, unsigned digest, const uint8_t *msg, size_t len,     \
                      uint8_t *out) {                                                     \
         const unsigned lanes = rate / 8;                                                 \
+        const int aligned = is_aligned8(msg);                                            \
         INIT();                                                                          \
         while (len >= rate) {                                                            \
-            for (unsigned i = 0; i < lanes; i++) XOR_LANE(i, load64_le(msg + 8 * i));    \
+            if (aligned)                                                                 \
+                for (unsigned i = 0; i < lanes; i++)                                     \
+                    XOR_LANE(i, load64_aligned(msg + 8 * i));                            \
+            else                                                                         \
+                for (unsigned i = 0; i < lanes; i++) XOR_LANE(i, load64_le(msg + 8 * i)); \
             PERMUTE();                                                                   \
             msg += rate;                                                                 \
             len -= rate;                                                                 \
         }                                                                                \
-        /* Final block: remaining bytes, then 0x06 ... 0x80 padding. */                  \
-        uint8_t block[144];                                                              \
-        for (unsigned k = 0; k < rate; k++) block[k] = (k < len) ? msg[k] : 0;           \
-        block[len] ^= 0x06;                                                              \
-        block[rate - 1] ^= 0x80;                                                         \
-        for (unsigned i = 0; i < lanes; i++) XOR_LANE(i, load64_le(block + 8 * i));      \
+        /* Final block (len < rate): whole lanes, then the partial lane with  */         \
+        /* 0x06 appended, and 0x80 in the last byte of the rate.              */         \
+        unsigned i = 0;                                                                  \
+        for (; 8 * i + 8 <= len; i++)                                                    \
+            XOR_LANE(i, aligned ? load64_aligned(msg + 8 * i) : load64_le(msg + 8 * i)); \
+        uint64_t tail = 0;                                                               \
+        for (unsigned k = 8 * i; k < len; k++) tail |= (uint64_t)msg[k] << (8 * (k - 8 * i)); \
+        tail ^= (uint64_t)0x06 << (8 * (len - 8 * i));                                  \
+        if (i == lanes - 1) {                                                            \
+            XOR_LANE(i, tail ^ (0x80ull << 56));                                         \
+        } else {                                                                         \
+            XOR_LANE(i, tail);                                                           \
+            XOR_LANE(lanes - 1, 0x80ull << 56);                                          \
+        }                                                                                \
         PERMUTE();                                                                       \
         /* Squeeze: every SHA3 digest fits in the first block of output. */              \
-        for (unsigned i = 0; 8 * i < digest; i++) {                                      \
-            unsigned n = (digest - 8 * i < 8) ? digest - 8 * i : 8;                      \
-            store64_le(out + 8 * i, READ_LANE(i), n);                                    \
+        const int out_aligned = is_aligned8(out);                                        \
+        for (unsigned j = 0; 8 * j < digest; j++) {                                      \
+            unsigned n = (digest - 8 * j < 8) ? digest - 8 * j : 8;                      \
+            if (out_aligned && n == 8)                                                   \
+                store64_aligned(out + 8 * j, READ_LANE(j));                              \
+            else                                                                         \
+                store64_le(out + 8 * j, READ_LANE(j), n);                                \
         }                                                                                \
     }
 

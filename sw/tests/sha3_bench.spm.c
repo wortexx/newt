@@ -9,8 +9,9 @@
 // permutations including the padding block) and reads mcycle/minstret
 // around the hash call, minus the measured cost of the counter reads.
 //
-// Each (variant, implementation) is run once untimed first so the
-// instruction cache is warm; the reported numbers are steady-state.
+// Each (variant, implementation) is run once untimed first, on the longest
+// message, so the instruction and data caches are warm; the reported numbers
+// are steady-state.
 // Interrupts are disabled throughout (design D5).
 //
 // Output (parsed by scripts/sha3_eval.py), one line per variant x impl to
@@ -26,7 +27,7 @@ static const unsigned kBlocks[] = {0, 1, 2, 4};
 #define NUM_LENGTHS (sizeof(kBlocks) / sizeof(kBlocks[0]))
 #define MAX_MSG (4 * 144)
 
-static uint8_t msg[MAX_MSG];
+static uint8_t msg[MAX_MSG] __attribute__((aligned(8)));
 
 typedef struct {
     uint64_t cycles, instret;
@@ -58,12 +59,16 @@ int main(void) {
     }
     printf("CALIB,%lu,%lu\r\n", calib.cycles, calib.instret);
 
-    uint8_t out[64];
+    uint8_t out[64] __attribute__((aligned(8)));
     for (unsigned v = 0; v < SHA3_NUM_VARIANTS; v++) {
         unsigned rate = sha3_rate_bytes((sha3_variant_t)v);
         for (unsigned impl = 0; impl < SHA3_NUM_IMPLS; impl++) {
             counts_t res[NUM_LENGTHS];
-            measure((sha3_variant_t)v, (sha3_impl_t)impl, msg, rate, out, 0);  // warm-up
+            // Warm-up with the longest message: every measurement then runs with
+            // warm instruction and data caches (a shorter warm-up leaves the later
+            // blocks of msg cold, adding misses that grow with the length).
+            measure((sha3_variant_t)v, (sha3_impl_t)impl, msg,
+                    kBlocks[NUM_LENGTHS - 1] * rate, out, 0);
             for (unsigned l = 0; l < NUM_LENGTHS; l++) {
                 counts_t c =
                     measure((sha3_variant_t)v, (sha3_impl_t)impl, msg, kBlocks[l] * rate, out, 0);
