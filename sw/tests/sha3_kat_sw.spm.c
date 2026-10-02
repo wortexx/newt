@@ -16,9 +16,9 @@ int main(void) {
     newt_uart_init();
     set_mie(0);
     printf("sha3_kat_sw: %u vectors x %u implementations\r\n", SHA3_NUM_KATS,
-           (unsigned)(SHA3_NUM_IMPLS - SHA3_FIRST_SW));
+           (unsigned)(SHA3_FIRST_MMIO - SHA3_FIRST_SW));
 
-    for (unsigned impl = SHA3_FIRST_SW; impl < SHA3_NUM_IMPLS; impl++) {
+    for (unsigned impl = SHA3_FIRST_SW; impl < SHA3_FIRST_MMIO; impl++) {
         for (unsigned k = 0; k < SHA3_NUM_KATS; k++) {
             const sha3_kat_t *t = &sha3_kats[k];
             unsigned n = sha3_digest_bytes(t->variant);

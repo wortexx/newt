@@ -12,26 +12,28 @@ A one-block message (`len < rate`) costs its measured value. Longer messages fol
 
 | SHA3 | impl | a (cycles) | b (cycles/block) | instr/block | max residual | 1-block (cycles) | 1-block excess |
 |---|---|---:|---:|---:|---:|---:|---:|
-| 224 | ise-kperm | 15 | 142 | 96 | 0.10 % | 196 | +39 (+19.9 %) |
-| 224 | ise-shatr | 6 | 238 | 168 | 0.45 % | 280 | +36 (+13.0 %) |
-| 224 | sw-rvcrypto | -279 | 48,806 | 34,529 | 0.00 % | 48,617 | +90 (+0.2 %) |
-| 224 | sw-xkcp-opt64 | -381 | 17,520 | 7,342 | 0.02 % | 16,678 | -461 (-2.8 %) |
-| 224 | sw-xkcp-ref64 | -141 | 83,001 | 57,033 | 0.00 % | 82,866 | +6 (+0.0 %) |
-| 256 | ise-kperm | -29 | 135 | 91 | 0.12 % | 182 | +76 (+41.8 %) |
-| 256 | ise-shatr | -23 | 231 | 163 | 0.49 % | 244 | +36 (+15.0 %) |
-| 256 | sw-rvcrypto | -235 | 48,769 | 34,501 | 0.00 % | 48,597 | +63 (+0.1 %) |
-| 256 | sw-xkcp-opt64 | -1,071 | 17,262 | 7,285 | 1.19 % | 16,679 | +488 (+2.9 %) |
-| 256 | sw-xkcp-ref64 | -97 | 82,964 | 57,005 | 0.00 % | 82,854 | -13 (-0.0 %) |
-| 384 | ise-kperm | 17 | 107 | 71 | 0.13 % | 185 | +61 (+33.0 %) |
-| 384 | ise-shatr | 23 | 203 | 143 | 0.51 % | 262 | +36 (+13.9 %) |
-| 384 | sw-rvcrypto | -59 | 48,621 | 34,389 | 0.00 % | 48,612 | +50 (+0.1 %) |
-| 384 | sw-xkcp-opt64 | -1,692 | 17,740 | 7,171 | 0.12 % | 16,439 | +391 (+2.4 %) |
-| 384 | sw-xkcp-ref64 | 79 | 82,816 | 56,893 | 0.00 % | 82,882 | -13 (-0.0 %) |
-| 512 | ise-kperm | 63 | 79 | 51 | 0.14 % | 203 | +61 (+30.0 %) |
-| 512 | ise-shatr | 69 | 175 | 123 | 0.54 % | 280 | +36 (+13.0 %) |
-| 512 | sw-rvcrypto | 117 | 48,473 | 34,277 | 0.00 % | 48,640 | +50 (+0.1 %) |
-| 512 | sw-xkcp-opt64 | 420 | 16,578 | 6,968 | 0.57 % | 17,097 | +99 (+0.6 %) |
-| 512 | sw-xkcp-ref64 | 255 | 82,668 | 56,781 | 0.00 % | 82,910 | -13 (-0.0 %) |
+| 224 | ise-kperm | -7 | 142 | 96 | 0.10 % | 190 | +55 (+28.9 %) |
+| 224 | ise-shatr | -6 | 239 | 168 | 0.24 % | 273 | +40 (+14.7 %) |
+| 224 | sw-rvcrypto | -1,208 | 49,699 | 35,034 | 0.00 % | 48,564 | +74 (+0.2 %) |
+| 224 | sw-xkcp-opt64 | -626 | 17,404 | 7,339 | 0.65 % | 17,262 | +484 (+2.8 %) |
+| 224 | sw-xkcp-ref64 | -132 | 83,002 | 57,033 | 0.00 % | 82,868 | -2 (-0.0 %) |
+| 256 | ise-kperm | -34 | 135 | 91 | 0.12 % | 129 | +28 (+21.7 %) |
+| 256 | ise-shatr | -33 | 232 | 163 | 0.27 % | 220 | +21 (+9.5 %) |
+| 256 | mmio-cpu | -27 | 265 | 99 | 0.00 % | 281 | +43 (+15.3 %) |
+| 256 | mmio-dma | 1,665 | 255 | 45 | 0.02 % | 1,982 | +62 (+3.1 %) |
+| 256 | sw-rvcrypto | -1,117 | 49,614 | 34,978 | 0.00 % | 48,571 | +74 (+0.2 %) |
+| 256 | sw-xkcp-opt64 | 777 | 16,842 | 7,282 | 1.21 % | 17,254 | -365 (-2.1 %) |
+| 256 | sw-xkcp-ref64 | -88 | 82,965 | 57,005 | 0.00 % | 82,874 | -3 (-0.0 %) |
+| 384 | ise-kperm | 12 | 107 | 71 | 0.13 % | 143 | +24 (+16.8 %) |
+| 384 | ise-shatr | 13 | 204 | 143 | 0.27 % | 239 | +22 (+9.2 %) |
+| 384 | sw-rvcrypto | -749 | 49,274 | 34,754 | 0.00 % | 48,599 | +74 (+0.2 %) |
+| 384 | sw-xkcp-opt64 | 1,258 | 16,896 | 7,168 | 0.09 % | 16,995 | -1,159 (-6.8 %) |
+| 384 | sw-xkcp-ref64 | 88 | 82,817 | 56,893 | 0.00 % | 82,902 | -3 (-0.0 %) |
+| 512 | ise-kperm | 58 | 79 | 51 | 0.14 % | 161 | +24 (+14.9 %) |
+| 512 | ise-shatr | 59 | 176 | 123 | 0.29 % | 256 | +21 (+8.2 %) |
+| 512 | sw-rvcrypto | -381 | 48,934 | 34,530 | 0.00 % | 48,627 | +74 (+0.2 %) |
+| 512 | sw-xkcp-opt64 | 815 | 16,508 | 6,965 | 0.02 % | 17,166 | -157 (-0.9 %) |
+| 512 | sw-xkcp-ref64 | 264 | 82,669 | 56,781 | 0.00 % | 82,930 | -3 (-0.0 %) |
 
 ## Table I (arXiv:2508.20653 form)
 
@@ -39,55 +41,66 @@ Total cycles over the NIST ShortMsg lengths (0..rate bytes) and LongMsg lengths 
 
 | SHA3 | impl | short (cycles) | long (cycles) |
 |---|---|---:|---:|
-| 224 | ise-kperm | 28,523 | 748,471 *EXTRAPOLATED* |
-| 224 | ise-shatr | 40,801 | 1,248,211 *EXTRAPOLATED* |
-| 224 | sw-rvcrypto | 7,098,181 | 256,202,129 *EXTRAPOLATED* |
-| 224 | sw-xkcp-ref64 | 12,098,565 | 435,740,414 *EXTRAPOLATED* |
-| 224 | sw-xkcp-opt64 | 2,436,291 | 91,943,371 *EXTRAPOLATED* |
-| 256 | ise-kperm | 24,993 | 707,321 *EXTRAPOLATED* |
-| 256 | ise-shatr | 33,622 | 1,208,561 *EXTRAPOLATED* |
-| 256 | sw-rvcrypto | 6,706,495 | 256,012,279 *EXTRAPOLATED* |
-| 256 | sw-xkcp-ref64 | 11,433,975 | 435,550,564 *EXTRAPOLATED* |
-| 256 | sw-xkcp-opt64 | 2,301,797 | 90,518,400 *EXTRAPOLATED* |
-| 384 | ise-kperm | 19,471 | 564,921 *EXTRAPOLATED* |
-| 384 | ise-shatr | 27,676 | 1,066,161 *EXTRAPOLATED* |
-| 384 | sw-rvcrypto | 5,152,831 | 255,252,879 *EXTRAPOLATED* |
-| 384 | sw-xkcp-ref64 | 8,785,439 | 434,791,164 *EXTRAPOLATED* |
-| 384 | sw-xkcp-opt64 | 1,743,444 | 92,966,536 *EXTRAPOLATED* |
-| 512 | ise-kperm | 14,837 | 424,821 *EXTRAPOLATED* |
-| 512 | ise-shatr | 20,578 | 928,825 *EXTRAPOLATED* |
-| 512 | sw-rvcrypto | 3,599,143 | 255,899,187 *EXTRAPOLATED* |
-| 512 | sw-xkcp-ref64 | 6,135,111 | 436,429,132 *EXTRAPOLATED* |
-| 512 | sw-xkcp-opt64 | 1,264,560 | 87,559,482 *EXTRAPOLATED* |
+| 224 | ise-kperm | 27,637 | 746,271 *EXTRAPOLATED* |
+| 224 | ise-shatr | 39,784 | 1,254,886 *EXTRAPOLATED* |
+| 224 | sw-rvcrypto | 7,091,405 | 260,797,796 *EXTRAPOLATED* |
+| 224 | sw-xkcp-ref64 | 12,098,864 | 435,746,564 *EXTRAPOLATED* |
+| 224 | sw-xkcp-opt64 | 2,519,910 | 91,306,193 *EXTRAPOLATED* |
+| 256 | ise-kperm | 17,780 | 706,821 *EXTRAPOLATED* |
+| 256 | ise-shatr | 30,351 | 1,215,436 *EXTRAPOLATED* |
+| 256 | sw-rvcrypto | 6,703,767 | 260,364,007 *EXTRAPOLATED* |
+| 256 | sw-xkcp-ref64 | 11,436,706 | 435,556,714 *EXTRAPOLATED* |
+| 256 | sw-xkcp-opt64 | 2,381,005 | 88,499,671 *EXTRAPOLATED* |
+| 384 | ise-kperm | 15,098 | 564,421 *EXTRAPOLATED* |
+| 384 | ise-shatr | 25,277 | 1,073,036 *EXTRAPOLATED* |
+| 384 | sw-rvcrypto | 5,152,095 | 258,615,807 *EXTRAPOLATED* |
+| 384 | sw-xkcp-ref64 | 8,787,530 | 434,797,314 *EXTRAPOLATED* |
+| 384 | sw-xkcp-opt64 | 1,802,530 | 88,828,329 *EXTRAPOLATED* |
+| 512 | ise-kperm | 11,808 | 424,321 *EXTRAPOLATED* |
+| 512 | ise-shatr | 18,843 | 935,744 *EXTRAPOLATED* |
+| 512 | sw-rvcrypto | 3,598,631 | 258,286,706 *EXTRAPOLATED* |
+| 512 | sw-xkcp-ref64 | 6,136,562 | 436,435,311 *EXTRAPOLATED* |
+| 512 | sw-xkcp-opt64 | 1,269,783 | 87,227,232 *EXTRAPOLATED* |
 
 ### Speedups of the ISE over each software baseline
 
 | SHA3 | ISE | baseline | short | long |
 |---|---|---|---:|---:|
-| 224 | ise-kperm | sw-rvcrypto | 248.86x | 342.30x *EXTRAPOLATED* |
-| 224 | ise-kperm | sw-xkcp-ref64 | 424.16x | 582.17x *EXTRAPOLATED* |
-| 224 | ise-kperm | sw-xkcp-opt64 | 85.41x | 122.84x *EXTRAPOLATED* |
-| 224 | ise-shatr | sw-rvcrypto | 173.97x | 205.26x *EXTRAPOLATED* |
-| 224 | ise-shatr | sw-xkcp-ref64 | 296.53x | 349.09x *EXTRAPOLATED* |
-| 224 | ise-shatr | sw-xkcp-opt64 | 59.71x | 73.66x *EXTRAPOLATED* |
-| 256 | ise-kperm | sw-rvcrypto | 268.33x | 361.95x *EXTRAPOLATED* |
-| 256 | ise-kperm | sw-xkcp-ref64 | 457.48x | 615.77x *EXTRAPOLATED* |
-| 256 | ise-kperm | sw-xkcp-opt64 | 92.10x | 127.97x *EXTRAPOLATED* |
-| 256 | ise-shatr | sw-rvcrypto | 199.47x | 211.83x *EXTRAPOLATED* |
-| 256 | ise-shatr | sw-xkcp-ref64 | 340.07x | 360.39x *EXTRAPOLATED* |
-| 256 | ise-shatr | sw-xkcp-opt64 | 68.46x | 74.90x *EXTRAPOLATED* |
-| 384 | ise-kperm | sw-rvcrypto | 264.64x | 451.84x *EXTRAPOLATED* |
-| 384 | ise-kperm | sw-xkcp-ref64 | 451.20x | 769.65x *EXTRAPOLATED* |
-| 384 | ise-kperm | sw-xkcp-opt64 | 89.54x | 164.57x *EXTRAPOLATED* |
-| 384 | ise-shatr | sw-rvcrypto | 186.18x | 239.41x *EXTRAPOLATED* |
-| 384 | ise-shatr | sw-xkcp-ref64 | 317.44x | 407.81x *EXTRAPOLATED* |
-| 384 | ise-shatr | sw-xkcp-opt64 | 62.99x | 87.20x *EXTRAPOLATED* |
-| 512 | ise-kperm | sw-rvcrypto | 242.57x | 602.37x *EXTRAPOLATED* |
-| 512 | ise-kperm | sw-xkcp-ref64 | 413.49x | 1027.33x *EXTRAPOLATED* |
-| 512 | ise-kperm | sw-xkcp-opt64 | 85.23x | 206.11x *EXTRAPOLATED* |
-| 512 | ise-shatr | sw-rvcrypto | 174.90x | 275.51x *EXTRAPOLATED* |
-| 512 | ise-shatr | sw-xkcp-ref64 | 298.14x | 469.87x *EXTRAPOLATED* |
-| 512 | ise-shatr | sw-xkcp-opt64 | 61.45x | 94.27x *EXTRAPOLATED* |
+| 224 | ise-kperm | sw-rvcrypto | 256.59x | 349.47x *EXTRAPOLATED* |
+| 224 | ise-kperm | sw-xkcp-ref64 | 437.77x | 583.90x *EXTRAPOLATED* |
+| 224 | ise-kperm | sw-xkcp-opt64 | 91.18x | 122.35x *EXTRAPOLATED* |
+| 224 | ise-shatr | sw-rvcrypto | 178.25x | 207.83x *EXTRAPOLATED* |
+| 224 | ise-shatr | sw-xkcp-ref64 | 304.11x | 347.24x *EXTRAPOLATED* |
+| 224 | ise-shatr | sw-xkcp-opt64 | 63.34x | 72.76x *EXTRAPOLATED* |
+| 256 | ise-kperm | sw-rvcrypto | 377.03x | 368.36x *EXTRAPOLATED* |
+| 256 | ise-kperm | sw-xkcp-ref64 | 643.22x | 616.22x *EXTRAPOLATED* |
+| 256 | ise-kperm | sw-xkcp-opt64 | 133.91x | 125.21x *EXTRAPOLATED* |
+| 256 | ise-shatr | sw-rvcrypto | 220.87x | 214.21x *EXTRAPOLATED* |
+| 256 | ise-shatr | sw-xkcp-ref64 | 376.81x | 358.35x *EXTRAPOLATED* |
+| 256 | ise-shatr | sw-xkcp-opt64 | 78.45x | 72.81x *EXTRAPOLATED* |
+| 384 | ise-kperm | sw-rvcrypto | 341.24x | 458.20x *EXTRAPOLATED* |
+| 384 | ise-kperm | sw-xkcp-ref64 | 582.02x | 770.34x *EXTRAPOLATED* |
+| 384 | ise-kperm | sw-xkcp-opt64 | 119.39x | 157.38x *EXTRAPOLATED* |
+| 384 | ise-shatr | sw-rvcrypto | 203.82x | 241.01x *EXTRAPOLATED* |
+| 384 | ise-shatr | sw-xkcp-ref64 | 347.65x | 405.20x *EXTRAPOLATED* |
+| 384 | ise-shatr | sw-xkcp-opt64 | 71.31x | 82.78x *EXTRAPOLATED* |
+| 512 | ise-kperm | sw-rvcrypto | 304.75x | 608.71x *EXTRAPOLATED* |
+| 512 | ise-kperm | sw-xkcp-ref64 | 519.68x | 1028.55x *EXTRAPOLATED* |
+| 512 | ise-kperm | sw-xkcp-opt64 | 107.53x | 205.57x *EXTRAPOLATED* |
+| 512 | ise-shatr | sw-rvcrypto | 190.98x | 276.02x *EXTRAPOLATED* |
+| 512 | ise-shatr | sw-xkcp-ref64 | 325.67x | 466.40x *EXTRAPOLATED* |
+| 512 | ise-shatr | sw-xkcp-opt64 | 67.39x | 93.22x *EXTRAPOLATED* |
+
+## ISE vs MMIO accelerator (SHA3-256)
+
+The MMIO accelerator (`hw/coproc/keccak_mmio.sv`) fed by CPU stores (`mmio-cpu`) or by Cheshire's iDMA (`mmio-dma`), against the ISE back-ends, from the same split-model fits. A crossover is the shortest message from which the other arm is cheaper (up to 10,000 blocks). Lengths beyond the largest measured message come from the fit and are marked *EXTRAPOLATED*; task 7.2 brackets each predicted crossover with measured points.
+
+| ISE | MMIO | cheaper at one block | crossover |
+|---|---|---|---|
+| ise-kperm | mmio-cpu | `ise-kperm` | none in range |
+| ise-kperm | mmio-dma | `ise-kperm` | none in range |
+| ise-shatr | mmio-cpu | `ise-shatr` | none in range |
+| ise-shatr | mmio-dma | `ise-shatr` | none in range |
 
 Method differences from arXiv:2508.20653: RTL simulation instead of gem5; an ASIC flow (IHP SG13G2) instead of an FPGA; the ISE reached through CV-X-IF instead of an in-pipeline unit. The baselines run on a core without bit-manipulation rotates (`RVB = 0`); see the rotate-share analysis.
 
@@ -97,9 +110,9 @@ The core has no bit-manipulation rotates (`RVB = 0`), so a 64-bit rotate costs a
 
 | baseline | rotates/perm | rotate instrs/perm | instr/block (SHA3-256) | rotate share | Zbb saving | static idioms found |
 |---|---:|---:|---:|---:|---:|---|
-| sw-rvcrypto | 720 | 2,760 | 34,501 | 8.0 % | 5.9 % | KeccakF1600_StatePermute: 1 const; KeccakF1600_StatePermute: 1 var |
+| sw-rvcrypto | 720 | 2,760 | 34,978 | 7.9 % | 5.8 % | KeccakF1600_StatePermute: 1 const; KeccakF1600_StatePermute: 1 var |
 | sw-xkcp-ref64 | 720 | 2,760 | 57,005 | 4.8 % | 3.6 % | theta: 1 const; rho: 1 var |
-| sw-xkcp-opt64 | 696 | 2,088 | 7,285 | 28.7 % | 19.1 % | KeccakP1600_plain64_Permute_24rounds: 696 const |
+| sw-xkcp-opt64 | 696 | 2,088 | 7,282 | 28.7 % | 19.1 % | KeccakP1600_plain64_Permute_24rounds: 696 const |
 
 The looped baselines rotate all 25 lanes in rho, including the offset-0 lane (a rotate by 0 that still costs the idiom), hence 720 rather than 696.
 
@@ -109,9 +122,9 @@ Shares are of dynamic instructions, not cycles: on CVA6 these are single-cycle A
 
 ```
 bundle MANIFEST:
-  bundle_id:        newt-xrun-b72b384-dirty
-  commit:           b72b384e3d8f822d639a776dacc99633b79523ad
-  commit_date:      2026-10-02T11:31:55+03:00
+  bundle_id:        newt-xrun-0dee23f-dirty
+  commit:           0dee23fcf4b73a357332f8fb15e63dd6821fc55d
+  commit_date:      2026-10-02T19:16:07+03:00
   working_tree:     DIRTY (uncommitted changes)
   bender_lock_sha:  7be4d3596bfd1ba321a5edc4bfa4237a513a78052c11b0ad2e5a10dda9162144
   bender:           bender 0.32.0

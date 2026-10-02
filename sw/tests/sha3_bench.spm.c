@@ -4,8 +4,9 @@
 //
 // SHA-3 cycle and instruction benchmark (spec sha3-evaluation, "Cycle and
 // instruction counts from RTL simulation"). For every variant and every
-// implementation (both ISE back-ends and the three software baselines) it
-// hashes messages of 0, 1, 2 and 4 full rate blocks (1, 2, 3 and 5
+// implementation (both ISE back-ends and the three software baselines; for
+// SHA3-256 also the MMIO accelerator, CPU- and DMA-fed, for the crossover of
+// task 7.1) it hashes messages of 0, 1, 2 and 4 full rate blocks (1, 2, 3 and 5
 // permutations including the padding block) and reads mcycle/minstret
 // around the hash call, minus the measured cost of the counter reads.
 //
@@ -14,10 +15,15 @@
 // are steady-state.
 // Interrupts are disabled throughout (design D5).
 //
+// Every timed hash is also checked: its digest must equal the software XKCP
+// opt64 digest of the same message, computed untimed. A mismatch prints a
+// MISMATCH line and fails the test, so a broken back-end cannot report timings.
+//
 // Output (parsed by scripts/sha3_eval.py), one line per variant x impl to
 // keep UART time down (each character costs ~87 us of simulated time):
 //   CALIB,<cycles>,<instret>
 //   RESULT,<variant>,<impl>,<rate>,<bytes>:<cycles>:<instret>,...
+//   MISMATCH,<variant>,<impl>,<bytes>      (only on a wrong digest)
 // <variant> is the digest size (224/256/384/512), <impl> the sha3_impl_name().
 
 #include "newt_test.h"
@@ -60,9 +66,16 @@ int main(void) {
     printf("CALIB,%lu,%lu\r\n", calib.cycles, calib.instret);
 
     uint8_t out[64] __attribute__((aligned(8)));
+    uint8_t want[NUM_LENGTHS][64] __attribute__((aligned(8)));
+    unsigned mismatches = 0;
     for (unsigned v = 0; v < SHA3_NUM_VARIANTS; v++) {
         unsigned rate = sha3_rate_bytes((sha3_variant_t)v);
-        for (unsigned impl = 0; impl < SHA3_NUM_IMPLS; impl++) {
+        unsigned digest = sha3_digest_bytes((sha3_variant_t)v);
+        for (unsigned l = 0; l < NUM_LENGTHS; l++)
+            sha3_hash((sha3_variant_t)v, SHA3_IMPL_SW_XKCP_OPT64, msg, kBlocks[l] * rate, want[l]);
+        // The MMIO accelerator (task 7.1) is measured for SHA3-256 only.
+        const unsigned last_impl = (v == SHA3_256) ? SHA3_NUM_IMPLS : SHA3_FIRST_MMIO;
+        for (unsigned impl = 0; impl < last_impl; impl++) {
             counts_t res[NUM_LENGTHS];
             // Warm-up with the longest message: every measurement then runs with
             // warm instruction and data caches (a shorter warm-up leaves the later
@@ -74,15 +87,22 @@ int main(void) {
                     measure((sha3_variant_t)v, (sha3_impl_t)impl, msg, kBlocks[l] * rate, out, 0);
                 res[l].cycles = c.cycles - calib.cycles;
                 res[l].instret = c.instret - calib.instret;
+                for (unsigned b = 0; b < digest; b++)
+                    if (out[b] != want[l][b]) {
+                        printf("MISMATCH,%u,%s,%u\r\n", 8 * digest,
+                               sha3_impl_name((sha3_impl_t)impl), kBlocks[l] * rate);
+                        mismatches++;
+                        break;
+                    }
             }
-            printf("RESULT,%u,%s,%u", 8 * sha3_digest_bytes((sha3_variant_t)v),
+            printf("RESULT,%u,%s,%u", 8 * digest,
                    sha3_impl_name((sha3_impl_t)impl), rate);
             for (unsigned l = 0; l < NUM_LENGTHS; l++)
                 printf(",%u:%lu:%lu", kBlocks[l] * rate, res[l].cycles, res[l].instret);
             printf("\r\n");
         }
     }
-    printf("sha3_bench: DONE\r\n");
+    printf("sha3_bench: DONE (%u digest mismatches)\r\n", mismatches);
     newt_uart_flush();
-    return 0;
+    return newt_exit_code((int)mismatches);
 }

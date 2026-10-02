@@ -57,6 +57,8 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 ISE_IMPLS = ["ise-kperm", "ise-shatr"]
 SW_IMPLS = ["sw-rvcrypto", "sw-xkcp-ref64", "sw-xkcp-opt64"]
+MMIO_IMPLS = ["mmio-cpu", "mmio-dma"]  # measured for SHA3-256 only (task 7.1)
+CROSSOVER_VARIANT = 256
 VARIANTS = [224, 256, 384, 512]
 RATE = {224: 144, 256: 136, 384: 104, 512: 72}
 
@@ -76,6 +78,7 @@ ROTATES_PER_PERMUTATION = 24 * (5 + 24)  # theta 5 + rho 24 non-zero offsets
 
 RESULT_RE = re.compile(r"RESULT,(\d+),([a-z0-9-]+),(\d+),(.*)$")
 CALIB_RE = re.compile(r"CALIB,(\d+),(\d+)")
+MISMATCH_RE = re.compile(r"MISMATCH,(\d+),([a-z0-9-]+),(\d+)")
 
 
 class EvalError(Exception):
@@ -114,6 +117,10 @@ def parse(logs):
             m = CALIB_RE.search(line)
             if m:
                 calib = (int(m.group(1)), int(m.group(2)))
+            m = MISMATCH_RE.search(line)
+            if m:
+                raise EvalError(f"{src}: SHA3-{m.group(1)} {m.group(2)} gave a wrong digest at "
+                                f"{m.group(3)} bytes; its timings are not valid")
             m = RESULT_RE.search(line)
             if not m:
                 continue
@@ -208,6 +215,38 @@ def table_one(fits):
             long_, long_x = total_cycles(f, rate, long_lengths(rate))
             rows.append((variant, impl, short, short_x, long_, long_x))
     return rows
+
+
+# --- ISE vs MMIO crossover --------------------------------------------------------
+
+def crossovers(fits, max_blocks=10000):
+    """Predicted ISE-vs-MMIO crossovers for SHA3-256 (spec "Measured
+    ISE-versus-MMIO crossover", task 7.1). For every (ISE, MMIO) pair, both
+    split-model costs are evaluated at 1, 2, ... max_blocks permutations, and
+    every block count where the cheaper arm changes is reported. Returns
+    (ise, mmio, first, switches): `first` is the cheaper arm at one block, and
+    `switches` is a list of (blocks, message bytes, newly cheaper arm), where
+    bytes is the shortest message with that many permutations."""
+    rate = RATE[CROSSOVER_VARIANT]
+    out = []
+    for ise in ISE_IMPLS:
+        for mmio in MMIO_IMPLS:
+            fi, fm = fits.get((CROSSOVER_VARIANT, ise)), fits.get((CROSSOVER_VARIANT, mmio))
+            if not fi or not fm:
+                continue
+            def cheaper(n):
+                nbytes = (n - 1) * rate
+                return mmio if model_cycles(fm, nbytes, rate) < model_cycles(fi, nbytes, rate) \
+                    else ise
+            first = prev = cheaper(1)
+            switches = []
+            for n in range(2, max_blocks + 1):
+                cur = cheaper(n)
+                if cur != prev:
+                    switches.append((n, (n - 1) * rate, cur))
+                    prev = cur
+            out.append((ise, mmio, first, switches))
+    return out
 
 
 # --- Rotate share ----------------------------------------------------------------
@@ -392,6 +431,30 @@ def markdown(calib, fits, rows, prov, rot=None):
                       f"{' *EXTRAPOLATED*' if sx_i or sx_s else ''} | {l_s / l_i:.2f}x"
                       f"{' *EXTRAPOLATED*' if lx_i or lx_s else ''} |")
     p()
+    xs = crossovers(fits)
+    if xs:
+        p(f"## ISE vs MMIO accelerator (SHA3-{CROSSOVER_VARIANT})")
+        p()
+        p("The MMIO accelerator (`hw/coproc/keccak_mmio.sv`) fed by CPU stores (`mmio-cpu`) or by "
+          "Cheshire's iDMA (`mmio-dma`), against the ISE back-ends, from the same split-model "
+          "fits. A crossover is the shortest message from which the other arm is cheaper (up to "
+          "10,000 blocks). Lengths beyond the largest measured message come from the fit and are "
+          "marked *EXTRAPOLATED*; task 7.2 brackets each predicted crossover with measured "
+          "points.")
+        p()
+        p("| ISE | MMIO | cheaper at one block | crossover |")
+        p("|---|---|---|---|")
+        for ise, mmio, first, switches in xs:
+            mx = max(fits[(CROSSOVER_VARIANT, ise)]["max_measured_bytes"],
+                     fits[(CROSSOVER_VARIANT, mmio)]["max_measured_bytes"])
+            if not switches:
+                cell = "none in range"
+            else:
+                cell = "; ".join(f"`{who}` cheaper from {n} blocks (≥ {nb:,} bytes)"
+                                 f"{' *EXTRAPOLATED*' if nb > mx else ''}"
+                                 for n, nb, who in switches)
+            p(f"| {ise} | {mmio} | `{first}` | {cell} |")
+        p()
     p("Method differences from arXiv:2508.20653: RTL simulation instead of gem5; "
       "an ASIC flow (IHP SG13G2) instead of an FPGA; the ISE reached through CV-X-IF "
       "instead of an in-pipeline unit. The baselines run on a core without bit-manipulation "

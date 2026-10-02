@@ -10,14 +10,17 @@
 
 #include "sha3.h"
 
+#include "dif/dma.h"
 #include "keccak_ise.h"
+#include "keccak_mmio.h"
 
 static const unsigned kRate[SHA3_NUM_VARIANTS] = {144, 136, 104, 72};
 static const unsigned kDigest[SHA3_NUM_VARIANTS] = {28, 32, 48, 64};
 static const char *const kVariantName[SHA3_NUM_VARIANTS] = {"SHA3-224", "SHA3-256",
                                                              "SHA3-384", "SHA3-512"};
-static const char *const kImplName[SHA3_NUM_IMPLS] = {"ise-kperm", "ise-shatr", "sw-rvcrypto",
-                                                       "sw-xkcp-ref64", "sw-xkcp-opt64"};
+static const char *const kImplName[SHA3_NUM_IMPLS] = {
+    "ise-kperm", "ise-shatr", "sw-rvcrypto", "sw-xkcp-ref64", "sw-xkcp-opt64",
+    "mmio-cpu",  "mmio-dma"};
 
 // Software baselines (sw/lib/sha3_sw_*.c, vendored code under sw/vendor/).
 void sha3_sw_rvcrypto_hash(unsigned rate, unsigned digest, const uint8_t *msg, size_t len,
@@ -59,7 +62,7 @@ static inline void store64_aligned(uint8_t *p, uint64_t v) {
 static inline int is_aligned8(const void *p) { return ((uintptr_t)p & 7u) == 0; }
 
 // Generates `static void <name>(rate, digest, msg, len, out)` from four
-// back-end operations: INIT(), XOR_LANE(lane_index, value), PERMUTE(),
+// back-end operations: INIT(rate), XOR_LANE(lane_index, value), PERMUTE(rate),
 // READ_LANE(lane_index) -> uint64_t. Lanes of an 8-byte-aligned message are
 // loaded whole; an unaligned message falls back to byte loads. The final
 // block absorbs only the lanes that carry message bytes or padding.
@@ -68,14 +71,14 @@ static inline int is_aligned8(const void *p) { return ((uintptr_t)p & 7u) == 0; 
                      uint8_t *out) {                                                     \
         const unsigned lanes = rate / 8;                                                 \
         const int aligned = is_aligned8(msg);                                            \
-        INIT();                                                                          \
+        INIT(rate);                                                                      \
         while (len >= rate) {                                                            \
             if (aligned)                                                                 \
                 for (unsigned i = 0; i < lanes; i++)                                     \
                     XOR_LANE(i, load64_aligned(msg + 8 * i));                            \
             else                                                                         \
                 for (unsigned i = 0; i < lanes; i++) XOR_LANE(i, load64_le(msg + 8 * i)); \
-            PERMUTE();                                                                   \
+            PERMUTE(rate);                                                               \
             msg += rate;                                                                 \
             len -= rate;                                                                 \
         }                                                                                \
@@ -93,7 +96,7 @@ static inline int is_aligned8(const void *p) { return ((uintptr_t)p & 7u) == 0; 
             XOR_LANE(i, tail);                                                           \
             XOR_LANE(lanes - 1, 0x80ull << 56);                                          \
         }                                                                                \
-        PERMUTE();                                                                       \
+        PERMUTE(rate);                                                                   \
         /* Squeeze: every SHA3 digest fits in the first block of output. */              \
         const int out_aligned = is_aligned8(out);                                        \
         for (unsigned j = 0; 8 * j < digest; j++) {                                      \
@@ -107,14 +110,71 @@ static inline int is_aligned8(const void *p) { return ((uintptr_t)p & 7u) == 0; 
 
 // --- Coprocessor back-ends --------------------------------------------------
 
+static inline void ise_init(unsigned rate) {
+    (void)rate;
+    keccak_kclr();
+}
+
 static inline void keccak_kxor_lane(unsigned lane, uint64_t value) { keccak_kxor(value, lane); }
 
-static inline void ise_shatr_permute(void) {
+static inline void ise_kperm(unsigned rate) {
+    (void)rate;
+    keccak_kperm();
+}
+
+static inline void ise_shatr_permute(unsigned rate) {
+    (void)rate;
     for (uint64_t r = 0; r < 24; r++) keccak_shatr(r);
 }
 
-SHA3_DEFINE_SPONGE(sponge_ise_kperm, keccak_kclr, keccak_kxor_lane, keccak_kperm, keccak_krd)
-SHA3_DEFINE_SPONGE(sponge_ise_shatr, keccak_kclr, keccak_kxor_lane, ise_shatr_permute, keccak_krd)
+SHA3_DEFINE_SPONGE(sponge_ise_kperm, ise_init, keccak_kxor_lane, ise_kperm, keccak_krd)
+SHA3_DEFINE_SPONGE(sponge_ise_shatr, ise_init, keccak_kxor_lane, ise_shatr_permute, keccak_krd)
+
+// --- MMIO accelerator back-ends (hw/coproc/keccak_mmio.sv) --------------------
+
+// CPU-fed: the same sponge, with each lane a store into the absorb window.
+SHA3_DEFINE_SPONGE(sponge_mmio_cpu, keccak_mmio_clear, keccak_mmio_absorb, keccak_mmio_permute,
+                   keccak_mmio_read)
+
+// DMA-fed: Cheshire's iDMA copies each rate block into the absorb window
+// (rate/8 64-bit beats; the accelerator XORs each beat into its lane). Whole
+// blocks are copied straight from the message, and the padded final block
+// from a local buffer. CVA6's D-cache is write-through, so a fence makes the
+// CPU's stores visible to the DMA.
+//
+// The copy goes through the 2D call with one repetition. Cheshire's iDMA is
+// the 2D build, and the 1D sys_dma_blk_memcpy leaves the ND enable clear, so
+// the register frontend forces reps to 0, and idma_nd_midend completes a
+// zero-repetition request without issuing any burst: the transfer ID comes
+// back done while nothing was copied.
+static uint8_t mmio_dma_block[144] __attribute__((aligned(8)));
+
+static void mmio_dma_copy(uint64_t dst, const void *src, unsigned bytes) {
+    sys_dma_2d_blk_memcpy(dst, (uint64_t)(uintptr_t)src, bytes, 0, 0, 1, DMA_CONF_DECOUPLE_NONE);
+}
+
+static void sponge_mmio_dma(unsigned rate, unsigned digest, const uint8_t *msg, size_t len,
+                            uint8_t *out) {
+    const uint64_t absorb = KECCAK_MMIO_BASE + KECCAK_MMIO_ABSORB;
+    keccak_mmio_clear(rate);
+    asm volatile("fence" ::: "memory");
+    while (len >= rate) {
+        mmio_dma_copy(absorb, msg, rate);
+        keccak_mmio_permute(rate);
+        msg += rate;
+        len -= rate;
+    }
+    for (unsigned k = 0; k < rate; k++) mmio_dma_block[k] = (k < len) ? msg[k] : 0;
+    mmio_dma_block[len] ^= 0x06;
+    mmio_dma_block[rate - 1] ^= 0x80;
+    asm volatile("fence" ::: "memory");
+    mmio_dma_copy(absorb, mmio_dma_block, rate);
+    keccak_mmio_permute(rate);
+    for (unsigned j = 0; 8 * j < digest; j++) {
+        unsigned n = (digest - 8 * j < 8) ? digest - 8 * j : 8;
+        store64_le(out + 8 * j, keccak_mmio_read(j), n);
+    }
+}
 
 int sha3_hash(sha3_variant_t v, sha3_impl_t impl, const uint8_t *msg, size_t len,
               uint8_t *out) {
@@ -134,6 +194,12 @@ int sha3_hash(sha3_variant_t v, sha3_impl_t impl, const uint8_t *msg, size_t len
             return 0;
         case SHA3_IMPL_SW_XKCP_OPT64:
             sha3_sw_xkcp_opt64_hash(kRate[v], kDigest[v], msg, len, out);
+            return 0;
+        case SHA3_IMPL_MMIO_CPU:
+            sponge_mmio_cpu(kRate[v], kDigest[v], msg, len, out);
+            return 0;
+        case SHA3_IMPL_MMIO_DMA:
+            sponge_mmio_dma(kRate[v], kDigest[v], msg, len, out);
             return 0;
         default:
             return -1;
