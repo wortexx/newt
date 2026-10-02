@@ -1,0 +1,9 @@
+upstream: https://github.com/riscv/riscv-crypto
+commit:   9cb90879050f68de8ba0b2f8bc34bec599ac8025
+files:    benchmarks/sha3/reference/Keccak.c -> Keccak.c
+          benchmarks/sha3/Keccak.h           -> riscvcrypto/sha3/Keccak.h (path kept for its #include)
+license:  both files are the Keccak Team's code under CC0 1.0 (see each file's
+          header); LICENSE is the riscv-crypto repository license (CC-BY-4.0),
+          kept for completeness. Files are unmodified.
+role:     baseline "riscv-crypto reference SHA-3" (paper arXiv:2508.20653's
+          RISC-V SHA-3 baseline), called through its own Keccak() sponge.

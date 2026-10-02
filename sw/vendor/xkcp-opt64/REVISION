@@ -1,0 +1,15 @@
+upstream: https://github.com/XKCP/XKCP
+commit:   4affab454735d54e78156880b3b44e38dcbf765c
+files:    lib/low/KeccakP-1600/plain-64bits/KeccakP-1600-opt64.c, KeccakP-1600-plain64.h
+          lib/low/KeccakP-1600/plain-64bits/SnP/KeccakP-1600-SnP.h
+          lib/low/KeccakP-1600/common/KeccakP-1600-64.macros, KeccakP-1600-unrolling.macros
+          lib/low/common/SnP-Relaned.h
+          lib/common/SnP-common.h, load-store.h, brg_endian.h
+          config.h is NOT an XKCP file: hand-written to match the config XKCP
+          generates for its "generic64" target (all rounds unrolled, no lane
+          complementing).
+license:  CC0 1.0 for the Keccak files (see headers); brg_endian.h is Brian
+          Gladman's BSD-style license (see its header and LICENSE). Upstream
+          files are unmodified.
+role:     baseline "XKCP opt64" (generic64), the fair optimised software
+          baseline, driven through its SnP API (sw/lib/sha3_sw_xkcp_opt64.c).

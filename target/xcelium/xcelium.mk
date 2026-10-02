@@ -46,8 +46,9 @@ XRUN_TB_SRCS := \
 
 XRUN_DPI_SRCS := $(CHS_ROOT)/target/sim/src/elfloader.cpp
 
-# SPM-linked tests only: the DUT has no DRAM behind the LLC.
-XRUN_ELFS ?= $(wildcard $(CHS_ROOT)/sw/tests/*.spm.elf)
+# SPM-linked tests only: the DUT has no DRAM behind the LLC. Cheshire's tests
+# plus the project's own (sw/, built by ig-sw-newt as part of ig-sw-all).
+XRUN_ELFS ?= $(wildcard $(CHS_ROOT)/sw/tests/*.spm.elf) $(wildcard $(IG_ROOT)/sw/tests/*.spm.elf)
 
 $(XRUN_RAW_F): Bender.yml Bender.lock $(XRUN_VENDOR_MODELS)
 	@mkdir -p $(@D)

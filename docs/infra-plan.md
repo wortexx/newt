@@ -23,9 +23,11 @@ instructions for a cryptographic (SHA) coprocessor on CVA6 / Cheshire, targeting
 | Basilisk WNS ≈ −2.5 ns vs 6 ns target | Design does not close timing in the open flow (known / accepted). **Caveat for any PPA number quoted from the CI lane**: with `grt_repair` skipped (Phase 5), measured WNS at `grt` is **−14.76**, not −2.5 — post-route repair is exactly what closes that gap. Restore a bounded `grt_repair`, or requote the baseline, before using lane output as thesis PPA data. |
 | CVA6 CV-X-IF present but disabled: `CVA6ConfigCvxifEn = 0`; Cheshire ties off `cvxif_req_o` / `cvxif_resp_i`, `cheshire_pkg CvxifEn : 0` | The integration seam already exists; needs enabling + un-tying. |
 
-### ISA integration — open decision (does not block infra)
+### ISA integration — decided 2026-10-01: SHA-3 via CV-X-IF (+ MMIO comparison arm)
 
-Choosing between:
+**Decision:** option 1 with SHA-3/Keccak. The instructions are `shatr` (one Keccak-f round, after arXiv:2508.20653) plus `kclr`/`kxor`/`krd`/`kperm`, on `custom-1` in a CV-X-IF coprocessor, with no CVA6 RTL change. A memory-mapped Keccak accelerator is built as a **comparison arm**, not as a fallback. Its job is the measured ISE-vs-MMIO crossover. `Zknh` was rejected: its speedup (~1.4–2.3×) and its hardware (~2.5k gates, no flip-flops) are too small to give a measurable PPA result on this flow. Change: `openspec/changes/sha3-cvxif-coprocessor/` (design D1). Decision record: [ADR-0003](adr/adr-0003-sha3-via-cvxif.md).
+
+The options as they were framed:
 
 1. **CV-X-IF custom coprocessor** — own opcodes via CVA6's eXtension interface; `.insn`
    inline-asm wrappers (no compiler patch). Needed for SHA-3/Keccak.
@@ -33,11 +35,13 @@ Choosing between:
    `-march=rv64gc_zknh` already in GCC/LLVM. SHA-2 only.
 
 Both modify **CVA6 + Cheshire** and both need the simulator to carry the new instructions,
-so the infra plan is identical. MMIO-accelerator option dropped from the critical path
-(revisit only if 1 and 2 both prove too invasive).
+so the infra plan is identical. The MMIO accelerator was originally dropped from the critical path.
+It returns as the comparison arm above, and it carries no infra consequence beyond the
+`AxiExtNumSlv` port.
 
-**Toolchain consequence:** keep option 2 open → `newt-eda` must ship
-**riscv64 GCC ≥ 13 / binutils ≥ 2.40**.
+**Toolchain consequence:** option 1 needs no toolchain support. The custom opcodes are emitted with
+`.insn r` and assemble on any binutils. The `newt-eda` toolchain (GCC 16.1.0) already exceeds
+the GCC ≥ 13 / binutils ≥ 2.40 floor that keeping `Zknh` open required.
 
 ---
 
@@ -365,15 +369,21 @@ map to `main.bicep` declarations exactly, with no exception left.
 
 ## Phase 7 — Coprocessor scaffolding  *(parallel track, not infra)*
 
-- [ ] `hw/newt_sha_*.sv` + `Bender.yml` entry.
-- [ ] Config flip: `CVA6ConfigCvxifEn=1` (+ Cheshire `CvxifEn`) or `Zknh` ALU path.
-- [ ] Un-tie Cheshire `cvxif_*` port (fork).
-- [ ] `sw/tests/sha_kat_*.c` — NIST CAVP known-answer vectors.
-- [ ] Unit testbench (Phase 2).
-- [ ] Decision needed from `custom-isa-extension.md`: mechanism (1 vs 2) + which hashes
-      (SHA-256 / SHA-512 / SHA-3).
+Executed as `openspec/changes/sha3-cvxif-coprocessor/`; its `tasks.md` is the detailed checklist.
+
+- [ ] `hw/coproc/keccak_*.sv` + `Bender.yml` entry (change tasks 2.x).
+- [x] Config flip, **not** through `CVA6ConfigCvxifEn=1`: that package constant never reaches the
+      core (Phase 15). Instead, Cheshire fork field `Cva6CvxifEn = 1` is set in `hw/iguana_pkg.sv`
+      (change task 1.3; verified by elaboration).
+- [x] Un-tie Cheshire `cvxif_*` port (fork `v0.3.1-newt.2`, `7b53138`; change task 1.1).
+- [ ] `sw/tests/sha3_kat_*.c` — NIST CAVP SHA-3 known-answer vectors (change tasks 3.5/3.6).
+- [ ] Unit testbench (change tasks 2.2/2.4, Verilator at block level).
+- [x] Decision from `custom-isa-extension.md`: mechanism 1 (CV-X-IF), hash SHA-3. See the
+      "ISA integration" section above.
 
 ## Phase 8 — Replace svase+sv2v with `yosys-slang`  *(exploratory, not blocking)*
+
+> **Sequencing (2026-10-02, user decision):** this migration lands **after** the `sha3-cvxif-coprocessor` PPA measurements. That change measures on the current svase/sv2v frontend against the current baseline, so no frontend delta mixes into the coprocessor delta (its design D10).
 
 > **Prerequisite met (2026-09-17).** This needed yosys ≥ 0.67, the first release with the slang
 > frontend built in (the standalone plugin supports only 0.52–0.66). The toolchain is now on
@@ -751,6 +761,68 @@ internet. Change: `openspec/changes/xcelium-sim-lane`. How to use it: `target/xc
     network route dropped.
   - Label-triggered synth runs (`full-synth`) wait for a deallocated runner VM. `synth.yml` has no
     start step, so start the VM (`az vm start`) or wait for `pnr.yml`.
+
+---
+
+## Phase 16 — Odd exit codes hang the JTAG-preload flow *(finding, 2026-10-01, worked around)*
+
+Found on the Xcelium lane (`sha3-cvxif-coprocessor`): a program that returns an **odd** exit
+code is reported `TIMEOUT`, not `FAIL`. Exit probes: `return 0` → `PASS`, `return 2` →
+`FAIL 2`, `return 1` → `TIMEOUT`.
+
+Cause, in upstream Cheshire (v0.3.1):
+
+- crt0's `_exit` writes `(code << 1) | 1` to `SCRATCH[2]` and then `ret`s into its caller.
+  Under JTAG preload, that caller is the bootrom's passive-boot loop.
+- That loop (`hw/bootrom/cheshire_bootrom.c`, `boot_passive`) takes **bit 1** of `SCRATCH[2]`
+  as its "start" flag, which is bit 0 of the exit code. When it sees the flag it clears
+  `SCRATCH[2]` and jumps to the entry in `SCRATCH[1:0]`.
+- So every odd exit code is erased before the VIP's end-of-computation poll (bit 0) sees it,
+  and the run hangs until the simulated-time bound.
+
+This affects every lane that uses the JTAG-preload flow: Xcelium, and Questa through the same
+VIP. It violates the `xcelium-sim` spec's "Failing program reported as FAIL" scenario for odd
+codes; even codes are fine.
+
+- [x] Workaround in the project's own programs: `sw/include/newt_test.h` `newt_exit_code()`
+      returns `2 × failures`, which is always even.
+- [ ] Proper fix through the Cheshire fork (ADR-0002): either have crt0 not return into the
+      bootrom after reporting, or have `boot_passive` use a flag bit that cannot collide with
+      the EOC encoding. Upstream Cheshire tests all `return 0` on success, which is why this
+      never showed there.
+
+---
+
+## Phase 15 — `IG_CVA6_PKG_PARAMS` only partly reaches the core *(finding, 2026-10-01, not acted on)*
+
+Found while enabling CV-X-IF (`sha3-cvxif-coprocessor` task 1.1). CVA6's configuration has two layers:
+
+- **Package-level constants** in `cv64a6_imafdcsclic_sv39_config_pkg.sv`, read by
+  `ariane_pkg`/`riscv_pkg`/the hpdcache params: cache sizes and ways, D-cache type, scoreboard
+  entries, user widths, `XLEN`. `iguana.mk`'s `IG_CVA6_PKG_PARAMS` rewrite **does** change these.
+- **The `cva6_cfg_t` struct** passed as `cva6 #(.CVA6Cfg(...))`: `RVH`, `RVB`, `CvxifEn`, `RVZCB`,
+  PMP and BTB/BHT sizes, …. Cheshire builds this itself in `gen_cva6_cfg()` and overrides the
+  package default, so `IG_CVA6_PKG_PARAMS` has **no effect** on these fields.
+
+**Consequence: the hypervisor extension is ON in the baseline.** `iguana.mk` sets
+`CVA6ConfigHExtEn=0` ("deactivate hypervisor extension (large and not needed)"), but Cheshire
+hard-codes `RVH : 1`. Confirmed by evaluating `cheshire_pkg::gen_cva6_cfg(iguana_pkg::CheshireCfg)`
+in a Verilator probe: `RVH=1 RVB=0 CvxifEn=1` (on the `sha3-cvxif-coprocessor` branch). This is
+**not** a regression from the Cheshire v0.3.1 bump (#48): the pre-bump revision `4a270af` also has
+`RVH : 1`. So `synth-baseline.json` (735,953 cells / 17.77 mm²) and every PPA number so far
+include the H extension.
+
+- [x] Decide whether the thesis baseline should be H-off. **Decided 2026-10-02: keep H on**
+      ([ADR-0004](adr/adr-0004-keep-cva6-hypervisor-extension.md)); newt stays on fork tag
+      `newt.2`, with no H field. Original item:
+      decide whether the thesis baseline should be H-off. If so, add a `Cva6RVH`-style field next
+      to `Cva6CvxifEn` in the Cheshire fork, set it in `iguana_pkg`, and re-run the synth
+      adoption gate. This moves the baseline, so it must land **before** any coprocessor PPA
+      delta is quoted, or the delta must be measured against an H-on baseline and stated as such.
+- [ ] Audit the rest of `IG_CVA6_PKG_PARAMS` for other struct-level no-ops. The current list is all
+      package-level except `CVA6ConfigHExtEn`, but it should be re-checked whenever it is edited.
+- [x] Fix or remove the misleading `CVA6ConfigHExtEn=0` line and its comment in `iguana.mk`.
+      The line stays (harmless), and its comment now says H stays on and points to ADR-0004.
 
 ---
 
