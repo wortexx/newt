@@ -25,6 +25,17 @@ UART, and for every (variant, implementation):
     each software baseline. Totals over lengths beyond the largest measured
     message come from the fit and are marked EXTRAPOLATED.
 
+Rotate share (task 4.5): the core has no bit-manipulation rotates (RVB = 0),
+so a 64-bit rotate costs a shift pair plus a combine (3 instructions; 4 for
+a variable amount, which also negates the shift count). The baselines'
+permutation code is disassembled from the benchmark ELF and those idioms are
+counted statically. Each idiom's static count is weighted by how often its
+code runs per permutation: once in fully unrolled code; 5 x 24 for the theta
+rotate inside a per-column loop and 25 x 24 for the rho rotate inside a
+per-lane loop. The result is divided by the measured instructions per block
+(the minstret fit slope, one permutation per block). The script also reports
+what Zbb's rori/rol would save (2 or 3 instructions per rotate).
+
 Provenance is printed with every report: the bundle MANIFEST (source commit,
 dirty flag, Bender.lock hash, tool versions), sw/tests/BUILD_INFO (compiler
 and flags), and each vendored baseline's REVISION.
@@ -37,6 +48,8 @@ import argparse
 import csv
 import io
 import re
+import shutil
+import subprocess
 import sys
 import tarfile
 from pathlib import Path
@@ -46,6 +59,20 @@ ISE_IMPLS = ["ise-kperm", "ise-shatr"]
 SW_IMPLS = ["sw-rvcrypto", "sw-xkcp-ref64", "sw-xkcp-opt64"]
 VARIANTS = [224, 256, 384, 512]
 RATE = {224: 144, 256: 136, 384: 104, 512: 72}
+
+# Rotate-share model: per baseline, (function, idiom kind, executions of each
+# static idiom per Keccak-f permutation). theta's ROL(C, 1) runs 5 times and
+# rho's table-driven ROL 25 times per round in the looped implementations;
+# XKCP opt64 is fully unrolled (all 24 rounds in one straight-line function).
+ROTATE_MODEL = {
+    "sw-rvcrypto": [("KeccakF1600_StatePermute", "const", 5 * 24),
+                    ("KeccakF1600_StatePermute", "var", 25 * 24)],
+    "sw-xkcp-ref64": [("theta", "const", 5 * 24), ("rho", "var", 25 * 24)],
+    "sw-xkcp-opt64": [("KeccakP1600_plain64_Permute_24rounds", "const", 1)],
+}
+IDIOM_INSTRS = {"const": 3, "var": 4}   # slli+srli+combine; neg+sll+srl+or
+ZBB_SAVES = {"const": 2, "var": 3}      # one rori / rol replaces the idiom
+ROTATES_PER_PERMUTATION = 24 * (5 + 24)  # theta 5 + rho 24 non-zero offsets
 
 RESULT_RE = re.compile(r"RESULT,(\d+),([a-z0-9-]+),(\d+),(.*)$")
 CALIB_RE = re.compile(r"CALIB,(\d+),(\d+)")
@@ -183,6 +210,84 @@ def table_one(fits):
     return rows
 
 
+# --- Rotate share ----------------------------------------------------------------
+
+def disassemble(elf, objdump):
+    """Return {function: [(mnemonic, [operands])]} for the ELF's text."""
+    out = subprocess.run([objdump, "-d", str(elf)], check=True, capture_output=True,
+                         text=True).stdout
+    funcs, cur = {}, None
+    for line in out.splitlines():
+        m = re.match(r"^[0-9a-f]+ <([^>]+)>:", line)
+        if m:
+            cur = funcs.setdefault(m.group(1), [])
+            continue
+        m = re.match(r"\s+[0-9a-f]+:\s+[0-9a-f]+\s+(\S+)\s*(.*)", line)
+        if m and cur is not None:
+            ops = [x.strip() for x in m.group(2).split("#")[0].split(",") if x.strip()]
+            cur.append((m.group(1).removeprefix("c."), ops))
+    return funcs
+
+
+def count_rotate_idioms(ins):
+    """Count constant rotates (slli k / srli 64-k of one source) and variable
+    rotates (sll / srl of one source by k and by neg(k)) in one function."""
+    def src(ops):
+        return ops[1] if len(ops) == 3 else ops[0]
+    taken, const = set(), 0
+    for i, (op, ops) in enumerate(ins):
+        if op not in ("slli", "srli") or i in taken:
+            continue
+        want, k = ("srli" if op == "slli" else "slli"), int(ops[-1], 0)
+        for j in range(i + 1, min(len(ins), i + 48)):
+            oj, aj = ins[j]
+            if j not in taken and oj == want and src(aj) == src(ops) and int(aj[-1], 0) == 64 - k:
+                taken |= {i, j}
+                const += 1
+                break
+            if aj and aj[0] == src(ops):
+                break
+    negs = {ops[0]: ops[1] for op, ops in ins if op in ("neg", "negw") and len(ops) == 2}
+    var = 0
+    for i, (op, ops) in enumerate(ins):
+        if op != "sll" or len(ops) != 3:
+            continue
+        for oj, aj in ins[max(0, i - 8):i + 8]:
+            if oj == "srl" and len(aj) == 3 and aj[1] == ops[1] and negs.get(aj[2]) == ops[2]:
+                var += 1
+                break
+    return {"const": const, "var": var}
+
+
+def rotate_share(fits, elf, objdump):
+    """Rows (impl, rotate instrs/permutation, rotates/permutation, instr/block
+    for SHA3-256, share %, Zbb saving %, static idioms) or an error string."""
+    if not elf.exists():
+        return f"benchmark ELF {elf} not found (build it with make ig-sw-newt)"
+    if not shutil.which(objdump):
+        return f"{objdump} not found"
+    funcs = disassemble(elf, objdump)
+    rows = []
+    for impl, model in ROTATE_MODEL.items():
+        f = fits.get((256, impl))
+        if not f:
+            continue
+        instrs = rotates = saved = 0
+        static = []
+        for func, kind, weight in model:
+            if func not in funcs:
+                return f"{impl}: function {func} not in {elf.name}"
+            n = count_rotate_idioms(funcs[func])[kind]
+            static.append(f"{func}: {n} {kind}")
+            instrs += n * IDIOM_INSTRS[kind] * weight
+            rotates += n * weight
+            saved += n * ZBB_SAVES[kind] * weight
+        per_block = f["instret"][1]
+        rows.append((impl, instrs, rotates, per_block, instrs / per_block * 100.0,
+                     saved / per_block * 100.0, "; ".join(static)))
+    return rows
+
+
 # --- Provenance ------------------------------------------------------------------
 
 def provenance(manifests):
@@ -220,7 +325,7 @@ def write_csv(path, fits):
                             f"{f['one_block_excess']:.1f}"])
 
 
-def markdown(calib, fits, rows, prov):
+def markdown(calib, fits, rows, prov, rot=None):
     out = io.StringIO()
     p = lambda s="": print(s, file=out)  # noqa: E731
     p("# SHA-3 ISE evaluation: cycles and speedups")
@@ -281,6 +386,36 @@ def markdown(calib, fits, rows, prov):
       "instead of an in-pipeline unit. The baselines run on a core without bit-manipulation "
       "rotates (`RVB = 0`); see the rotate-share analysis.")
     p()
+    p("## Rotate share of the software baselines")
+    p()
+    p("The core has no bit-manipulation rotates (`RVB = 0`), so a 64-bit rotate costs a shift "
+      "pair plus a combine (3 instructions), or 4 for a variable amount (`neg`, `sll`, `srl`, "
+      "`or`). Method: the baselines' permutation code is disassembled from the benchmark ELF "
+      "and these idioms are counted statically. Each static idiom is weighted by its executions "
+      "per permutation: once in fully unrolled code, 5 × 24 for theta's `ROL(C, 1)` in a "
+      "per-column loop, 25 × 24 for rho's table-driven rotate in a per-lane loop. The sum is "
+      "divided by the measured instructions per block (the `minstret` fit slope; one "
+      "permutation per block). *Zbb saving* is the share Zbb's `rori`/`rol` would remove "
+      f"(one instruction per rotate). Keccak-f has {ROTATES_PER_PERMUTATION} non-trivial "
+      "rotates per permutation (24 rounds × (5 theta + 24 rho)).")
+    p()
+    if isinstance(rot, str) or rot is None:
+        p(f"Not computed: {rot or 'no ELF given'}.")
+    else:
+        p("| baseline | rotates/perm | rotate instrs/perm | instr/block (SHA3-256) | "
+          "rotate share | Zbb saving | static idioms found |")
+        p("|---|---:|---:|---:|---:|---:|---|")
+        for impl, instrs, rotates, per_block, share, saving, static in rot:
+            p(f"| {impl} | {rotates:,} | {instrs:,} | {per_block:,.0f} | {share:.1f} % | "
+              f"{saving:.1f} % | {static} |")
+        p()
+        p("The looped baselines rotate all 25 lanes in rho, including the offset-0 lane "
+          "(a rotate by 0 that still costs the idiom), hence 720 rather than 696.")
+        p()
+        p("Shares are of dynamic instructions, not cycles: on CVA6 these are single-cycle ALU "
+          "operations, while the baselines' cycles per instruction (~2.4 for opt64) are "
+          "dominated by loads and stores.")
+    p()
     p("## Provenance")
     p()
     p("```")
@@ -296,6 +431,9 @@ def main(argv=None):
     ap.add_argument("inputs", nargs="+", help="results archives or extracted directories")
     ap.add_argument("--out-dir", default=str(REPO / "docs" / "results"))
     ap.add_argument("--name", default="sha3-ise")
+    ap.add_argument("--elf", default=str(REPO / "sw" / "tests" / "sha3_bench.spm.elf"),
+                    help="benchmark ELF for the rotate-share analysis")
+    ap.add_argument("--objdump", default="riscv64-unknown-elf-objdump")
     a = ap.parse_args(argv)
     try:
         logs, manifests = read_inputs(a.inputs)
@@ -307,7 +445,9 @@ def main(argv=None):
     out = Path(a.out_dir)
     out.mkdir(parents=True, exist_ok=True)
     write_csv(out / f"{a.name}.csv", fits)
-    (out / f"{a.name}.md").write_text(markdown(calib, fits, table_one(fits), provenance(manifests)))
+    rot = rotate_share(fits, Path(a.elf), a.objdump)
+    (out / f"{a.name}.md").write_text(markdown(calib, fits, table_one(fits), provenance(manifests),
+                                               rot))
     print(f"sha3_eval: wrote {out / (a.name + '.md')} and {out / (a.name + '.csv')}")
     return 0
 

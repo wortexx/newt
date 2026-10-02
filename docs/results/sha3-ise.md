@@ -89,6 +89,20 @@ Total cycles over the NIST ShortMsg lengths (0..rate bytes) and LongMsg lengths 
 
 Method differences from arXiv:2508.20653: RTL simulation instead of gem5; an ASIC flow (IHP SG13G2) instead of an FPGA; the ISE reached through CV-X-IF instead of an in-pipeline unit. The baselines run on a core without bit-manipulation rotates (`RVB = 0`); see the rotate-share analysis.
 
+## Rotate share of the software baselines
+
+The core has no bit-manipulation rotates (`RVB = 0`), so a 64-bit rotate costs a shift pair plus a combine (3 instructions), or 4 for a variable amount (`neg`, `sll`, `srl`, `or`). Method: the baselines' permutation code is disassembled from the benchmark ELF and these idioms are counted statically. Each static idiom is weighted by its executions per permutation: once in fully unrolled code, 5 × 24 for theta's `ROL(C, 1)` in a per-column loop, 25 × 24 for rho's table-driven rotate in a per-lane loop. The sum is divided by the measured instructions per block (the `minstret` fit slope; one permutation per block). *Zbb saving* is the share Zbb's `rori`/`rol` would remove (one instruction per rotate). Keccak-f has 696 non-trivial rotates per permutation (24 rounds × (5 theta + 24 rho)).
+
+| baseline | rotates/perm | rotate instrs/perm | instr/block (SHA3-256) | rotate share | Zbb saving | static idioms found |
+|---|---:|---:|---:|---:|---:|---|
+| sw-rvcrypto | 720 | 2,760 | 34,501 | 8.0 % | 5.9 % | KeccakF1600_StatePermute: 1 const; KeccakF1600_StatePermute: 1 var |
+| sw-xkcp-ref64 | 720 | 2,760 | 57,005 | 4.8 % | 3.6 % | theta: 1 const; rho: 1 var |
+| sw-xkcp-opt64 | 696 | 2,088 | 7,285 | 28.7 % | 19.1 % | KeccakP1600_plain64_Permute_24rounds: 696 const |
+
+The looped baselines rotate all 25 lanes in rho, including the offset-0 lane (a rotate by 0 that still costs the idiom), hence 720 rather than 696.
+
+Shares are of dynamic instructions, not cycles: on CVA6 these are single-cycle ALU operations, while the baselines' cycles per instruction (~2.4 for opt64) are dominated by loads and stores.
+
 ## Provenance
 
 ```
