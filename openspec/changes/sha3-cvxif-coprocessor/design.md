@@ -152,7 +152,7 @@ There is no AXI manager in the accelerator. Reusing iDMA gives the "accelerator 
 ### D8 — Measurement method
 
 - **Cycles.** `csrr mcycle` and `csrr minstret` wrap each hash call, and an empty-call calibration run is subtracted. Results go out over UART in a fixed `RESULT,<variant>,<impl>,<bytes>,<cycles>,<instret>` line format.
-- **Evaluation script.** `scripts/sha3_eval.py` reads Xcelium results archives. It fits `cycles = a + b·blocks`, then writes CSV plus markdown tables: the speedups shaped like the paper's Table I, the sweep, and the crossover.
+- **Evaluation script.** `scripts/sha3_eval.py` reads Xcelium results archives. It uses a split model: the measured cost for a one-block message, and `cycles = a + b·blocks` fitted on the points with ≥ 2 blocks for longer ones. The one-block point's excess over the line is reported separately (revised 2026-10-02: with the optimised ISE at ~100–240 cycles per block, a fixed one-off cost of the shortest hash, 36–78 cycles, put that point 13–39 % above an otherwise exact line, and a single fit over all points missed the 5 % residual gate). It then writes CSV plus markdown tables: the speedups shaped like the paper's Table I, the sweep, and the crossover.
 - **Simulation budget.** At ~5k cycles/s, baseline runs of 0–4 blocks × 4 variants × 2 baselines take about 1.6 M cycles, roughly 6 minutes.
 - **Crossover.** It is located in two passes. A first fit predicts the crossover length, then a second run measures one length on each side of the prediction, as the spec requires.
 - **Area.**

@@ -9,10 +9,16 @@ Reads Xcelium-lane results archives (or extracted results directories),
 takes the `CALIB` / `RESULT` lines that sw/tests/sha3_bench.spm.c prints over
 UART, and for every (variant, implementation):
 
-  - fits cycles = a + b * blocks (and the same for retired instructions) by
-    least squares, where blocks is the number of Keccak-f permutations the
-    message costs (floor(len / rate) + 1, the last one carrying the padding),
-    and reports the largest residual as a percentage of the measured value;
+  - uses a split model. blocks is the number of Keccak-f permutations the
+    message costs (floor(len / rate) + 1, the last one carrying the padding).
+    A one-block message (len < rate) costs the measured one-block value.
+    Longer messages follow cycles = a + b * blocks (and the same for retired
+    instructions), fitted by least squares on the points with blocks >= 2.
+    The largest residual of that fit is reported as a percentage of the
+    measured value, and so is the one-block point's excess over the line.
+    Reason: once the ISE's per-block cost fell to ~100-200 cycles, a fixed
+    one-off cost of the shortest hash (tens of cycles) put the one-block
+    point visibly above an otherwise exact line through the longer messages;
   - produces a table shaped like arXiv:2508.20653 Table I: total cycles over
     the NIST ShortMsg lengths (0..rate bytes) and over the 100 NIST LongMsg
     lengths (2r+1 + k(r+1) bytes), and the speedup of each ISE back-end over
@@ -118,13 +124,23 @@ def fits_for(points):
     out = {}
     for (variant, impl), pts in sorted(points.items()):
         rate = RATE[variant]
-        xs = [blocks(b, rate) for b, _, _ in pts]
-        out[(variant, impl)] = {
-            "cycles": fit(xs, [c for _, c, _ in pts]),
-            "instret": fit(xs, [i for _, _, i in pts]),
+        multi = [p for p in pts if blocks(p[0], rate) >= 2]
+        single = [p for p in pts if blocks(p[0], rate) == 1]
+        if not single:
+            raise EvalError(f"SHA3-{variant} {impl}: no one-block (len < rate) measurement")
+        xs = [blocks(b, rate) for b, _, _ in multi]
+        f = {
+            "cycles": fit(xs, [c for _, c, _ in multi]),
+            "instret": fit(xs, [i for _, _, i in multi]),
+            "one_block_cycles": sum(c for _, c, _ in single) / len(single),
             "max_measured_bytes": max(b for b, _, _ in pts),
             "points": pts,
         }
+        a, b, _ = f["cycles"]
+        line = a + b
+        f["one_block_excess"] = f["one_block_cycles"] - line
+        f["one_block_excess_pct"] = f["one_block_excess"] / f["one_block_cycles"] * 100.0
+        out[(variant, impl)] = f
     return out
 
 
@@ -138,9 +154,17 @@ def long_lengths(rate):
     return [2 * rate + 1 + k * (rate + 1) for k in range(100)]
 
 
-def total_cycles(f, rate, lengths):
+def model_cycles(f, nbytes, rate):
+    """Split model: measured one-block cost, else the fit on blocks >= 2."""
+    nb = blocks(nbytes, rate)
+    if nb == 1:
+        return f["one_block_cycles"]
     a, b, _ = f["cycles"]
-    total = sum(a + b * blocks(n, rate) for n in lengths)
+    return a + b * nb
+
+
+def total_cycles(f, rate, lengths):
+    total = sum(model_cycles(f, n, rate) for n in lengths)
     extrapolated = max(lengths) > f["max_measured_bytes"]
     return total, extrapolated
 
@@ -186,12 +210,14 @@ def write_csv(path, fits):
     with open(path, "w", newline="") as fh:
         w = csv.writer(fh)
         w.writerow(["variant", "impl", "bytes", "blocks", "cycles", "instret",
-                    "fit_a_cycles", "fit_b_cycles_per_block", "fit_max_residual_pct"])
+                    "fit_a_cycles", "fit_b_cycles_per_block", "fit_max_residual_pct",
+                    "one_block_excess_cycles"])
         for (variant, impl), f in sorted(fits.items()):
             a, b, r = f["cycles"]
             for nb, c, i in f["points"]:
                 w.writerow([variant, impl, nb, blocks(nb, RATE[variant]), c, i,
-                            f"{a:.1f}", f"{b:.1f}", f"{r:.3f}"])
+                            f"{a:.1f}", f"{b:.1f}", f"{r:.3f}",
+                            f"{f['one_block_excess']:.1f}"])
 
 
 def markdown(calib, fits, rows, prov):
@@ -206,19 +232,28 @@ def markdown(calib, fits, rows, prov):
     if calib:
         p(f"Counter-read overhead subtracted: {calib[0]} cycles, {calib[1]} instructions.")
         p()
-    p("## Per-block cost (least-squares fit `cycles = a + b * blocks`)")
+    p("## Per-block cost (split model)")
     p()
-    p("| SHA3 | impl | a (cycles) | b (cycles/block) | instr/block | max residual |")
-    p("|---|---|---:|---:|---:|---:|")
+    p("A one-block message (`len < rate`) costs its measured value. Longer messages follow "
+      "`cycles = a + b * blocks`, least-squares fitted on the points with `blocks >= 2`; "
+      "*max residual* is that fit's largest deviation from a measured point. *1-block excess* "
+      "is how far the measured one-block cost sits above the line (a one-off cost of the "
+      "shortest hash that the per-block slope does not carry).")
+    p()
+    p("| SHA3 | impl | a (cycles) | b (cycles/block) | instr/block | max residual | "
+      "1-block (cycles) | 1-block excess |")
+    p("|---|---|---:|---:|---:|---:|---:|---:|")
     for (variant, impl), f in sorted(fits.items()):
         a, b, r = f["cycles"]
-        p(f"| {variant} | {impl} | {a:,.0f} | {b:,.0f} | {f['instret'][1]:,.0f} | {r:.2f} % |")
+        p(f"| {variant} | {impl} | {a:,.0f} | {b:,.0f} | {f['instret'][1]:,.0f} | {r:.2f} % | "
+          f"{f['one_block_cycles']:,.0f} | {f['one_block_excess']:+,.0f} "
+          f"({f['one_block_excess_pct']:+.1f} %) |")
     p()
     p("## Table I (arXiv:2508.20653 form)")
     p()
     p("Total cycles over the NIST ShortMsg lengths (0..rate bytes) and LongMsg lengths "
-      "(100 messages, 2r+1 + k(r+1) bytes). Cells marked *EXTRAPOLATED* exceed the largest "
-      "measured message and come from the fit.")
+      "(100 messages, 2r+1 + k(r+1) bytes), from the split model. Cells marked "
+      "*EXTRAPOLATED* exceed the largest measured message and come from the fit.")
     p()
     p("| SHA3 | impl | short (cycles) | long (cycles) |")
     p("|---|---|---:|---:|")

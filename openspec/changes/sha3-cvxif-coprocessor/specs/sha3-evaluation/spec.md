@@ -31,12 +31,12 @@ The software baselines SHALL be the RISC-V reference SHA-3 implementation and th
 
 ### Requirement: Cycle and instruction counts from RTL simulation
 
-Cycle and retired-instruction counts SHALL be measured on the RTL of the SoC, not on an architectural model. They SHALL be read from the `mcycle` and `minstret` counters immediately around the hashing call, with the counter-read overhead measured and subtracted. For each variant and implementation, counts SHALL be measured for at least four message lengths spanning 0 to at least 4 full blocks. A linear model `cycles = a + b * blocks` SHALL be fitted and reported with its residuals. Any figure for longer messages, including figures matched to the paper's long inputs, SHALL be labelled as extrapolated from that fit.
+Cycle and retired-instruction counts SHALL be measured on the RTL of the SoC, not on an architectural model. They SHALL be read from the `mcycle` and `minstret` counters immediately around the hashing call, with the counter-read overhead measured and subtracted. For each variant and implementation, counts SHALL be measured for at least four message lengths spanning 0 to at least 4 full blocks. Costs SHALL follow a split model: a one-block message (shorter than the rate) costs its measured value, and longer messages follow a linear model `cycles = a + b * blocks` fitted on the measurements with at least two blocks. The fit SHALL be reported with its residuals, and the measured one-block cost with its deviation from the fitted line. Any figure for longer messages, including figures matched to the paper's long inputs, SHALL be labelled as extrapolated from that fit.
 
 #### Scenario: Per-block cost is reported with its fit quality
 
 - **WHEN** the benchmark runs for SHA3-256 on the instruction extension
-- **THEN** the results contain the measured cycles and instructions per message length, the fitted `a` and `b`, and the largest residual as a percentage of the measured value
+- **THEN** the results contain the measured cycles and instructions per message length, the fitted `a` and `b`, the largest residual as a percentage of the measured value, and the one-block cost with its deviation from the fitted line
 
 #### Scenario: Extrapolated values are marked
 
