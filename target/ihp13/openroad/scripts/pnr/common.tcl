@@ -33,6 +33,20 @@ set openroad_dir  [file dirname $scripts_dir]
 set step_by_step_debug 0
 set threads 32
 
+# Global-placement target density, used by both passes in gpl.tcl. It must
+# stay above the utilization the design reaches entering dpl (DPL-0009,
+# which includes gpl's repair buffers). At 0.65 the yosys v0.69 netlist
+# (66.1 %) overflowed it, and the negotiation legalizer then timed out in
+# dpl and cts (docs/infra-plan.md Phase 11, 2026-10-02). 0.72 covers the
+# SHA-3 coprocessor's ~69.5 % with margin. PNR_GPL_DENSITY overrides it for
+# an experiment without a commit (openspec/changes/raise-gpl-density-target
+# design D1); run_pnr.sh checks the headroom after dpl (D2).
+if { [info exists ::env(PNR_GPL_DENSITY)] && $::env(PNR_GPL_DENSITY) ne "" } {
+    set pnr_gpl_density $::env(PNR_GPL_DENSITY)
+} else {
+    set pnr_gpl_density 0.72
+}
+
 # OpenROAD's per-process default is 1 thread (`threads_ = 1` in
 # OpenRoad.cc), and set_thread_count is what feeds STA and the global
 # router their thread budgets. chip.tcl set this once globally (line 93)

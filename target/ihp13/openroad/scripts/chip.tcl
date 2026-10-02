@@ -92,14 +92,18 @@ save_checkpoint ${proj_name}.pre_place
 ###############################################################################
 set_thread_count $threads
 
-set GPL_ARGS {  -density 0.65 
+# Target density 0.72, not 0.65: the design's utilization entering dpl now
+# exceeds 0.65 (docs/infra-plan.md Phase 11). The CI lane's staged flow takes
+# the value from scripts/pnr/common.tcl (pnr_gpl_density, PNR_GPL_DENSITY);
+# keep the two in step.
+set GPL_ARGS {  -density 0.72 
                 -routability_driven
                 -routability_check_overflow 0.40
                 -routability_inflation_ratio_coef 1.2
                 -routability_max_inflation_ratio 1.2
                 -max_phi_coef 1.04 }
 
-set GPL2_ARGS {  -density 0.65
+set GPL2_ARGS {  -density 0.72
                 -routability_driven
                 -routability_check_overflow 0.60
                 -routability_inflation_ratio_coef 1.2

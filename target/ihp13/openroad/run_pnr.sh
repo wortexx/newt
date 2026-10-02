@@ -39,6 +39,11 @@
 #                           cheap. Does not change the gate: a stop before
 #                           PNR_GATE still exits non-zero, since the gate
 #                           was never reached.
+#   PNR_GPL_DENSITY        Passed through to gpl.tcl: the global-placement
+#                           target density for both passes. Empty or unset:
+#                           pnr_gpl_density's default in scripts/pnr/common.tcl.
+#                           Also the target the post-dpl headroom check
+#                           compares utilization against.
 #   PNR_DRY_RUN             If "1", print the planned per-stage commands
 #                           (in order, honoring resume-skip) and exit 0
 #                           without invoking OpenROAD at all - the cheap
@@ -171,6 +176,45 @@ run_stage_once() {
     return "$rc"
 }
 
+# Post-dpl density headroom check (specs/pnr-flow "Placement density target
+# leaves headroom over the design's utilization"; raise-gpl-density-target
+# design D2). Compares DPL-0009's utilization, which dpl prints before it
+# legalizes (so it is there even if the stage later times out), with the gpl
+# target density. Warns when utilization has reached the target - the
+# condition that made the negotiation legalizer time out in dpl/cts
+# (docs/infra-plan.md Phase 11). Never changes the exit status.
+#
+# The target comes from gpl.tcl's own report line when this run placed;
+# else PNR_GPL_DENSITY; else pnr_gpl_density's default in common.tcl - so
+# the value lives in one place.
+gpl_density_target() {
+    local d=""
+    [ -f "${REPORTS}/pnr_gpl.log" ] && \
+        d="$(sed -n 's/.*Global placement target density: \([0-9.]*\).*/\1/p' \
+            "${REPORTS}/pnr_gpl.log" | tail -1)"
+    [ -n "$d" ] || d="${PNR_GPL_DENSITY:-}"
+    [ -n "$d" ] || d="$(sed -n 's/^ *set pnr_gpl_density \([0-9.]*\)$/\1/p' \
+            "${PNR_SCRIPTS_DIR}/common.tcl" | tail -1)"
+    echo "$d"
+}
+
+check_density_headroom() {
+    local util target
+    util="$(sed -n 's/.*DPL-0009\] Utilization: *\([0-9.]*\)%.*/\1/p' \
+        "${REPORTS}/pnr_dpl.log" 2>/dev/null | head -1)"
+    target="$(gpl_density_target)"
+    if [ -z "$util" ] || [ -z "$target" ]; then
+        echo "Density headroom: not checked (utilization '${util}', target '${target}')."
+        return 0
+    fi
+    local msg="dpl utilization ${util}% (DPL-0009: (movable + fixed) / core area, a proxy for gpl's per-bin density) vs gpl target density ${target}"
+    if awk -v u="$util" -v t="$target" 'BEGIN { exit !(u / 100 >= t) }'; then
+        echo "::warning::Density headroom exhausted: ${msg}. Expect slow legalization in dpl/cts; raise the target (PNR_GPL_DENSITY / scripts/pnr/common.tcl) - docs/infra-plan.md Phase 11."
+    else
+        echo "Density headroom: ${msg} - ok."
+    fi
+}
+
 past_gate=0
 overall_rc=0
 best_effort_broken=0
@@ -228,6 +272,8 @@ for stage in "${STAGES[@]}"; do
             log_status "$stage" retrying "attempt=${attempt} exit=${rc}"
         fi
     done
+
+    [ "$stage" = "dpl" ] && check_density_headroom
 
     if [ "$rc" -ne 0 ]; then
         echo "::error::stage '${stage}' failed after ${attempt} attempt(s), exit ${rc}"

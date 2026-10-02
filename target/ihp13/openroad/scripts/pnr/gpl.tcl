@@ -22,15 +22,16 @@ set err [catch {
     set clock_nets [pnr_set_clock_dont_touch]
     pnr_set_dont_use
 
-    set GPL_ARGS {  -density 0.65
-                    -routability_driven
+    utl::report "Global placement target density: $pnr_gpl_density"
+
+    # -density is passed at each call: $pnr_gpl_density (common.tcl).
+    set GPL_ARGS {  -routability_driven
                     -routability_check_overflow 0.40
                     -routability_inflation_ratio_coef 1.2
                     -routability_max_inflation_ratio 1.2
                     -max_phi_coef 1.04 }
 
-    set GPL2_ARGS {  -density 0.65
-                    -routability_driven
+    set GPL2_ARGS { -routability_driven
                     -routability_check_overflow 0.60
                     -routability_inflation_ratio_coef 1.2
                     -routability_max_inflation_ratio 1.2
@@ -39,7 +40,7 @@ set err [catch {
 
     # rough placement to get parasitics for steiner-tree so we can run repair_timing
     utl::report "Global Placement (1)"
-    global_placement {*}$GPL_ARGS
+    global_placement -density $pnr_gpl_density {*}$GPL_ARGS
     report_metrics "${proj_name}.gpl"
     report_image "${proj_name}.gpl" true true
     save_checkpoint ${proj_name}.gpl
@@ -56,7 +57,7 @@ set err [catch {
 
     # actual global placement
     utl::report "Global Placement (2)"
-    global_placement {*}$GPL2_ARGS
+    global_placement -density $pnr_gpl_density {*}$GPL2_ARGS
     report_metrics "${proj_name}.gpl2"
     report_image "${proj_name}.gpl2" true true
     save_checkpoint ${proj_name}.gpl2

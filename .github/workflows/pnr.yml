@@ -38,6 +38,10 @@ on:
         description: 'Stage name after which the driver stops (empty = run through the full flow; does not change the grt success gate)'
         required: false
         default: ''
+      gpl_density:
+        description: 'Global-placement target density for both gpl passes (empty = the default in scripts/pnr/common.tcl)'
+        required: false
+        default: ''
   push:
     tags: ['**']
 
@@ -547,7 +551,11 @@ jobs:
         # what "success" means for a run whose artifacts and status log
         # look like any other - a slice that stops before the gate still
         # exits non-zero, which is the honest verdict.
-        run: PNR_TIMEOUT_GRT=57600 PNR_TIMEOUT_GRT_REPAIR=57600 PNR_SKIP_GRT_REPAIR=1 PNR_SKIP_ANTENNA_REPAIR=1 PNR_DRT_END_ITER=8 PNR_STOP_AFTER=${{ github.event.inputs.stop_after || '' }} make -C target/ihp13/openroad -f openroad.mk run-pnr PROJ_NAME=basilisk
+        #
+        # PNR_GPL_DENSITY: the gpl_density dispatch input, empty by default
+        # (gpl.tcl then uses common.tcl's value), so trying another density
+        # costs a dispatch, not a commit (raise-gpl-density-target D1).
+        run: PNR_GPL_DENSITY=${{ github.event.inputs.gpl_density || '' }} PNR_TIMEOUT_GRT=57600 PNR_TIMEOUT_GRT_REPAIR=57600 PNR_SKIP_GRT_REPAIR=1 PNR_SKIP_ANTENNA_REPAIR=1 PNR_DRT_END_ITER=8 PNR_STOP_AFTER=${{ github.event.inputs.stop_after || '' }} make -C target/ihp13/openroad -f openroad.mk run-pnr PROJ_NAME=basilisk
 
       # Move the checkpoints out of the shared workspace before this job
       # releases the runner. This is the whole fix for the collision that

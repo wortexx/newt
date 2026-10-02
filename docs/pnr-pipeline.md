@@ -32,10 +32,10 @@ independent of this workflow — the backstop for a `stop` job that never ran.
 
 ### Manual dispatch inputs
 
-`workflow_dispatch` accepts three optional inputs, all empty by default
-(`resume_from_run`, `resume_exclude`, `stop_after` — matching `pnr.yml`'s
-`inputs:` keys exactly). With all three empty, a dispatched run behaves
-exactly like a scheduled run:
+`workflow_dispatch` accepts four optional inputs, all empty by default
+(`resume_from_run`, `resume_exclude`, `stop_after`, `gpl_density` — matching
+`pnr.yml`'s `inputs:` keys exactly). With all four empty, a dispatched run
+behaves exactly like a scheduled run:
 
 - `resume_from_run` — a previous run's ID whose checkpoints to restore
   before P&R starts (feeds `restore-checkpoints`, above). The `pnr` job's
@@ -50,6 +50,12 @@ exactly like a scheduled run:
   `PNR_STOP_AFTER`. Does not change the gate (`PNR_GATE`, fixed at `grt`
   and not exposed as an input): a dispatch that stops before the gate
   still exits non-zero.
+- `gpl_density` — the global-placement target density for both `gpl`
+  passes, e.g. `0.70`. Feeds `PNR_GPL_DENSITY`. Empty means
+  `pnr_gpl_density`'s default in `scripts/pnr/common.tcl` (0.72). It lets a
+  density experiment run without a commit. Combined with `resume_from_run`,
+  exclude `gpl` and every later checkpoint, or the restored placement is
+  reused and the value has no effect.
 
 Worked example — re-running just `grt_repair` against a previous full run's
 checkpoints, stopping once it completes (design D1's "Run B"):
@@ -83,8 +89,8 @@ doing anything else.
 |---|---|---|---|---|
 | 1 | `floorplan` | `power_grid` | **Gate** | Reads the synthesized netlist, links the design, reads SDC, runs `check_setup`/`report_checks` sanity checks, creates the floorplan (ring layout, 2-way or 4-way L1 cache depending on `L1CACHE_WAYS`), then builds the power grid (stripes/rings). Only stage that reads the netlist directly — everything after loads a checkpoint. |
 | 2 | `pre_place` | `pre_place` | **Gate** | Repairs tie-cell fanout, then `remove_buffers`. Deliberately its own tiny stage: `remove_buffers` is known to segfault roughly 1 run in 3, and isolating it means a retry only redoes this cheap step, not floorplan/power-grid. The only stage with a configured retry (1). |
-| 3 | `gpl` | `gpl2` | **Gate** | Global placement, two passes. Pass 1 (routability-driven) gives rough parasitics; `repair_design`/`repair_timing -repair_tns 70` clean up setup violations on that rough placement; pass 2 (routability + timing-driven) is the placement that actually carries forward. Only stage besides `drt` that calls `set_thread_count` (up to 32 threads, capped by the VM's core count). |
-| 4 | `dpl` | `dpl` | **Gate** | Detailed (legalized) placement + mirror optimization. Single-threaded. |
+| 3 | `gpl` | `gpl2` | **Gate** | Global placement, two passes. Pass 1 (routability-driven) gives rough parasitics; `repair_design`/`repair_timing -repair_tns 70` clean up setup violations on that rough placement; pass 2 (routability + timing-driven) is the placement that actually carries forward. Both passes use target density `pnr_gpl_density` (`scripts/pnr/common.tcl`, default 0.72; `PNR_GPL_DENSITY` / the `gpl_density` input override it), which `gpl.tcl` logs as "Global placement target density". Only stage besides `drt` that calls `set_thread_count` (up to 32 threads, capped by the VM's core count). |
+| 4 | `dpl` | `dpl` | **Gate** | Detailed (legalized) placement + mirror optimization. Single-threaded. Afterwards `run_pnr.sh` checks the density headroom (below). |
 | 5 | `cts` | `cts` | **Gate** | Clock tree synthesis. Lifts clock dont-touch (only stage that does — clock nets are protected everywhere else), repairs clock inverters and post-CTS wire length, legalizes, then `repair_timing -setup -repair_tns 90` to fix the setup violations CTS itself introduces. `check_placement` is caught/non-fatal here (thousands of buffer-overlap warnings after repair are diagnostic-only, don't block progress). |
 | 6 | `grt` | `grt` | **Gate — the actual gate** (`PNR_GATE` default) | Global route: `global_route -congestion_iterations 14 -allow_congestion -verbose`. This is the stage the whole flow is judged on — `run_pnr.sh` exits non-zero if this fails, regardless of the best-effort stages after it. The long pole by far: single-threaded, congestion-bound at ~63–65% utilization. `-congestion_iterations` was cut from `chip.tcl`'s original 80, to 20, to 14 across three real timeout failures — the last cut wasn't about average per-iteration cost but a specific finding: iterations 1–14 complete trivially, then iteration 15 itself triggers a clock-net NDR-relaxation cascade with no observed sign of ever terminating (10+ hours, no completion). See Notes. |
 | 7 | `grt_repair` | `grt_repaired` | Best-effort | Post-route timing repair using global-route-based parasitics: buffer insertion, incremental global route, `repair_timing -repair_tns 20 -max_buffer_percent 15` (bounded down from chip.tcl's original 100 — that looped effectively forever on this design). `PNR_SKIP_GRT_REPAIR=1` skips the work but still re-saves the checkpoint under the uniform name `drt.tcl` expects. **Currently skipped in `pnr.yml`** — even with its `global_route` calls bounded the same way `grt.tcl`'s are, real data (`pnr-bringup-6`) shows it still doesn't converge within 16h (see Notes); skipping lets `drt`/`final` actually run and produce a DEF while grt_repair's own timeout/tuning is revisited separately. |
@@ -99,6 +105,20 @@ global route"). Stages 7–9 run regardless and record their outcome in
 `grt_repair`/`drt`/`final` doesn't fail CI. This matches the project's
 accepted reality that clean routing on this design is a stretch goal, not a
 requirement.
+
+**Density headroom check** (`run_pnr.sh`, after `dpl`, whether `dpl` passed
+or not). It reads `DPL-0009` "Utilization" from `pnr_dpl.log`, which `dpl`
+prints before it legalizes, so the value is there even when the stage times
+out. It compares that with the `gpl` target density. The target comes from
+`gpl.tcl`'s "Global placement target density" line when the run placed;
+otherwise from `PNR_GPL_DENSITY`, then `pnr_gpl_density`'s default in
+`common.tcl`. It prints one line with both values. When utilization is at or
+above the target, it emits a `::warning::` ("Density headroom exhausted")
+instead. `DPL-0009` is (movable + fixed) / core area, a proxy for `gpl`'s
+per-bin density, and the message says so. The check never changes the exit
+status (`specs/pnr-flow`). Why it exists: at 0.65 the yosys v0.69 netlist
+entered `dpl` at 66.1 %, and the negotiation legalizer then timed out in
+`dpl` and `cts` (`docs/infra-plan.md` Phase 11).
 
 **Per-stage timeouts** (`run_pnr.sh`, override via `PNR_TIMEOUT_<STAGE>` or
 blanket `PNR_STAGE_TIMEOUT`): `floorplan` 1h, `pre_place` 30m, `gpl` 4h,

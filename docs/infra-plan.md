@@ -551,6 +551,45 @@ Whoever picks this phase up should start by checking `cts.tcl`'s report for
 congestion/setup-violation counts against the pre-upgrade baseline before assuming it shares
 `drt`'s root cause. Recorded, not investigated, per the user's decision when this surfaced.
 
+**2026-10-02 diagnosis: the design now overflows the `gpl` density target.** Investigated from
+the `pnr-reports` artifacts of runs `34938462965` (09-15, `7dfc599`, pre-upgrade, reached `grt`),
+`35390510737` (09-19, `cts` timeout) and `36188933699` (09-26, `599d837`, `dpl` timeout at its
+2h limit). The two failed runs start `dpl` from an identical state (same netlist); one squeezed
+through in 1h45 and the other did not, so the lane is on a knife edge. Not a `cts`-specific
+regression: both timeouts are the **negotiation legalizer** (`DPL-1102`) grinding through
+overlaps, in `dpl` and again inside `cts` after clock buffering.
+
+| | 09-15 (ok) | 09-19 / 09-26 (failed) |
+|---|---:|---:|
+| movable area before `gpl` (`GPL-0036`) | 9.89 mm² | 10.42 mm² (+5.4 %) |
+| utilization entering `dpl` (`DPL-0009`) | 62.9 % | **66.1 %** |
+| illegal cells at legalizer iteration 0 | 82,811 | 203,229 (2.5×) |
+| `dpl` runtime (limit 2h) | 1h28 | 1h45 / >2h |
+| legalization inside `cts` | 1h19 | 3h09 (then the 4h `cts` limit) |
+| HPWL after `cts` legalization | 166 M µm | 215 M µm (+29 %) |
+
+Cause: `chip.tcl` places with `-density 0.65` (`GPL_ARGS`, `GPL2_ARGS`). The v0.69 netlist plus
+the buffers `repair_design`/`repair_timing` add during `gpl` lift real utilization from just
+under that target to just over it. `gpl` cannot spread cells below the density the design
+needs: routability mode nudges the target only to ~0.669. So `dpl` and `cts` inherit far more
+overlap. The SHA-3 coprocessor (`sha3-cvxif-coprocessor` task 5.3: +0.84 mm²) would push
+utilization to ~69.5 %, so P&R of that branch would fail the same way. This, not `drt`'s
+congestion, is now the first blocker. The thesis P&R numbers only need the flow to reach
+`grt` (see the framing item below).
+
+- [ ] **Raise the `gpl` density target above real utilization** (next action, 2026-10-02):
+      `-density 0.65` → ~0.72 in both `GPL_ARGS` and `GPL2_ARGS`, enough to cover the
+      coprocessor's ~69.5 %. Run it as its own change on `main`. Resume from the
+      floorplan/`pre_place` checkpoint if the lane allows; otherwise run the full flow. Compare
+      against run `34938462965`: `DPL-0009` utilization, illegal cells at legalizer
+      iteration 0, `dpl` and `cts` runtimes, HPWL, `grt` congestion, and WNS. Success is
+      reaching `grt` within the existing stage timeouts on current `main`, giving the clean
+      pre-coprocessor P&R reference that the SHA-3 change's task 5.4 is measured against. This
+      works against the "lower `gpl` density" lever below: denser placement can worsen the
+      `grt`/`drt` congestion. So check `grt`'s congestion report against the 101.17 %
+      demand / 115.27 % Metal3 figures. If congestion gets materially worse, fall back to
+      raising only the `dpl`/`cts` timeouts (2h → 4h, 4h → 8h), which accepts the HPWL loss.
+
 Candidate levers, roughly cheapest first — none yet tried:
 
 - [ ] **Relax our own layer adjustments.** `pnr_apply_routing_layers` removes 30% of M2/M3
@@ -562,7 +601,9 @@ Candidate levers, roughly cheapest first — none yet tried:
       to deal with". Not a straight revert: iterations cost ~25 min each (80 ≈ 20–33h) and
       iteration 15 was separately observed entering an NDR-relaxation cascade that never
       terminated.
-- [ ] **Lower `gpl` density** from `-density 0.65`, trading area for routability.
+- [ ] **Lower `gpl` density** from `-density 0.65`, trading area for routability. *(Since
+      2026-10-02 this is constrained from the other side: real utilization is already above
+      0.65, see the diagnosis above. Lowering the target only helps with a larger core area.)*
 - [ ] **Floorplan changes** — largest lift, last resort.
 - [ ] **First, settle the framing question**: does the thesis's PPA comparison for the SHA
       extension actually need a *detail-routed* DEF, or do area/timing/power after CTS and
