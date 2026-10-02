@@ -46,6 +46,7 @@ sources:
       - hw/coproc/keccak_pkg.sv
       - hw/coproc/keccak_round.sv
       - hw/coproc/keccak_cvxif.sv
+      - hw/coproc/keccak_mmio.sv
       - hw/iguana_pkg.sv
       - hw/iguana_soc.sv
       - hw/iguana_chip.sv

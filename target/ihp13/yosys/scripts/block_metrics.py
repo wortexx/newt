@@ -72,10 +72,15 @@ def main(argv=None):
         "clock_period_ns": a.period_ns,
         "worst_slack_ns": slack,
         "critical_path_ns": arrival,
-        "kperm_cycles": 24 // a.rounds_per_cycle + 1,
         "corner": "typ_1p20V_25C",
         "stage": "block synthesis (yosys + OpenSTA, no placement)",
     }
+    # Permutation latency: keccak_cvxif's kperm instruction (rounds plus the
+    # registered result); keccak_mmio's START-to-DONE (rounds only).
+    if a.block == "keccak_cvxif":
+        record["kperm_cycles"] = 24 // a.rounds_per_cycle + 1
+    else:
+        record["perm_cycles"] = 24 // a.rounds_per_cycle
     Path(a.out).write_text(json.dumps(record, indent=2) + "\n")
     print(json.dumps(record, indent=2))
     if problems or structural:

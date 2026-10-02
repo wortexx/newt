@@ -30,7 +30,8 @@ COPROC_VLT_FLAGS = --cc --exe --build -Wall -Wno-fatal -O2 --assert \
 COPROC_ROUNDS_PER_CYCLE := 1 2 3 4 6
 
 # Per test: TOP, SRCS, TB (C++ harness), FLAGS (extra Verilator flags).
-COPROC_UNIT_TESTS := keccak_round $(foreach r,$(COPROC_ROUNDS_PER_CYCLE),keccak_cvxif_r$(r))
+COPROC_UNIT_TESTS := keccak_round $(foreach r,$(COPROC_ROUNDS_PER_CYCLE),keccak_cvxif_r$(r)) \
+                     $(foreach r,$(COPROC_ROUNDS_PER_CYCLE),keccak_mmio_r$(r))
 
 COPROC_TOP_keccak_round   := keccak_round
 COPROC_SRCS_keccak_round   = $(COPROC_KECCAK_SRCS)
@@ -44,6 +45,23 @@ COPROC_TB_keccak_cvxif_r$(1)    := $(COPROC_TB)/tb_keccak_cvxif.cpp
 COPROC_FLAGS_keccak_cvxif_r$(1) := -GRoundsPerCycle=$(1) -CFLAGS -DROUNDS_PER_CYCLE=$(1)
 endef
 $(foreach r,$(COPROC_ROUNDS_PER_CYCLE),$(eval $(call coproc_cvxif_test,$(r))))
+
+# keccak_mmio sits behind axi_to_detailed_mem: the packages are listed, and
+# the axi / common_cells modules it instantiates are found by file name (-y).
+COPROC_AXI_DIR     = $(shell $(BENDER) path axi)
+COPROC_MMIO_PKGS   = $(COPROC_CC_DIR)/src/cf_math_pkg.sv $(COPROC_AXI_DIR)/src/axi_pkg.sv
+COPROC_MMIO_SEARCH = -y $(COPROC_AXI_DIR)/src -y $(COPROC_CC_DIR)/src +libext+.sv \
+                     +incdir+$(COPROC_AXI_DIR)/include
+
+define coproc_mmio_test
+COPROC_TOP_keccak_mmio_r$(1)   := keccak_mmio_tb_top
+COPROC_SRCS_keccak_mmio_r$(1)   = $$(COPROC_MMIO_PKGS) $$(COPROC_KECCAK_SRCS) \
+                                  $(COPROC_DIR)/keccak_mmio.sv $(COPROC_TB)/keccak_mmio_tb_top.sv
+COPROC_TB_keccak_mmio_r$(1)    := $(COPROC_TB)/tb_keccak_mmio.cpp
+COPROC_FLAGS_keccak_mmio_r$(1) := -GRoundsPerCycle=$(1) -CFLAGS -DROUNDS_PER_CYCLE=$(1) \
+                                  $$(COPROC_MMIO_SEARCH)
+endef
+$(foreach r,$(COPROC_ROUNDS_PER_CYCLE),$(eval $(call coproc_mmio_test,$(r))))
 
 # One build rule per test: build/<test>/Vtb from its RTL and harness.
 define coproc_unit_rule

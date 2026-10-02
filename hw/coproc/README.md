@@ -12,6 +12,7 @@ microarchitecture is design D2–D5.
 | `keccak_pkg.sv` | Lane/state types and the 24 FIPS 202 round constants |
 | `keccak_round.sv` | One combinational Keccak-f[1600] round (θ ρ π χ ι), round constant as an input |
 | `keccak_cvxif.sv` | The CV-X-IF coprocessor: 1600-bit state, in-order issue queue, FSM, `RoundsPerCycle` chained rounds |
+| `keccak_mmio.sv` | The memory-mapped accelerator (comparison arm): an AXI subordinate behind `axi_to_detailed_mem`, same round datapath |
 | `tb/` | Verilator unit testbenches and the independent C++ reference (`keccak_ref.h`) |
 | `coproc.mk` | `make ig-coproc-unit`: build and run every unit testbench (the CI `sim-unit` job) |
 
@@ -127,3 +128,47 @@ remains open for a **synchronous exception of an older instruction**, for exampl
 fault detected after a younger coprocessor instruction was issued. The test does not
 exercise that case. The constraint above is therefore kept as stated. Relaxing its interrupt
 half would be a spec change backed by this measurement and the decoder argument.
+
+## MMIO accelerator (comparison arm)
+
+`keccak_mmio` computes the same Keccak-f[1600] as the coprocessor, reached
+over the bus instead of the instruction set. It is the comparison arm of
+design D6 and spec `keccak-mmio-accelerator`. It is an AXI subordinate on
+Cheshire's external AXI port (`CheshireCfg.AxiExtNumSlv = 1`), behind
+`axi_to_detailed_mem`, and has no AXI manager of its own. Its round datapath
+is the coprocessor's: `iguana_pkg::KeccakRoundsPerCycle` chained
+`keccak_round` instances. The two arms therefore differ only in how they are
+reached, and each has its own independent state.
+
+**Base address `0x5000_0000`**, 4 KiB (`iguana_pkg::AxiOutKeccakBase`). The
+window sits just above the hyperbus configuration window
+`[0x4000_0000, 0x5000_0000)`, inside the external non-CIE range
+`[0x4000_0000, 0x8000_0000)`. CVA6 therefore accesses it uncached and
+non-idempotent, as MMIO needs.
+
+| Offset | Register | Access | Behaviour |
+|---|---|---|---|
+| `0x000` | `CTRL` | W | bit 0 `CLEAR`: state := 0, `DONE` := 0. bit 1 `START`: run the full 24-round permutation, `DONE` := 0. bits 3:2 `RATE`: absorb lanes 18 / 17 / 13 / 9 for SHA3-224 / 256 / 384 / 512 (reset: SHA3-256). `CLEAR` and `START` together act as `CLEAR`, then `START`. |
+| `0x000` | `CTRL` | R | bits 3:2 `RATE`, all other bits 0 |
+| `0x008` | `STATUS` | R | bit 0 `BUSY` (permutation running), bit 1 `DONE` (a permutation finished since the last `CLEAR`/`START`) |
+| `0x100 + 8·i` | `ABSORB[i]` | W | lane *i* ^= data, for *i* below the rate's lane count. Byte strobes select the bytes, so narrow stores reach their 64-bit word. |
+| `0x200 + 8·i` | `STATE[i]` | R | lane *i*, *i* < 25 (the digest is lanes 0…) |
+
+Every other offset or direction, including an absorb lane past the rate, an
+absorb read, and a `STATUS` or `STATE` write, completes with **`SLVERR`** and
+changes nothing.
+
+**While `BUSY`, writes and `STATE` reads are held**: the memory grant is
+withheld until the permutation ends, and then they apply in order. Software
+and the iDMA therefore need no flow control of their own, and `STATUS` stays
+readable for polling. A permutation takes `24 / RoundsPerCycle` cycles. The
+accelerator has no interrupt; completion is polled.
+
+**Driver modes** (`sw/lib/sha3.c`):
+
+- **CPU:** software stores each rate block's lanes into `ABSORB`, writes
+  `START`, polls `STATUS` until `DONE`, and reads the digest from `STATE`.
+- **DMA:** Cheshire's iDMA copies each rate block from memory into the
+  `ABSORB` window. Software waits for the DMA, then starts and polls as in
+  CPU mode. The accelerator does not fetch its own data.
+
