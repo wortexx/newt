@@ -812,13 +812,17 @@ in a Verilator probe: `RVH=1 RVB=0 CvxifEn=1` (on the `sha3-cvxif-coprocessor` b
 `RVH : 1`. So `synth-baseline.json` (735,953 cells / 17.77 mm²) and every PPA number so far
 include the H extension.
 
-- [ ] Decide whether the thesis baseline should be H-off. If so, add a `Cva6RVH`-style field next
+- [x] Decide whether the thesis baseline should be H-off. **Decided 2026-10-02: keep H on**
+      ([ADR-0004](adr/adr-0004-keep-cva6-hypervisor-extension.md)); newt stays on fork tag
+      `newt.2`, with no H field. Original item:
+      decide whether the thesis baseline should be H-off. If so, add a `Cva6RVH`-style field next
       to `Cva6CvxifEn` in the Cheshire fork, set it in `iguana_pkg`, and re-run the synth
       adoption gate. This moves the baseline, so it must land **before** any coprocessor PPA
       delta is quoted, or the delta must be measured against an H-on baseline and stated as such.
 - [ ] Audit the rest of `IG_CVA6_PKG_PARAMS` for other struct-level no-ops. The current list is all
       package-level except `CVA6ConfigHExtEn`, but it should be re-checked whenever it is edited.
-- [ ] Fix or remove the misleading `CVA6ConfigHExtEn=0` line and its comment in `iguana.mk`.
+- [x] Fix or remove the misleading `CVA6ConfigHExtEn=0` line and its comment in `iguana.mk`.
+      The line stays (harmless), and its comment now says H stays on and points to ADR-0004.
 
 ---
 
