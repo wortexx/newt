@@ -33,6 +33,49 @@ set openroad_dir  [file dirname $scripts_dir]
 set step_by_step_debug 0
 set threads 32
 
+# Global-placement starting target density, used by both passes in gpl.tcl.
+# It is only the starting point: routability mode inflates it and
+# timing-driven mode resizes it during placement. 0.65 is the upstream value;
+# 0.72 was tried and made legalization worse (run 37037836332,
+# docs/infra-plan.md Phase 11). PNR_GPL_DENSITY overrides it for an
+# experiment without a commit (openspec/changes/raise-gpl-density-target
+# design D1).
+if { [info exists ::env(PNR_GPL_DENSITY)] && $::env(PNR_GPL_DENSITY) ne "" } {
+    set pnr_gpl_density $::env(PNR_GPL_DENSITY)
+} else {
+    set pnr_gpl_density 0.65
+}
+
+# Die scale for the floorplan (floorplan_ring_*way.tcl): the core's width and
+# height relative to the taped-out Basilisk die (6230 x 5478 um), pad and
+# power-ring margins unchanged. 1.10 gives the core 21 % more area, which
+# takes utilization entering dpl from ~67 % to ~55 % today (~58 % with the
+# SHA-3 coprocessor), under the 62.9 % of the last run that legalized in time
+# (docs/infra-plan.md Phase 11; raise-gpl-density-target design D5). The P&R
+# numbers are then for this enlarged floorplan, not the taped-out chip.
+# PNR_DIE_SCALE overrides it; 1.0 is the taped-out die.
+if { [info exists ::env(PNR_DIE_SCALE)] && $::env(PNR_DIE_SCALE) ne "" } {
+    set pnr_die_scale $::env(PNR_DIE_SCALE)
+} else {
+    set pnr_die_scale 1.10
+}
+
+# Overflow below which gpl's timing-driven iterations keep their
+# repair_design changes (global_placement -keep_resize_below_overflow), in
+# the second, timing-driven pass. OpenROAD's default, 1.0, keeps them all: the
+# second iteration then inserts ~1.1 mm^2 of buffers into a placement still
+# at overflow ~0.2, the target density jumps (0.90 / 0.99 / 1.04 in the runs
+# on record), Nesterov diverges and reverts, and gpl ends unconverged with
+# 80-220 k illegal cells for dpl's legalizer. 0 makes every timing-driven
+# iteration virtual: it re-weights nets for timing but inserts nothing. The
+# real repair_design / repair_timing between the two passes is unchanged
+# (design D1). PNR_GPL_KEEP_RESIZE overrides it; 1.0 restores the old flow.
+if { [info exists ::env(PNR_GPL_KEEP_RESIZE)] && $::env(PNR_GPL_KEEP_RESIZE) ne "" } {
+    set pnr_gpl_keep_resize $::env(PNR_GPL_KEEP_RESIZE)
+} else {
+    set pnr_gpl_keep_resize 0
+}
+
 # OpenROAD's per-process default is 1 thread (`threads_ = 1` in
 # OpenRoad.cc), and set_thread_count is what feeds STA and the global
 # router their thread budgets. chip.tcl set this once globally (line 93)

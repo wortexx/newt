@@ -551,6 +551,72 @@ Whoever picks this phase up should start by checking `cts.tcl`'s report for
 congestion/setup-violation counts against the pre-upgrade baseline before assuming it shares
 `drt`'s root cause. Recorded, not investigated, per the user's decision when this surfaced.
 
+**2026-10-02 diagnosis: the design now overflows the `gpl` density target.** Investigated from
+the `pnr-reports` artifacts of runs `34938462965` (09-15, `7dfc599`, pre-upgrade, reached `grt`),
+`35390510737` (09-19, `cts` timeout) and `36188933699` (09-26, `599d837`, `dpl` timeout at its
+2h limit). The two failed runs start `dpl` from an identical state (same netlist); one squeezed
+through in 1h45 and the other did not, so the lane is on a knife edge. Not a `cts`-specific
+regression: both timeouts are the **negotiation legalizer** (`DPL-1102`) grinding through
+overlaps, in `dpl` and again inside `cts` after clock buffering.
+
+| | 09-15 (ok) | 09-19 / 09-26 (failed) |
+|---|---:|---:|
+| movable area before `gpl` (`GPL-0036`) | 9.89 mm² | 10.42 mm² (+5.4 %) |
+| utilization entering `dpl` (`DPL-0009`) | 62.9 % | **66.1 %** |
+| illegal cells at legalizer iteration 0 | 82,811 | 203,229 (2.5×) |
+| `dpl` runtime (limit 2h) | 1h28 | 1h45 / >2h |
+| legalization inside `cts` | 1h19 | 3h09 (then the 4h `cts` limit) |
+| HPWL after `cts` legalization | 166 M µm | 215 M µm (+29 %) |
+
+~~Cause: the design overflows `-density 0.65`.~~ **Corrected 2026-10-03 after run
+`37037836332`.** That run placed at `-density 0.72` (`raise-gpl-density-target`, full flow,
+`stop_after=cts`), and `dpl` timed out again, starting from *more* illegal cells (223,074). The
+first diagnosis misread `gpl`: `-density` is only the *starting* target. Every run on record
+goes the same way inside `gpl` pass 2:
+
+1. Routability mode inflates the target (0.71 → 1.06 in run `37037836332`).
+2. `gpl` reverts that inflation itself, to the least-congested iteration (`GPL-0055`).
+3. The second timing-driven iteration then runs a real (non-virtual) `repair_design` while
+   overflow is still ≈ 0.2. It adds 0.9–1.2 mm² of buffers (+5–7 %), and the target jumps.
+4. Nesterov diverges, `gpl` reverts to a snapshot (`GPL-0999`), and it hands `dpl` an
+   unconverged placement.
+
+(The ~0.669 quoted before was only the first timing-driven adjustment.)
+
+| | 34938462965 (09-15, ok) | 36188933699 (09-26, 0.65) | 37037836332 (0.72) |
+|---|---:|---:|---:|
+| target after pass 2's timing-driven repair (`GPL-0110`) | 0.895 | 0.993 | 1.043 |
+| `repair_design` area in that iteration (`GPL-0107`) | +6.85 % | +4.79 % | +6.11 % |
+| pass 2 reverted to overflow (`GPL-0999`) | 0.189 | 0.218 | 0.217 |
+| final placement area (`GPL-1014`) | +29.5 % | +51.7 % | +59.4 % |
+| `DPL-0009` utilization | 62.9 % | 66.1 % | 67.3 % |
+| illegal cells at legalizer iteration 0 | 82,811 | 203,229 | 223,074 |
+| illegal cells at iteration 570 | — | 26,386 | 34,939 |
+
+The good run went through the same divergence; its jump was just smaller. A higher starting
+density makes the jump bigger.
+
+- [ ] **Make `gpl` pass 2's timing-driven repair virtual, and raise the legalization timeouts**
+      (`raise-gpl-density-target`, revised 2026-10-03). `-keep_resize_below_overflow 0`
+      (`pnr_gpl_keep_resize`, `PNR_GPL_KEEP_RESIZE`): the timing-driven iterations still
+      re-weight nets, but they insert no buffers into a half-spread placement. The real
+      `repair_design`/`repair_timing` between the passes is unchanged. Density goes back to
+      0.65. Timeouts as a safety net: `dpl` 2h → 4h, `cts` 4h → 8h. Changing a timeout does not
+      change the result, so the run still shows whether the old limits would have held. Run it
+      with `stop_after=grt`, because the change can move congestion into routing. Compare
+      against run `34938462965`: `gpl` revert/convergence, illegal cells at iteration 0,
+      `dpl`/`cts` runtimes, HPWL, `grt` congestion against 101.17 % demand / 115.27 % Metal3,
+      and WNS. Success is reaching `grt`; the result becomes the pre-coprocessor reference for
+      the SHA-3 change's task 5.4.
+- [ ] **Larger die for the reference** (`raise-gpl-density-target` D5, 2026-10-03; the user's
+      call: a clean reference now, flow optimisation after RTL and synthesis). Core 1.10× in
+      width and height (`pnr_die_scale`, `PNR_DIE_SCALE`, input `die_scale`): die 6777 × 5950
+      µm, core 31.2 mm² (+21 %), utilization entering `dpl` ~55 % (~58 % with the
+      coprocessor). P&R figures are then for this floorplan, not the taped-out chip; the
+      with/without-coprocessor delta uses the same floorplan.
+- [x] ~~**Raise the `gpl` density target above real utilization**~~ — tried at 0.72 (run
+      `37037836332`), made legalization worse; see the correction above.
+
 Candidate levers, roughly cheapest first — none yet tried:
 
 - [ ] **Relax our own layer adjustments.** `pnr_apply_routing_layers` removes 30% of M2/M3
@@ -562,7 +628,9 @@ Candidate levers, roughly cheapest first — none yet tried:
       to deal with". Not a straight revert: iterations cost ~25 min each (80 ≈ 20–33h) and
       iteration 15 was separately observed entering an NDR-relaxation cascade that never
       terminated.
-- [ ] **Lower `gpl` density** from `-density 0.65`, trading area for routability.
+- [ ] **Lower `gpl` density** from `-density 0.65`, trading area for routability. *(Only the
+      starting target; see the 2026-10-03 correction above for what actually sets the
+      density `dpl` inherits.)*
 - [ ] **Floorplan changes** — largest lift, last resort.
 - [ ] **First, settle the framing question**: does the thesis's PPA comparison for the SHA
       extension actually need a *detail-routed* DEF, or do area/timing/power after CTS and

@@ -38,6 +38,18 @@ on:
         description: 'Stage name after which the driver stops (empty = run through the full flow; does not change the grt success gate)'
         required: false
         default: ''
+      gpl_density:
+        description: 'Global-placement starting target density for both gpl passes (empty = the default in scripts/pnr/common.tcl)'
+        required: false
+        default: ''
+      gpl_keep_resize:
+        description: 'gpl pass 2 -keep_resize_below_overflow (empty = the default in scripts/pnr/common.tcl, 0 = virtual timing-driven repair; 1.0 = OpenROAD default)'
+        required: false
+        default: ''
+      die_scale:
+        description: 'Core width/height scale relative to the taped-out die (empty = the default in scripts/pnr/common.tcl; 1.0 = the taped-out 6230 x 5478 um die)'
+        required: false
+        default: ''
   push:
     tags: ['**']
 
@@ -547,7 +559,12 @@ jobs:
         # what "success" means for a run whose artifacts and status log
         # look like any other - a slice that stops before the gate still
         # exits non-zero, which is the honest verdict.
-        run: PNR_TIMEOUT_GRT=57600 PNR_TIMEOUT_GRT_REPAIR=57600 PNR_SKIP_GRT_REPAIR=1 PNR_SKIP_ANTENNA_REPAIR=1 PNR_DRT_END_ITER=8 PNR_STOP_AFTER=${{ github.event.inputs.stop_after || '' }} make -C target/ihp13/openroad -f openroad.mk run-pnr PROJ_NAME=basilisk
+        #
+        # PNR_GPL_DENSITY / PNR_GPL_KEEP_RESIZE / PNR_DIE_SCALE: the
+        # gpl_density, gpl_keep_resize and die_scale dispatch inputs, empty by
+        # default (the scripts then use common.tcl's values), so trying another
+        # value costs a dispatch, not a commit (raise-gpl-density-target D1, D5).
+        run: PNR_GPL_DENSITY=${{ github.event.inputs.gpl_density || '' }} PNR_GPL_KEEP_RESIZE=${{ github.event.inputs.gpl_keep_resize || '' }} PNR_DIE_SCALE=${{ github.event.inputs.die_scale || '' }} PNR_TIMEOUT_GRT=57600 PNR_TIMEOUT_GRT_REPAIR=57600 PNR_SKIP_GRT_REPAIR=1 PNR_SKIP_ANTENNA_REPAIR=1 PNR_DRT_END_ITER=8 PNR_STOP_AFTER=${{ github.event.inputs.stop_after || '' }} make -C target/ihp13/openroad -f openroad.mk run-pnr PROJ_NAME=basilisk
 
       # Move the checkpoints out of the shared workspace before this job
       # releases the runner. This is the whole fix for the collision that
