@@ -596,7 +596,7 @@ goes the same way inside `gpl` pass 2:
 The good run went through the same divergence; its jump was just smaller. A higher starting
 density makes the jump bigger.
 
-- [ ] **Make `gpl` pass 2's timing-driven repair virtual, and raise the legalization timeouts**
+- [x] **Make `gpl` pass 2's timing-driven repair virtual, and raise the legalization timeouts**
       (`raise-gpl-density-target`, revised 2026-10-03). `-keep_resize_below_overflow 0`
       (`pnr_gpl_keep_resize`, `PNR_GPL_KEEP_RESIZE`): the timing-driven iterations still
       re-weight nets, but they insert no buffers into a half-spread placement. The real
@@ -608,6 +608,16 @@ density makes the jump bigger.
       `dpl`/`cts` runtimes, HPWL, `grt` congestion against 101.17 % demand / 115.27 % Metal3,
       and WNS. Success is reaching `grt`; the result becomes the pre-coprocessor reference for
       the SHA-3 change's task 5.4.
+      **Done 2026-10-03: run `37108127061` (`dff4df0`, taped-out die) reached `grt ok`.**
+      `gpl` pass 2 converged (no revert). Against run `34938462965`:
+      - HPWL after `dpl`: 81.0 M vs 148.8 M µm; after `cts`: 124.7 M vs 166.3 M µm.
+      - `grt` demand 83.57 % (was 101.17 %); Metal3 108.99 % (was 115.27 %).
+      - WNS at `grt`: −8.36 ns (was −14.76 ns).
+      - `DPL-0009` utilization 60.8 %, with 106,255 illegal cells at iteration 0.
+      - Default-activity power: 1.82 W (was 1.46 W).
+      **This run is the clean pre-coprocessor P&R reference** (the user's call, 2026-10-04: same
+      netlist and same settings as `main` after the merge, so no re-run on `main`). P&R figures
+      from before this change are not comparable with figures from after it.
 - [ ] **Larger die, held in reserve** (`raise-gpl-density-target` D5, 2026-10-03). Input
       `die_scale` / `PNR_DIE_SCALE` (`pnr_die_scale`, default 1.0 = the taped-out die). 1.10
       gives a 6777 × 5950 µm die, core 31.2 mm² (+21 %), utilization entering `dpl` ~55 %.

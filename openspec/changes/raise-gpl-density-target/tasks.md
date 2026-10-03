@@ -136,8 +136,14 @@ The first plan's merge and reference tasks are superseded by 6.x and 7.x.
 
 ## 7. Merge and the clean reference
 
-- [ ] 7.1 **[edit]** After 6.1 reaches `grt`: tick the Phase 11 action, and record that P&R
-  figures from before this change are not comparable with figures from after it.
-- [ ] 7.2 **[long-run]** After merge, ask the user, then dispatch `pnr.yml` on `main` (full
+- [x] 7.1 **[edit]** After 6.1 reaches `grt`: tick the Phase 11 action, and record that P&R
+  figures from before this change are not comparable with figures from after it. — done
+  (`docs/infra-plan.md` Phase 11: action ticked, run 37108127061's figures and the
+  non-comparability note).
+- [x] 7.2 **[long-run]** After merge, ask the user, then dispatch `pnr.yml` on `main` (full
   flow). Verify `grt ok`. Record the stage reached, WNS and power, and `grt` congestion, as the
-  reference for `sha3-cvxif-coprocessor` task 5.4.
+  reference for `sha3-cvxif-coprocessor` task 5.4. — **not dispatched: the user's call
+  (2026-10-04) is that run `37108127061` counts as the reference.** It used the same netlist and
+  the same settings `main` has after this merge (taped-out die, `pnr_gpl_keep_resize 0`, 0.65,
+  `dpl` 4 h / `cts` 8 h). Reference: `grt ok`, WNS −8.36 ns, TNS −44,095 ns, default-activity
+  power 1.82 W (typ), `grt` demand 83.57 %, Metal3 108.99 % (6.1 table).
