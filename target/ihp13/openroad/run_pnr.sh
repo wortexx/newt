@@ -39,6 +39,19 @@
 #                           cheap. Does not change the gate: a stop before
 #                           PNR_GATE still exits non-zero, since the gate
 #                           was never reached.
+#   PNR_GPL_DENSITY        Passed through to gpl.tcl: the global-placement
+#                           starting target density for both passes. Empty or
+#                           unset: pnr_gpl_density's default in
+#                           scripts/pnr/common.tcl.
+#   PNR_GPL_KEEP_RESIZE    Passed through to gpl.tcl: pass 2's
+#                           -keep_resize_below_overflow. Empty or unset:
+#                           pnr_gpl_keep_resize's default in common.tcl (0,
+#                           virtual timing-driven repair); 1.0 is OpenROAD's
+#                           default.
+#   PNR_DIE_SCALE          Passed through to the floorplan: the core's width
+#                           and height relative to the taped-out die. Empty or
+#                           unset: pnr_die_scale's default in common.tcl
+#                           (1.0, the taped-out 6230 x 5478 um die).
 #   PNR_DRY_RUN             If "1", print the planned per-stage commands
 #                           (in order, honoring resume-skip) and exit 0
 #                           without invoking OpenROAD at all - the cheap
@@ -83,7 +96,7 @@ declare -A STAGE_RETRIES=(
     [grt]=0 [grt_repair]=0 [drt]=0 [final]=0
 )
 declare -A STAGE_TIMEOUT_DEFAULT=(
-    [floorplan]=3600 [pre_place]=1800 [gpl]=14400 [dpl]=7200 [cts]=14400
+    [floorplan]=3600 [pre_place]=1800 [gpl]=14400 [dpl]=14400 [cts]=28800
     [grt]=14400 [grt_repair]=21600 [drt]=57600 [final]=3600
 )
 
@@ -171,6 +184,41 @@ run_stage_once() {
     return "$rc"
 }
 
+# Post-dpl placement report (specs/pnr-flow "The run reports how global
+# placement ended"; raise-gpl-density-target design D2). One line with what
+# decides dpl's legalization time: whether gpl's last pass reverted after a
+# divergence (GPL-0999) and at what overflow, the final placement area
+# inflation (GPL-1014), dpl's utilization (DPL-0009) and the illegal cells
+# the negotiation legalizer starts from (its iteration-0 row). dpl prints the
+# last two before it legalizes, so they are there even if the stage later
+# times out. Warns when gpl reverted on divergence, the state that left
+# 80-220 k illegal cells in the runs on record (docs/infra-plan.md Phase 11).
+# Never changes the exit status.
+report_placement_state() {
+    local gpl="${REPORTS}/pnr_gpl.log" dpl="${REPORTS}/pnr_dpl.log"
+    local revert area util illegal
+    if [ ! -f "$gpl" ]; then
+        echo "Placement: not reported (no ${gpl}; gpl restored from a checkpoint?)."
+        return 0
+    fi
+    revert="$(sed -n 's/.*GPL-0999\] Revert to iter: *\([0-9]*\) overflow: *\([0-9.]*\).*/iter \1, overflow \2/p' \
+        "$gpl" 2>/dev/null | tail -1)"
+    area="$(sed -n 's/.*GPL-1014\] Final placement area: .*(\([-+0-9.]*%\)).*/\1/p' \
+        "$gpl" 2>/dev/null | tail -1)"
+    util="$(sed -n 's/.*DPL-0009\] Utilization: *\([0-9.]*%\).*/\1/p' "$dpl" 2>/dev/null | head -1)"
+    illegal="$(awk -F'|' '/^ *0 \|/ { gsub(/ /, "", $3); print $3; exit }' "$dpl" 2>/dev/null)"
+    local msg="gpl final area ${area:-?}, dpl utilization ${util:-?} (DPL-0009), illegal cells at legalizer iteration 0: ${illegal:-none reported}"
+    # Only a revert in the last gpl pass matters to dpl: GPL-0999 after the
+    # pass-2 marker.
+    local last_revert
+    last_revert="$(sed -n '/Global Placement (2)/,$p' "$gpl" 2>/dev/null | grep -c 'GPL-0999')"
+    if [ "${last_revert:-0}" -gt 0 ]; then
+        echo "::warning::Global placement pass 2 reverted after a divergence (${revert}); dpl inherits an unconverged placement: ${msg}. See docs/infra-plan.md Phase 11 (PNR_GPL_KEEP_RESIZE)."
+    else
+        echo "Placement: gpl pass 2 converged without a revert; ${msg}."
+    fi
+}
+
 past_gate=0
 overall_rc=0
 best_effort_broken=0
@@ -228,6 +276,8 @@ for stage in "${STAGES[@]}"; do
             log_status "$stage" retrying "attempt=${attempt} exit=${rc}"
         fi
     done
+
+    [ "$stage" = "dpl" ] && report_placement_state
 
     if [ "$rc" -ne 0 ]; then
         echo "::error::stage '${stage}' failed after ${attempt} attempt(s), exit ${rc}"

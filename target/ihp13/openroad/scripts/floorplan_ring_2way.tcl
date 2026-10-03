@@ -54,8 +54,22 @@ set RamSize2048x64_H  [ord::dbu_to_microns [$RamMaster2048x64 getHeight]]
 ##########################################################################
 # Chip sizes and margins
 ##########################################################################
-set chipW            6230.0
-set chipH            5478.0
+# Taped-out Basilisk die. pnr_die_scale (scripts/pnr/common.tcl, or
+# PNR_DIE_SCALE; 1.0 when neither is set) scales the core's width and height,
+# keeping the pad and power-ring margins below, so utilization drops by about
+# 1/scale^2. Macros are placed relative to the core edges and follow it; pads
+# keep their absolute positions along each edge (basilisk_io.tcl), which
+# leaves unused pad sites near two corners on a larger die
+# (openspec/changes/raise-gpl-density-target design D5).
+set chipW_tapeout    6230.0
+set chipH_tapeout    5478.0
+if { [info exists ::env(PNR_DIE_SCALE)] && $::env(PNR_DIE_SCALE) ne "" } {
+    set dieScale $::env(PNR_DIE_SCALE)
+} elseif { [info exists pnr_die_scale] } {
+    set dieScale $pnr_die_scale
+} else {
+    set dieScale 1.0
+}
 # thickness of annular ring for pads
 set padMargin         310.0
 
@@ -67,6 +81,11 @@ set floorPaddingX       8.0
 set floorPaddingY      14.0
 
 set coreMargin        [expr $padMargin + $floorMargin]
+
+# Whole microns, so the IO rows stay on the 1 um IOSite grid.
+set chipW [expr {round(($chipW_tapeout - 2*$coreMargin) * $dieScale + 2*$coreMargin)}].0
+set chipH [expr {round(($chipH_tapeout - 2*$coreMargin) * $dieScale + 2*$coreMargin)}].0
+utl::report "Die: $chipW x $chipH um (core scale $dieScale of the taped-out $chipW_tapeout x $chipH_tapeout)"
 
 # minimum macro-to-macro distance
 set macroMargin        10.0

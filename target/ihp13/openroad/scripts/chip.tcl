@@ -47,6 +47,8 @@ report_checks -format end -no_line_splits                >> ${report_dir}/${proj
 report_checks -format end -no_line_splits                >> ${report_dir}/${proj_name}_checks.rpt
 
 utl::report "Create Floorplan"
+# Same die scale as the CI lane's scripts/pnr/common.tcl (pnr_die_scale).
+set pnr_die_scale 1.0
 if { [info exists ::env(L1CACHE_WAYS)] && $::env(L1CACHE_WAYS) eq "2"} {
     source scripts/floorplan_ring_2way.tcl
 } else {
@@ -92,6 +94,11 @@ save_checkpoint ${proj_name}.pre_place
 ###############################################################################
 set_thread_count $threads
 
+# Pass 2's timing-driven iterations are virtual (-keep_resize_below_overflow
+# 0): with OpenROAD's default they insert buffers into a half-spread placement
+# and gpl diverges (docs/infra-plan.md Phase 11). The CI lane's staged flow
+# takes both values from scripts/pnr/common.tcl (pnr_gpl_density,
+# pnr_gpl_keep_resize); keep the two in step.
 set GPL_ARGS {  -density 0.65 
                 -routability_driven
                 -routability_check_overflow 0.40
@@ -105,6 +112,7 @@ set GPL2_ARGS {  -density 0.65
                 -routability_inflation_ratio_coef 1.2
                 -routability_max_inflation_ratio 1.2
                 -timing_driven
+                -keep_resize_below_overflow 0
                 -max_phi_coef 1.02 }
 # check_overflow: Higher means routability starts being considered earlier in placement
 #                 too early -> very dense regions, too late -> little to no effect
