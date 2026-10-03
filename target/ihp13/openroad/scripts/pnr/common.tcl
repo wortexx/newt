@@ -33,18 +33,33 @@ set openroad_dir  [file dirname $scripts_dir]
 set step_by_step_debug 0
 set threads 32
 
-# Global-placement target density, used by both passes in gpl.tcl. It must
-# stay above the utilization the design reaches entering dpl (DPL-0009,
-# which includes gpl's repair buffers). At 0.65 the yosys v0.69 netlist
-# (66.1 %) overflowed it, and the negotiation legalizer then timed out in
-# dpl and cts (docs/infra-plan.md Phase 11, 2026-10-02). 0.72 covers the
-# SHA-3 coprocessor's ~69.5 % with margin. PNR_GPL_DENSITY overrides it for
-# an experiment without a commit (openspec/changes/raise-gpl-density-target
-# design D1); run_pnr.sh checks the headroom after dpl (D2).
+# Global-placement starting target density, used by both passes in gpl.tcl.
+# It is only the starting point: routability mode inflates it and
+# timing-driven mode resizes it during placement. 0.65 is the upstream value;
+# 0.72 was tried and made legalization worse (run 37037836332,
+# docs/infra-plan.md Phase 11). PNR_GPL_DENSITY overrides it for an
+# experiment without a commit (openspec/changes/raise-gpl-density-target
+# design D1).
 if { [info exists ::env(PNR_GPL_DENSITY)] && $::env(PNR_GPL_DENSITY) ne "" } {
     set pnr_gpl_density $::env(PNR_GPL_DENSITY)
 } else {
-    set pnr_gpl_density 0.72
+    set pnr_gpl_density 0.65
+}
+
+# Overflow below which gpl's timing-driven iterations keep their
+# repair_design changes (global_placement -keep_resize_below_overflow), in
+# the second, timing-driven pass. OpenROAD's default, 1.0, keeps them all: the
+# second iteration then inserts ~1.1 mm^2 of buffers into a placement still
+# at overflow ~0.2, the target density jumps (0.90 / 0.99 / 1.04 in the runs
+# on record), Nesterov diverges and reverts, and gpl ends unconverged with
+# 80-220 k illegal cells for dpl's legalizer. 0 makes every timing-driven
+# iteration virtual: it re-weights nets for timing but inserts nothing. The
+# real repair_design / repair_timing between the two passes is unchanged
+# (design D1). PNR_GPL_KEEP_RESIZE overrides it; 1.0 restores the old flow.
+if { [info exists ::env(PNR_GPL_KEEP_RESIZE)] && $::env(PNR_GPL_KEEP_RESIZE) ne "" } {
+    set pnr_gpl_keep_resize $::env(PNR_GPL_KEEP_RESIZE)
+} else {
+    set pnr_gpl_keep_resize 0
 }
 
 # OpenROAD's per-process default is 1 thread (`threads_ = 1` in

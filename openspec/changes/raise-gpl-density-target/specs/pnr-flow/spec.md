@@ -1,20 +1,20 @@
 ## ADDED Requirements
 
-### Requirement: Placement density target leaves headroom over the design's utilization
+### Requirement: The run reports how global placement ended
 
-The flow's global-placement density target SHALL be above the utilization the design actually reaches entering detailed placement, which includes the cells added by placement-time repair. A run SHALL report the density target and the measured utilization side by side, and SHALL flag a run whose utilization is at or above the target. The flag is a named warning in the run's output, not a failure, so that a growing design is noticed before it shows up as a legalization timeout.
+After detailed placement, a run SHALL report whether global placement's final pass converged or reverted after a divergence (and at what overflow), the final placement-area inflation, the utilization entering detailed placement, and the number of illegal cells the legalizer starts from. A final-pass revert SHALL be a named warning in the run's output, not a failure, so that an unconverged placement is noticed before it shows up as a legalization timeout. The report SHALL be produced whether or not detailed placement succeeded, from what detailed placement logs before it legalizes.
 
-#### Scenario: Current design places within the target
+#### Scenario: Placement converges
 
-- **WHEN** the P&R flow runs on the current Basilisk netlist
-- **THEN** the utilization reported entering detailed placement is below the global-placement density target, and detailed placement and CTS complete within their configured stage timeouts
+- **WHEN** the P&R flow runs on the current Basilisk netlist with the default placement settings
+- **THEN** the report shows the final global-placement pass ending without a revert, and detailed placement and CTS complete within their configured stage timeouts
 
-#### Scenario: Design with the SHA-3 coprocessor still fits
+#### Scenario: Placement reverts after a divergence
 
-- **WHEN** the flow runs on the netlist with the SHA-3 coprocessor (about 0.84 mm² more cell area)
-- **THEN** its utilization entering detailed placement is still below the density target
+- **WHEN** global placement's final pass reverts to a snapshot after a divergence
+- **THEN** the run's output contains a warning naming the overflow it reverted to and the illegal cells detailed placement starts from, and the run's exit status is still decided only by the stage gates
 
-#### Scenario: Design outgrows the target
+#### Scenario: Detailed placement times out
 
-- **WHEN** a run's utilization entering detailed placement is at or above the density target
-- **THEN** the run's output contains a warning naming both values, and the run's exit status is still decided only by the stage gates
+- **WHEN** detailed placement exceeds its stage timeout
+- **THEN** the report is still printed, with the utilization and the illegal-cell count taken from the detailed-placement log

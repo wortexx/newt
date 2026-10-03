@@ -23,8 +23,10 @@ set err [catch {
     pnr_set_dont_use
 
     utl::report "Global placement target density: $pnr_gpl_density"
+    utl::report "Global placement keep_resize_below_overflow (pass 2): $pnr_gpl_keep_resize"
 
-    # -density is passed at each call: $pnr_gpl_density (common.tcl).
+    # -density and pass 2's -keep_resize_below_overflow are passed at each
+    # call, from common.tcl.
     set GPL_ARGS {  -routability_driven
                     -routability_check_overflow 0.40
                     -routability_inflation_ratio_coef 1.2
@@ -57,7 +59,8 @@ set err [catch {
 
     # actual global placement
     utl::report "Global Placement (2)"
-    global_placement -density $pnr_gpl_density {*}$GPL2_ARGS
+    global_placement -density $pnr_gpl_density \
+        -keep_resize_below_overflow $pnr_gpl_keep_resize {*}$GPL2_ARGS
     report_metrics "${proj_name}.gpl2"
     report_image "${proj_name}.gpl2" true true
     save_checkpoint ${proj_name}.gpl2
