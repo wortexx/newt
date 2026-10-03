@@ -78,10 +78,21 @@ The first plan's merge and reference tasks are superseded by 6.x and 7.x.
   Phase 11: the corrected diagnosis and the revised action. Verify that neither file still
   presents 0.72 as the default or the headroom premise as the cause.
 
+## 5b. Larger die (design D5)
+
+- [x] 5.5 **[edit]** `common.tcl`: `pnr_die_scale` (`PNR_DIE_SCALE`, default `1.10`). Both
+  `floorplan_ring_*way.tcl` scale the core's width and height and keep the 380 µm margins, rounding
+  the die to whole microns. `chip.tcl` sets the same default. `pnr.yml` input `die_scale`;
+  `run_pnr.sh` header; `docs/pnr-pipeline.md` inputs and floorplan row. Verify that the floorplan
+  scripts parse, and that scale 1.0 gives exactly 6230 × 5478 µm and 1.10 gives 6777 × 5950 µm
+  (core 31.2 mm²). — done (`tclsh` arithmetic check; all edited Tcl files are `info complete`).
+
 ## 6. Measure the revised plan
 
 - [ ] 6.1 **[long-run]** Ask the user, then dispatch `pnr.yml` on this change's branch, full flow
-  (no checkpoint matches; 3.1), `stop_after=grt`. Record in Phase 11, next to the 3.2 table:
+  (no checkpoint matches; 3.1), `stop_after=grt`. In progress: run `37108127061` (`dff4df0`,
+  D1 only, taped-out die); 6.2 replaces it if it fails. Record in Phase 11, next to the 3.2
+  table:
   - pass 2 convergence (the placement report line);
   - illegal cells at iteration 0;
   - `dpl` and `cts` runtimes, against both the old (2 h / 4 h) and the new limits;
@@ -91,6 +102,10 @@ The first plan's merge and reference tasks are superseded by 6.x and 7.x.
 
   If `gpl` still reverts, or any gated stage fails, stop and report to the user before
   changing anything else.
+
+- [ ] 6.2 **[long-run]** If 6.1 fails or stalls, ask the user, then cancel it and dispatch with
+  the D5 default (die scale 1.10, D1 on), full flow, `stop_after=grt`. Record as in 6.1, plus
+  the die and core size and `DPL-0009` utilization.
 
 ## 7. Merge and the clean reference
 

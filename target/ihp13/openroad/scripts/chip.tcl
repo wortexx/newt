@@ -47,6 +47,8 @@ report_checks -format end -no_line_splits                >> ${report_dir}/${proj
 report_checks -format end -no_line_splits                >> ${report_dir}/${proj_name}_checks.rpt
 
 utl::report "Create Floorplan"
+# Same die scale as the CI lane's scripts/pnr/common.tcl (pnr_die_scale).
+set pnr_die_scale 1.10
 if { [info exists ::env(L1CACHE_WAYS)] && $::env(L1CACHE_WAYS) eq "2"} {
     source scripts/floorplan_ring_2way.tcl
 } else {

@@ -34,6 +34,11 @@ has. Its content is now the revised plan below.
   `scripts/pnr/common.tcl` (`pnr_gpl_keep_resize`). `PNR_GPL_KEEP_RESIZE` and a `pnr.yml`
   input, `gpl_keep_resize`, override it, and `1.0` restores OpenROAD's default.
 - Return the starting density to 0.65 (`pnr_gpl_density`, kept overridable).
+- Scale the die for the reference (design D5, added 2026-10-03): the core is 1.10× wider and
+  taller (`pnr_die_scale`, `PNR_DIE_SCALE`, `pnr.yml` input `die_scale`; 1.0 is the taped-out
+  die), which takes utilization entering `dpl` from ~67 % to ~55 %. The P&R figures are then
+  for this floorplan, not the taped-out chip, and the with/without-coprocessor comparison
+  uses the same floorplan.
 - Raise the `dpl` and `cts` stage timeouts (2 h → 4 h, 4 h → 8 h) as a safety net. A timeout does
   not change what a stage computes, so a run still shows whether the old limits would have held.
 - Replace the post-`dpl` density-headroom warning, whose premise was wrong, with a placement
@@ -62,7 +67,8 @@ None.
 - **Code**: `target/ihp13/openroad/scripts/pnr/common.tcl` (`pnr_gpl_density` 0.65,
   `pnr_gpl_keep_resize` 0); `scripts/pnr/gpl.tcl` (pass 2 option, report lines);
   `scripts/chip.tcl` (same values); `run_pnr.sh` (timeouts, placement report);
-  `.github/workflows/pnr.yml` (`gpl_keep_resize` input).
+  `.github/workflows/pnr.yml` (`gpl_keep_resize` and `die_scale` inputs);
+  `scripts/floorplan_ring_2way.tcl` and `floorplan_ring_4way.tcl` (die scale, D5).
 - **Results**: placement, CTS and routing all move, so P&R figures from before this change are
   not comparable with figures from after it. The SHA-3 change's task 5.4 is measured against
   the reference this change produces, on the same settings.
@@ -72,5 +78,5 @@ None.
   stops after `grt`, not `cts`.
 - **Cost**: one P&R lane run, ≈ 12–30 h depending on how far it gets. It is dispatched only after
   the user approves it.
-- **Not changed**: synthesis, the netlist, the floorplan and die size, the routability settings,
+- **Not changed**: synthesis, the netlist, the pad ring and macro arrangement, the routability settings,
   the repair between the `gpl` passes, routing-layer adjustments, and the `grt` gate.

@@ -48,6 +48,10 @@
 #                           pnr_gpl_keep_resize's default in common.tcl (0,
 #                           virtual timing-driven repair); 1.0 is OpenROAD's
 #                           default.
+#   PNR_DIE_SCALE          Passed through to the floorplan: the core's width
+#                           and height relative to the taped-out die. Empty or
+#                           unset: pnr_die_scale's default in common.tcl
+#                           (1.10); 1.0 is the taped-out 6230 x 5478 um die.
 #   PNR_DRY_RUN             If "1", print the planned per-stage commands
 #                           (in order, honoring resume-skip) and exit 0
 #                           without invoking OpenROAD at all - the cheap

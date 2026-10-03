@@ -46,6 +46,20 @@ if { [info exists ::env(PNR_GPL_DENSITY)] && $::env(PNR_GPL_DENSITY) ne "" } {
     set pnr_gpl_density 0.65
 }
 
+# Die scale for the floorplan (floorplan_ring_*way.tcl): the core's width and
+# height relative to the taped-out Basilisk die (6230 x 5478 um), pad and
+# power-ring margins unchanged. 1.10 gives the core 21 % more area, which
+# takes utilization entering dpl from ~67 % to ~55 % today (~58 % with the
+# SHA-3 coprocessor), under the 62.9 % of the last run that legalized in time
+# (docs/infra-plan.md Phase 11; raise-gpl-density-target design D5). The P&R
+# numbers are then for this enlarged floorplan, not the taped-out chip.
+# PNR_DIE_SCALE overrides it; 1.0 is the taped-out die.
+if { [info exists ::env(PNR_DIE_SCALE)] && $::env(PNR_DIE_SCALE) ne "" } {
+    set pnr_die_scale $::env(PNR_DIE_SCALE)
+} else {
+    set pnr_die_scale 1.10
+}
+
 # Overflow below which gpl's timing-driven iterations keep their
 # repair_design changes (global_placement -keep_resize_below_overflow), in
 # the second, timing-driven pass. OpenROAD's default, 1.0, keeps them all: the

@@ -32,10 +32,10 @@ independent of this workflow — the backstop for a `stop` job that never ran.
 
 ### Manual dispatch inputs
 
-`workflow_dispatch` accepts five optional inputs, all empty by default
+`workflow_dispatch` accepts six optional inputs, all empty by default
 (`resume_from_run`, `resume_exclude`, `stop_after`, `gpl_density`,
-`gpl_keep_resize` — matching `pnr.yml`'s `inputs:` keys exactly). With all
-five empty, a dispatched run
+`gpl_keep_resize`, `die_scale` — matching `pnr.yml`'s `inputs:` keys
+exactly). With all six empty, a dispatched run
 behaves exactly like a scheduled run:
 
 - `resume_from_run` — a previous run's ID whose checkpoints to restore
@@ -59,7 +59,13 @@ behaves exactly like a scheduled run:
   `common.tcl` (0: the timing-driven iterations are virtual); `1.0` is
   OpenROAD's default and restores the flow before this setting.
 
-  Both `gpl_*` inputs let a placement experiment run without a commit.
+- `die_scale` — the core's width and height relative to the taped-out
+  Basilisk die. Feeds `PNR_DIE_SCALE`. Empty means `pnr_die_scale`'s default
+  in `common.tcl` (1.10: a 6777 × 5950 µm die, +21 % core area); `1.0` is the
+  taped-out 6230 × 5478 µm die. Changing it invalidates every checkpoint
+  from `floorplan` on, so do not combine it with `resume_from_run`.
+
+  The `gpl_*` inputs let a placement experiment run without a commit.
   Combined with `resume_from_run`, exclude `gpl` and every later checkpoint,
   or the restored placement is reused and the value has no effect.
 
@@ -93,7 +99,7 @@ doing anything else.
 
 | # | Stage | Checkpoint | Gate? | What it does |
 |---|---|---|---|---|
-| 1 | `floorplan` | `power_grid` | **Gate** | Reads the synthesized netlist, links the design, reads SDC, runs `check_setup`/`report_checks` sanity checks, creates the floorplan (ring layout, 2-way or 4-way L1 cache depending on `L1CACHE_WAYS`), then builds the power grid (stripes/rings). Only stage that reads the netlist directly — everything after loads a checkpoint. |
+| 1 | `floorplan` | `power_grid` | **Gate** | Reads the synthesized netlist, links the design, reads SDC, runs `check_setup`/`report_checks` sanity checks, creates the floorplan (ring layout, 2-way or 4-way L1 cache depending on `L1CACHE_WAYS`; die scaled by `pnr_die_scale`, default 1.10 of the taped-out core, see `die_scale` above), then builds the power grid (stripes/rings). Only stage that reads the netlist directly — everything after loads a checkpoint. |
 | 2 | `pre_place` | `pre_place` | **Gate** | Repairs tie-cell fanout, then `remove_buffers`. Deliberately its own tiny stage: `remove_buffers` is known to segfault roughly 1 run in 3, and isolating it means a retry only redoes this cheap step, not floorplan/power-grid. The only stage with a configured retry (1). |
 | 3 | `gpl` | `gpl2` | **Gate** | Global placement, two passes. Pass 1 (routability-driven) gives rough parasitics; `repair_design`/`repair_timing -repair_tns 70` clean up setup violations on that rough placement; pass 2 (routability + timing-driven) is the placement that actually carries forward. Both passes start from target density `pnr_gpl_density` (`scripts/pnr/common.tcl`, default 0.65; `PNR_GPL_DENSITY` / the `gpl_density` input override it). Pass 2's timing-driven iterations are virtual (`-keep_resize_below_overflow`, `pnr_gpl_keep_resize`, default 0; `PNR_GPL_KEEP_RESIZE` / the `gpl_keep_resize` input): they re-weight nets but insert no buffers. `gpl.tcl` logs both values. Only stage besides `drt` that calls `set_thread_count` (up to 32 threads, capped by the VM's core count). |
 | 4 | `dpl` | `dpl` | **Gate** | Detailed (legalized) placement + mirror optimization. Single-threaded. Afterwards `run_pnr.sh` reports how `gpl` ended (below). |
