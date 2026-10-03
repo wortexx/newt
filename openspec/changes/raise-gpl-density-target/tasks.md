@@ -89,7 +89,7 @@ The first plan's merge and reference tasks are superseded by 6.x and 7.x.
 
 ## 6. Measure the revised plan
 
-- [ ] 6.1 **[long-run]** Ask the user, then dispatch `pnr.yml` on this change's branch, full flow
+- [x] 6.1 **[long-run]** Ask the user, then dispatch `pnr.yml` on this change's branch, full flow
   (no checkpoint matches; 3.1), `stop_after=grt`. In progress: run `37108127061` (`dff4df0`,
   D1 only, taped-out die); 6.2 replaces it if it fails. Record in Phase 11, next to the 3.2
   table:
@@ -125,8 +125,10 @@ The first plan's merge and reference tasks are superseded by 6.x and 7.x.
   | WNS / TNS at `grt` | −14.76 ns / −55,441 | −8.36 ns / −44,095 |
   | power at `grt` (`report_power`, default activity, typ) | 1.46 W | 1.82 W |
 
-  Per-stage runtimes (against the old 2 h / 4 h `dpl`/`cts` limits): pending the job log, which is
-  downloadable once the run's `upload-checkpoints` job finishes. The illegal-cell count is still
+  Per-stage runtimes (from the job log): `floorplan` 4 m, `pre_place` 7 m, `gpl` 2 h 37 m, `dpl`
+  1 h 40 m (would have fit the old 2 h), **`cts` 6 h 58 m (over the old 4 h limit: D3's 8 h was
+  needed)**, `grt` 3 h 10 m. The `upload-checkpoints` job then waited behind the nightly synth lane
+  for the single self-hosted runner, until the user cancelled that run (2026-10-04). The illegal-cell count is still
   above the good run's, from a converged but larger-area placement. Power is higher, with the cause
   not investigated; it is default-activity SoC power, not a workload figure.
 

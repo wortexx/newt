@@ -615,6 +615,8 @@ density makes the jump bigger.
       - WNS at `grt`: −8.36 ns (was −14.76 ns).
       - `DPL-0009` utilization 60.8 %, with 106,255 illegal cells at iteration 0.
       - Default-activity power: 1.82 W (was 1.46 W).
+      - Runtimes: `gpl` 2 h 37 m, `dpl` 1 h 40 m, `cts` 6 h 58 m (over the old 4 h limit; the
+        8 h one was needed), `grt` 3 h 10 m.
       **This run is the clean pre-coprocessor P&R reference** (the user's call, 2026-10-04: same
       netlist and same settings as `main` after the merge, so no re-run on `main`). P&R figures
       from before this change are not comparable with figures from after it.
