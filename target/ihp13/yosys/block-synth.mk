@@ -135,14 +135,19 @@ synth-coproc-all:
 #      workload, energy per block).
 #
 #   make power-coproc-block BLOCK=keccak_cvxif ROUNDS_PER_CYCLE=6
+#       steps 1-5 for the task 5.2 workload (power.json)
+#   make power-coproc-workloads BLOCK=keccak_cvxif ROUNDS_PER_CYCLE=6
+#       steps 1-2 once, then 3-5 for every POWER_WORKLOADS entry
+#       (power_<name>.json; task 5.5)
+#   make power-coproc-run BLOCK=... ROUNDS_PER_CYCLE=... WORKLOAD=<name>
+#       steps 3-5 for one workload, on an existing model
 #
-# POWER_PLUSARGS overrides the workload (e.g. +blocks=64 +block_cycles=155).
+# POWER_PLUSARGS adds harness plusargs (e.g. +blocks=64) to every run.
 
 POWER_PLUSARGS   ?=
 BLOCK_GLSIM      := $(BLOCK_DIR)/$(BLOCK_NAME).glsim.v
 BLOCK_GLWRAP     := $(BLOCK_DIR)/$(BLOCK)_gl.sv
 BLOCK_GLBUILD    := $(BLOCK_DIR)/glsim_build
-BLOCK_SAIF       := $(BLOCK_DIR)/power.saif
 BLOCK_POWER_TB_keccak_cvxif := $(COPROC_TB)/tb_keccak_power.cpp
 BLOCK_POWER_TOP_keccak_cvxif := $(COPROC_TB)/keccak_cvxif_tb_top.sv
 # SAIF scope of the netlist instance: Verilator's TOP, the testbench top,
@@ -150,9 +155,23 @@ BLOCK_POWER_TOP_keccak_cvxif := $(COPROC_TB)/keccak_cvxif_tb_top.sv
 # yosys's _NNNNNN_ nets, which Verilator leaves out of traces by default.
 BLOCK_SAIF_SCOPE ?= TOP/keccak_cvxif_tb_top/i_dut/i_netlist
 
-.PHONY: power-coproc-block
-power-coproc-block:
-	@test -f $(BLOCK_NET) || { echo "power-coproc-block: $(BLOCK_NET) missing - run synth-coproc-block BLOCK=$(BLOCK) ROUNDS_PER_CYCLE=$(ROUNDS_PER_CYCLE) first"; exit 1; }
+# Workloads for keccak_cvxif at RoundsPerCycle = 6 (task 5.5). Cycles per
+# block are the SHA3-256 split-model slopes: "cached" from
+# docs/results/sha3-ise.md (message in the D-cache, Xcelium run L),
+# "uncached" from docs/results/sha3-mmio-uncached.md (run O). The kxor gap
+# spreads the 17 lane absorbs over the block as the SoC's absorb loop does,
+# leaving room for kperm, or for 24 shatr 4 cycles apart. "idle" issues
+# nothing: the coprocessor's cost to every other workload.
+POWER_WORKLOADS := kperm-cached shatr-cached kperm-uncached shatr-uncached idle
+POWER_ARGS_kperm-cached   := +mode=kperm +block_cycles=135 +lane_gap=7
+POWER_ARGS_shatr-cached   := +mode=shatr +block_cycles=232 +lane_gap=7 +shatr_gap=4
+POWER_ARGS_kperm-uncached := +mode=kperm +block_cycles=281 +lane_gap=16
+POWER_ARGS_shatr-uncached := +mode=shatr +block_cycles=377 +lane_gap=15 +shatr_gap=4
+POWER_ARGS_idle           := +mode=idle +block_cycles=135
+
+.PHONY: power-coproc-model power-coproc-run power-coproc-workloads power-coproc-block
+power-coproc-model:
+	@test -f $(BLOCK_NET) || { echo "power-coproc-model: $(BLOCK_NET) missing - run synth-coproc-block BLOCK=$(BLOCK) ROUNDS_PER_CYCLE=$(ROUNDS_PER_CYCLE) first"; exit 1; }
 	$(YOSYS) -q -l $(BLOCK_DIR)/glsim.log -p 'read_liberty -ignore_miss_func $(TECH_CELLS)' \
 		-p 'read_verilog $(BLOCK_NET)' -p 'hierarchy -top $(BLOCK_TOP)' \
 		-p 'write_verilog -noattr $(BLOCK_GLSIM)'
@@ -166,12 +185,27 @@ power-coproc-block:
 		--top-module $(notdir $(basename $(BLOCK_POWER_TOP_$(BLOCK)))) \
 		--Mdir $(BLOCK_GLBUILD) -o Vpower $(BLOCK_POWER_TB_$(BLOCK)) > $(BLOCK_DIR)/glsim_build.log 2>&1 \
 		|| (tail -30 $(BLOCK_DIR)/glsim_build.log; exit 1)
-	cd $(BLOCK_DIR) && $(BLOCK_GLBUILD)/Vpower +saif=$(BLOCK_SAIF) \
-		+stats=$(BLOCK_DIR)/power_workload.json $(POWER_PLUSARGS)
+
+# One workload on the model: WORKLOAD names a POWER_WORKLOADS entry, or is
+# empty for the harness defaults (task 5.2), whose files keep their old names.
+WORKLOAD    ?=
+POWER_STEM   = $(if $(WORKLOAD),power_$(WORKLOAD),power)
+power-coproc-run:
+	@test -x $(BLOCK_GLBUILD)/Vpower || { echo "power-coproc-run: no model - run power-coproc-model first"; exit 1; }
+	@test -z "$(WORKLOAD)" || test -n "$(POWER_ARGS_$(WORKLOAD))" || { echo "power-coproc-run: unknown WORKLOAD '$(WORKLOAD)' (one of: $(POWER_WORKLOADS))"; exit 1; }
+	cd $(BLOCK_DIR) && $(BLOCK_GLBUILD)/Vpower +saif=$(BLOCK_DIR)/$(POWER_STEM).saif \
+		+stats=$(BLOCK_DIR)/$(POWER_STEM)_workload.json $(if $(WORKLOAD),+name=$(WORKLOAD)) \
+		$(POWER_ARGS_$(WORKLOAD)) $(POWER_PLUSARGS)
 	cd $(BLOCK_DIR) && NETLIST="$(BLOCK_NET)" TOP_DESIGN="$(BLOCK_TOP)" \
-		BLOCK_PERIOD_NS="$(BLOCK_PERIOD_NS)" BLOCK_SAIF="$(BLOCK_SAIF)" \
+		BLOCK_PERIOD_NS="$(BLOCK_PERIOD_NS)" BLOCK_SAIF="$(BLOCK_DIR)/$(POWER_STEM).saif" \
 		BLOCK_SAIF_SCOPE="$(BLOCK_SAIF_SCOPE)" \
-		$(STA) -no_init -exit $(YOSYS_DIR)/scripts/block_power.tcl > $(BLOCK_DIR)/power.rpt 2>&1
-	python3 $(YOSYS_DIR)/scripts/block_power_metrics.py --power $(BLOCK_DIR)/power.rpt \
-		--workload $(BLOCK_DIR)/power_workload.json --block $(BLOCK) \
-		--rounds-per-cycle $(ROUNDS_PER_CYCLE) --out $(BLOCK_DIR)/power.json
+		$(STA) -no_init -exit $(YOSYS_DIR)/scripts/block_power.tcl > $(BLOCK_DIR)/$(POWER_STEM).rpt 2>&1
+	python3 $(YOSYS_DIR)/scripts/block_power_metrics.py --power $(BLOCK_DIR)/$(POWER_STEM).rpt \
+		--workload $(BLOCK_DIR)/$(POWER_STEM)_workload.json --block $(BLOCK) \
+		--rounds-per-cycle $(ROUNDS_PER_CYCLE) --out $(BLOCK_DIR)/$(POWER_STEM).json
+
+power-coproc-workloads: power-coproc-model
+	@set -e; for w in $(POWER_WORKLOADS); do $(MAKE) --no-print-directory power-coproc-run WORKLOAD=$$w; done
+
+power-coproc-block: power-coproc-model
+	$(MAKE) --no-print-directory power-coproc-run WORKLOAD=

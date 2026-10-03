@@ -26,9 +26,16 @@ selected R (make power-coproc-block, task 5.2), it adds the block power
 section: activity-annotated power of the block netlist under a SoC-paced
 SHA3-256 workload, with its annotated fraction and energy per block.
 
+If the five power_<name>.json of `make power-coproc-workloads` exist for the
+selected R (task 5.5), it adds the energy-per-byte section: each ISE
+back-end in both cache regimes, at the 11.0 ns constraint and, with
+--achieved-period-ns, at the period P&R achieved; plus the idle
+coprocessor's cost per byte of the software baselines.
+
 Usage: scripts/sha3_ppa.py [--out docs/results/sha3-ppa.md]
                            [--soc RUN_DIR --soc-ref REF_DIR]
                            [--soc-run-id N --soc-ref-run-id N]
+                           [--achieved-period-ns T]
 """
 
 import argparse
@@ -189,6 +196,111 @@ def power_section(p):
     ]
 
 
+ENERGY_WORKLOADS = [  # (power_<name>.json, implementation, regime)
+    ("kperm-cached", "ise-kperm", "cached"),
+    ("shatr-cached", "ise-shatr", "cached"),
+    ("kperm-uncached", "ise-kperm", "uncached"),
+    ("shatr-uncached", "ise-shatr", "uncached"),
+]
+REGIME_CSV = {"cached": "sha3-ise.csv", "uncached": "sha3-mmio-uncached.csv"}
+SHA3_256_RATE = 136
+
+
+def sha3_256_slopes(csv_name):
+    """{impl: cycles per block} for SHA3-256 from a sha3_eval.py CSV."""
+    path = REPO / "docs" / "results" / csv_name
+    out = {}
+    if path.exists():
+        for line in path.read_text().splitlines()[1:]:
+            f = line.split(",")
+            if f[0] == "256":
+                out[f[1]] = float(f[7])
+    return out
+
+
+def energy_section(block_dir, achieved_ns):
+    """Task 5.5: energy per byte of the coprocessor, from the activity-annotated
+    power of each SoC-paced workload (power-coproc-workloads) and the measured
+    cycles per block. Returns markdown lines, or [] when the runs are missing."""
+    runs = {}
+    for name, _, _ in ENERGY_WORKLOADS + [("idle", None, None)]:
+        f = block_dir / f"power_{name}.json"
+        if not f.exists():
+            return []
+        runs[name] = json.loads(f.read_text())
+    slopes = {r: sha3_256_slopes(c) for r, c in REGIME_CSV.items()}
+    t11 = runs["idle"]["workload"]["clock_period_ns"]
+
+    def energy_per_block(p, cycles, period_ns):
+        # Switching and internal energy per cycle do not depend on the
+        # period; leakage energy scales with it.
+        dyn = (p["internal_w"] + p["switching_w"]) * t11 * 1e-9
+        return cycles * (dyn + p["leakage_w"] * period_ns * 1e-9)
+
+    out = [
+        "## Energy per byte (task 5.5)",
+        "",
+        f"Stage: block synthesis netlist, gate-level simulation (Verilator) + OpenSTA. Corner: "
+        f"`{runs['idle']['corner']}`. Activity: annotated from the SAIF of each workload below "
+        "(not default activity); every run annotates all pins "
+        f"({min(r['annotated_fraction'] for r in runs.values()) * 100:.1f} % minimum) and passes "
+        "its gate-level functional check. Coprocessor only: the CPU's energy is not in these "
+        "figures.",
+        "",
+        "Each workload is SHA3-256 absorb paced like the SoC: per block, 17 `kxor`, then one "
+        "`kperm` or 24 `shatr`, over the measured cycles per block of that implementation and "
+        "cache regime (*cached*: message in the D-cache, `docs/results/sha3-ise.md`; "
+        "*uncached*: message evicted, `docs/results/sha3-mmio-uncached.md`). Energy per block = "
+        "average power × cycles per block × clock period; per byte, divided by the 136-byte "
+        "rate. At another period, switching and internal energy per cycle stay, and leakage "
+        "scales with the period.",
+        "",
+        f"| implementation | regime | cycles/block (workload / measured) | power @ {t11:.1f} ns "
+        f"(mW) | energy/block @ {t11:.1f} ns (nJ) | energy/byte @ {t11:.1f} ns (pJ/B) | "
+        "energy/byte @ achieved period |",
+        "|---|---|---:|---:|---:|---:|---:|",
+    ]
+    for name, impl, regime in ENERGY_WORKLOADS:
+        p = runs[name]
+        cyc = p["workload"]["block_cycles"]
+        meas = slopes[regime].get(impl)
+        e11 = energy_per_block(p, cyc, t11)
+        ach = (f"{energy_per_block(p, cyc, achieved_ns) * 1e12 / SHA3_256_RATE:.1f} pJ/B "
+               f"@ {achieved_ns:.2f} ns" if achieved_ns else "pending (task 5.4)")
+        out.append(f"| {impl} | {regime} | {cyc} / {meas:.0f} | {p['power_w'] * 1e3:.2f} | "
+                   f"{e11 * 1e9:.2f} | {e11 * 1e12 / SHA3_256_RATE:.1f} | {ach} |"
+                   if meas is not None else
+                   f"| {impl} | {regime} | {cyc} / — | {p['power_w'] * 1e3:.2f} | "
+                   f"{e11 * 1e9:.2f} | {e11 * 1e12 / SHA3_256_RATE:.1f} | {ach} |")
+    idle = runs["idle"]
+    out += [
+        "",
+        f"**Idle coprocessor: {idle['power_w'] * 1e3:.2f} mW** (internal "
+        f"{idle['internal_w'] * 1e3:.2f}, switching {idle['switching_w'] * 1e3:.3f}, leakage "
+        f"{idle['leakage_w'] * 1e3:.3f}). Its flip-flops are not clock-gated, so the block draws "
+        "this whenever the SoC is clocked, whatever runs. The software baselines' own energy is "
+        "CPU energy, which this flow does not measure (it would need a gate-level CVA6 "
+        "simulation); what the coprocessor adds to them is this idle power over their cycles:",
+        "",
+        "| baseline (cached) | cycles/block | coprocessor idle energy/byte @ "
+        f"{t11:.1f} ns (pJ/B) |",
+        "|---|---:|---:|",
+    ]
+    for impl in ("sw-rvcrypto", "sw-xkcp-ref64", "sw-xkcp-opt64"):
+        b = slopes["cached"].get(impl)
+        if b is not None:
+            e = energy_per_block(idle, b, t11)
+            out.append(f"| {impl} | {b:,.0f} | {e * 1e12 / SHA3_256_RATE:,.1f} |")
+    out += [
+        "",
+        "Caveats: no clock tree (ideal clock), so a real clock network adds power, mostly in "
+        "the sequential share; typical corner; the CPU, caches and interconnect are outside "
+        "the block. The P&R-stage figures are task 5.4.",
+        "",
+    ]
+    return out
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -197,6 +309,8 @@ def main(argv=None):
     ap.add_argument("--soc-ref", help="synth-reports artifact dir of the reference run")
     ap.add_argument("--soc-run-id", help="synth lane run id of --soc, for the report")
     ap.add_argument("--soc-ref-run-id", help="synth lane run id of --soc-ref, for the report")
+    ap.add_argument("--achieved-period-ns", type=float,
+                    help="clock period the P&R lane achieved (task 5.4), for the energy table")
     a = ap.parse_args(argv)
     if bool(a.soc) != bool(a.soc_ref):
         sys.exit("sha3_ppa: --soc and --soc-ref go together")
@@ -262,6 +376,7 @@ def main(argv=None):
     power = BLOCK_DIR / f"keccak_cvxif_r{selected}" / "power.json"
     if power.exists():
         out += power_section(json.loads(power.read_text()))
+    out += energy_section(power.parent, a.achieved_period_ns)
     if a.soc:
         out += soc_section(soc_metrics(a.soc), soc_metrics(a.soc_ref), a.soc_run_id,
                            a.soc_ref_run_id)
