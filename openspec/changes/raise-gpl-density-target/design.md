@@ -117,29 +117,31 @@ If it reaches `grt`, merge, and the run on `main` that follows is the pre-coproc
 reference. The netlist is the same, so it is a re-run on `main`, needed only because the
 reference must come from `main`'s settings. Every dispatch needs the user's go-ahead.
 
-### D5 — A larger die for the reference (added 2026-10-03)
+### D5 — An optional larger die (added 2026-10-03; default 1.0 since 2026-10-04)
 
 The floorplan scales the core's width and height by `pnr_die_scale`, defined in
-`scripts/pnr/common.tcl` with default `1.10`. `PNR_DIE_SCALE` and the `pnr.yml` input `die_scale`
-override it, and `1.0` is the taped-out die. The pad and power-ring margins (380 µm) are kept,
+`scripts/pnr/common.tcl`. `PNR_DIE_SCALE` and the `pnr.yml` input `die_scale` override it. The
+default is `1.0`, the taped-out die: run `37108127061` reached `grt` on it with D1 alone (task
+6.1), so the reference stays on the real Basilisk floorplan (the user's call, 2026-10-04). `1.10` is
+the prepared fallback for a netlist that stops legalizing in time, such as the coprocessor's
+(~3 points more utilization). The pad and power-ring margins (380 µm) are kept,
 so the die goes from 6230 × 5478 µm to 6777 × 5950 µm, and the core from 25.8 to 31.2 mm²
 (+21 %). The SRAM macros are placed relative to the core edges, so they follow the core. The pads
 keep their absolute positions (`src/basilisk_io.tcl`), which leaves unused pad sites near two
 corners. The power grid is laid out from the core origin and the pad pitch, both unchanged.
 
-- **Why.** The user's call, 2026-10-03: the thesis needs a clean P&R reference now, and the flow
-  can be optimised once RTL and synthesis are done. Lower utilization removes the condition behind
+- **Why it exists.** The user's call, 2026-10-03: the thesis needs a clean P&R reference, and
+  the flow can be optimised once RTL and synthesis are done. Lower utilization removes the condition behind
   every legalization failure on record. Utilization entering `dpl` drops from ~67 % to ~55 %
   today (~58 % with the SHA-3 coprocessor, ~59 % with both arms), under the 62.9 % of the only
   run that legalized in time. It should also ease `grt` congestion, which is the `drt` blocker.
 - **Why 1.10.** It is the smallest round scale that keeps the coprocessor's netlist about
   5 points under 62.9 %, so that comparing with and without the coprocessor stays on the same
   floorplan. A larger die would lengthen wires and change power more than needed.
-- **Cost.** The P&R figures are for this enlarged floorplan, not for the taped-out chip.
+- **Cost, when used.** The P&R figures are for the enlarged floorplan, not for the taped-out chip.
   Absolute WNS, power and wirelength shift. The thesis compares with and without the
   coprocessor, on the same floorplan and the same settings, and states that.
-- **Together with D1.** D1 (virtual timing-driven repair) stays on: it costs nothing, and
-  dispatching both keeps one run. `die_scale=1.0` isolates D1 alone.
+- **Together with D1.** If the fallback is used, D1 (virtual timing-driven repair) stays on.
 
 ## Risks / Trade-offs
 

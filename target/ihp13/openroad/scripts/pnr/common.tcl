@@ -48,16 +48,16 @@ if { [info exists ::env(PNR_GPL_DENSITY)] && $::env(PNR_GPL_DENSITY) ne "" } {
 
 # Die scale for the floorplan (floorplan_ring_*way.tcl): the core's width and
 # height relative to the taped-out Basilisk die (6230 x 5478 um), pad and
-# power-ring margins unchanged. 1.10 gives the core 21 % more area, which
-# takes utilization entering dpl from ~67 % to ~55 % today (~58 % with the
-# SHA-3 coprocessor), under the 62.9 % of the last run that legalized in time
-# (docs/infra-plan.md Phase 11; raise-gpl-density-target design D5). The P&R
-# numbers are then for this enlarged floorplan, not the taped-out chip.
-# PNR_DIE_SCALE overrides it; 1.0 is the taped-out die.
+# power-ring margins unchanged. Default 1.0, the taped-out die: with
+# pnr_gpl_keep_resize 0 it reached grt (run 37108127061, dpl utilization
+# 60.8 %). 1.10 (core +21 %, utilization ~55 %) is the fallback if a larger
+# netlist stops legalizing in time; the P&R numbers are then for that
+# enlarged floorplan, not the taped-out chip (docs/infra-plan.md Phase 11;
+# raise-gpl-density-target design D5). PNR_DIE_SCALE overrides it.
 if { [info exists ::env(PNR_DIE_SCALE)] && $::env(PNR_DIE_SCALE) ne "" } {
     set pnr_die_scale $::env(PNR_DIE_SCALE)
 } else {
-    set pnr_die_scale 1.10
+    set pnr_die_scale 1.0
 }
 
 # Overflow below which gpl's timing-driven iterations keep their

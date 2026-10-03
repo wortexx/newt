@@ -34,11 +34,11 @@ has. Its content is now the revised plan below.
   `scripts/pnr/common.tcl` (`pnr_gpl_keep_resize`). `PNR_GPL_KEEP_RESIZE` and a `pnr.yml`
   input, `gpl_keep_resize`, override it, and `1.0` restores OpenROAD's default.
 - Return the starting density to 0.65 (`pnr_gpl_density`, kept overridable).
-- Scale the die for the reference (design D5, added 2026-10-03): the core is 1.10× wider and
-  taller (`pnr_die_scale`, `PNR_DIE_SCALE`, `pnr.yml` input `die_scale`; 1.0 is the taped-out
-  die), which takes utilization entering `dpl` from ~67 % to ~55 %. The P&R figures are then
-  for this floorplan, not the taped-out chip, and the with/without-coprocessor comparison
-  uses the same floorplan.
+- Make the die scalable (design D5, added 2026-10-03): `pnr_die_scale` (`PNR_DIE_SCALE`,
+  `pnr.yml` input `die_scale`) scales the core's width and height. The default is 1.0, the
+  taped-out die, which reached `grt` with D1 alone. 1.10 (+21 % core area, utilization ~55 %)
+  is the fallback for a netlist that stops legalizing in time; its P&R figures are then for that
+  floorplan, and the with/without-coprocessor comparison uses the same one.
 - Raise the `dpl` and `cts` stage timeouts (2 h → 4 h, 4 h → 8 h) as a safety net. A timeout does
   not change what a stage computes, so a run still shows whether the old limits would have held.
 - Replace the post-`dpl` density-headroom warning, whose premise was wrong, with a placement

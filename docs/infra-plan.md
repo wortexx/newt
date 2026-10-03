@@ -608,12 +608,12 @@ density makes the jump bigger.
       `dpl`/`cts` runtimes, HPWL, `grt` congestion against 101.17 % demand / 115.27 % Metal3,
       and WNS. Success is reaching `grt`; the result becomes the pre-coprocessor reference for
       the SHA-3 change's task 5.4.
-- [ ] **Larger die for the reference** (`raise-gpl-density-target` D5, 2026-10-03; the user's
-      call: a clean reference now, flow optimisation after RTL and synthesis). Core 1.10× in
-      width and height (`pnr_die_scale`, `PNR_DIE_SCALE`, input `die_scale`): die 6777 × 5950
-      µm, core 31.2 mm² (+21 %), utilization entering `dpl` ~55 % (~58 % with the
-      coprocessor). P&R figures are then for this floorplan, not the taped-out chip; the
-      with/without-coprocessor delta uses the same floorplan.
+- [ ] **Larger die, held in reserve** (`raise-gpl-density-target` D5, 2026-10-03). Input
+      `die_scale` / `PNR_DIE_SCALE` (`pnr_die_scale`, default 1.0 = the taped-out die). 1.10
+      gives a 6777 × 5950 µm die, core 31.2 mm² (+21 %), utilization entering `dpl` ~55 %.
+      Not needed for the reference: run `37108127061` reached `grt` on the taped-out die with
+      the virtual-repair fix alone (60.8 % utilization). Use it if the coprocessor's netlist
+      (~3 points more) stops legalizing in time; its P&R figures are then for that floorplan.
 - [x] ~~**Raise the `gpl` density target above real utilization**~~ — tried at 0.72 (run
       `37037836332`), made legalization worse; see the correction above.
 

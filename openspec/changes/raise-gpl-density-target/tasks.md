@@ -80,7 +80,7 @@ The first plan's merge and reference tasks are superseded by 6.x and 7.x.
 
 ## 5b. Larger die (design D5)
 
-- [x] 5.5 **[edit]** `common.tcl`: `pnr_die_scale` (`PNR_DIE_SCALE`, default `1.10`). Both
+- [x] 5.5 **[edit]** `common.tcl`: `pnr_die_scale` (`PNR_DIE_SCALE`; default `1.10`, then `1.0` since 2026-10-04, after 6.1). Both
   `floorplan_ring_*way.tcl` scale the core's width and height and keep the 380 µm margins, rounding
   the die to whole microns. `chip.tcl` sets the same default. `pnr.yml` input `die_scale`;
   `run_pnr.sh` header; `docs/pnr-pipeline.md` inputs and floorplan row. Verify that the floorplan
@@ -103,9 +103,36 @@ The first plan's merge and reference tasks are superseded by 6.x and 7.x.
   If `gpl` still reverts, or any gated stage fails, stop and report to the user before
   changing anything else.
 
-- [ ] 6.2 **[long-run]** If 6.1 fails or stalls, ask the user, then cancel it and dispatch with
-  the D5 default (die scale 1.10, D1 on), full flow, `stop_after=grt`. Record as in 6.1, plus
-  the die and core size and `DPL-0009` utilization.
+  — **Run `37108127061` (2026-10-03, `dff4df0`: D1 + D3, taped-out die, `stop_after=grt`): `grt ok`.**
+  Every gated stage passed (`floorplan`, `pre_place`, `gpl`, `dpl`, `cts`, `grt`); the `pnr` job
+  finished at 22:41Z, 14 h 37 m after P&R started. Placement report: "gpl pass 2 converged without a
+  revert". Both passes end with `GPL-1001` (pass 2 at iteration 1,682), and both timing-driven
+  iterations are `virtual: true`.
+
+  | | 34938462965 (09-15, ok) | 37108127061 (D1) |
+  |---|---:|---:|
+  | gpl pass 2 | reverted, overflow 0.189 | converged |
+  | final placement area (`GPL-1014`) | +29.5 % | +45.3 % |
+  | `DPL-0009` utilization | 62.9 % | 60.8 % |
+  | illegal cells, legalizer iteration 0 | 82,811 | 106,255 |
+  | HPWL after `dpl` | 148.8 M µm | 81.0 M µm (−46 %) |
+  | HPWL after `cts` legalization | 166.3 M µm | 124.7 M µm (−25 %) |
+  | `grt` total demand | 101.17 % | 83.57 % |
+  | `grt` Metal3 | 115.27 % | 108.99 % |
+  | `grt` wirelength | 204.2 M µm | 169.9 M µm (−17 %) |
+  | WNS / TNS at `dpl` | −0.63 ns / −1.75 | −0.87 ns / −305.73 |
+  | WNS / TNS at `cts` | −8.22 ns / −21,823 | −3.18 ns / −19,363 |
+  | WNS / TNS at `grt` | −14.76 ns / −55,441 | −8.36 ns / −44,095 |
+  | power at `grt` (`report_power`, default activity, typ) | 1.46 W | 1.82 W |
+
+  Per-stage runtimes (against the old 2 h / 4 h `dpl`/`cts` limits): pending the job log, which is
+  downloadable once the run's `upload-checkpoints` job finishes. The illegal-cell count is still
+  above the good run's, from a converged but larger-area placement. Power is higher, with the cause
+  not investigated; it is default-activity SoC power, not a workload figure.
+
+- [x] 6.2 **[long-run]** If 6.1 fails or stalls, dispatch with die scale 1.10. — not needed: 6.1
+  reached `grt`. The default went back to `1.0` (the user's call, 2026-10-04); `die_scale=1.10`
+  stays available as an input for a larger netlist.
 
 ## 7. Merge and the clean reference
 
