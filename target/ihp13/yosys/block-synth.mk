@@ -124,12 +124,18 @@ synth-coproc-all:
 #      netlist keeps one instance per cell (no flatten): OpenSTA's read_saif
 #      annotates instance pins, so the SAIF must hold <cell>/<pin> scopes,
 #      which Verilator's trace keeps even when it inlines the cell modules.
+#      First, wires and cells named after a source location (sv2v's
+#      function results, e.g. rate_lanes$func$/path/file.v:2112$...) are
+#      renamed anonymous into BLOCK_POWER_NET, which both the model and
+#      OpenSTA read: the '/' and ':' in them stop OpenSTA's SAIF parser.
+#      Parameters are not traced (--no-trace-params): their escaped bit
+#      names stop the parser too, and they carry no activity.
 #   2. block_glwrap.py gives that model its RTL struct ports back.
 #   3. Verilator runs the block's power workload (tb/tb_<BLOCK>_power-style
 #      harness, here hw/coproc/tb/tb_keccak_power.cpp) on it and records SAIF
 #      over the workload window; the harness also checks the final state
 #      against the C++ reference.
-#   4. OpenSTA annotates the netlist from that SAIF (names match, so
+#   4. OpenSTA annotates BLOCK_POWER_NET from that SAIF (names match, so
 #      annotation is direct) and reports power at the typical corner.
 #   5. block_power_metrics.py writes power.json (power, annotated fraction,
 #      workload, energy per block).
@@ -146,42 +152,70 @@ synth-coproc-all:
 
 POWER_PLUSARGS   ?=
 BLOCK_GLSIM      := $(BLOCK_DIR)/$(BLOCK_NAME).glsim.v
+# The netlist the power flow simulates and annotates: BLOCK_NET with its
+# source-location names made anonymous (see step 1), shared by the
+# simulation model and OpenSTA so instance names match.
+BLOCK_POWER_NET  := $(BLOCK_DIR)/$(BLOCK_NAME).power.v
 BLOCK_GLWRAP     := $(BLOCK_DIR)/$(BLOCK)_gl.sv
 BLOCK_GLBUILD    := $(BLOCK_DIR)/glsim_build
-BLOCK_POWER_TB_keccak_cvxif := $(COPROC_TB)/tb_keccak_power.cpp
-BLOCK_POWER_TOP_keccak_cvxif := $(COPROC_TB)/keccak_cvxif_tb_top.sv
+# Per block: the power harness, its testbench top, the packages the top
+# needs, and the struct ports block_glwrap.py restores (PORT=TYPE).
+BLOCK_POWER_TB_keccak_cvxif   := $(COPROC_TB)/tb_keccak_power.cpp
+BLOCK_POWER_TOP_keccak_cvxif  := $(COPROC_TB)/keccak_cvxif_tb_top.sv
+BLOCK_POWER_PKGS_keccak_cvxif  = $(COPROC_CVA6_PKGS)
+BLOCK_GLPORTS_keccak_cvxif    := cvxif_req_i=cvxif_pkg::cvxif_req_t cvxif_resp_o=cvxif_pkg::cvxif_resp_t
+BLOCK_POWER_TB_keccak_mmio    := $(COPROC_TB)/tb_keccak_mmio_power.cpp
+BLOCK_POWER_TOP_keccak_mmio   := $(COPROC_TB)/keccak_mmio_tb_top.sv
+BLOCK_POWER_PKGS_keccak_mmio   = +incdir+$(COPROC_AXI_DIR)/include $(COPROC_AXI_DIR)/src/axi_pkg.sv \
+                                 $(COPROC_TB)/keccak_mmio_tb_pkg.sv
+BLOCK_GLPORTS_keccak_mmio     := axi_req_i=keccak_mmio_tb_pkg::axi_req_t axi_rsp_o=keccak_mmio_tb_pkg::axi_resp_t
 # SAIF scope of the netlist instance: Verilator's TOP, the testbench top,
 # the wrapper (i_dut) and the netlist (i_netlist). --trace-underscore keeps
 # yosys's _NNNNNN_ nets, which Verilator leaves out of traces by default.
-BLOCK_SAIF_SCOPE ?= TOP/keccak_cvxif_tb_top/i_dut/i_netlist
+BLOCK_SAIF_SCOPE ?= TOP/$(BLOCK)_tb_top/i_dut/i_netlist
 
-# Workloads for keccak_cvxif at RoundsPerCycle = 6 (task 5.5). Cycles per
+# Workloads at RoundsPerCycle = 6. keccak_cvxif (task 5.5): cycles per
 # block are the SHA3-256 split-model slopes: "cached" from
 # docs/results/sha3-ise.md (message in the D-cache, Xcelium run L),
 # "uncached" from docs/results/sha3-mmio-uncached.md (run O). The kxor gap
 # spreads the 17 lane absorbs over the block as the SoC's absorb loop does,
 # leaving room for kperm, or for 24 shatr 4 cycles apart. "idle" issues
 # nothing: the coprocessor's cost to every other workload.
-POWER_WORKLOADS := kperm-cached shatr-cached kperm-uncached shatr-uncached idle
+POWER_WORKLOADS_keccak_cvxif := kperm-cached shatr-cached kperm-uncached shatr-uncached idle
 POWER_ARGS_kperm-cached   := +mode=kperm +block_cycles=135 +lane_gap=7
 POWER_ARGS_shatr-cached   := +mode=shatr +block_cycles=232 +lane_gap=7 +shatr_gap=4
 POWER_ARGS_kperm-uncached := +mode=kperm +block_cycles=281 +lane_gap=16
 POWER_ARGS_shatr-uncached := +mode=shatr +block_cycles=377 +lane_gap=15 +shatr_gap=4
 POWER_ARGS_idle           := +mode=idle +block_cycles=135
+# keccak_mmio (task 8.1): the mmio-cpu and mmio-dma slopes from the same two
+# reports. CPU-fed: 17 lane stores lane_gap apart, START, STATUS polls;
+# iDMA-fed: one 17-beat burst, START, polls.
+POWER_WORKLOADS_keccak_mmio := cpu-cached dma-cached cpu-uncached dma-uncached mmio-idle
+POWER_ARGS_cpu-cached     := +mode=cpu +block_cycles=265 +lane_gap=14
+POWER_ARGS_dma-cached     := +mode=dma +block_cycles=255
+POWER_ARGS_cpu-uncached   := +mode=cpu +block_cycles=304 +lane_gap=16
+POWER_ARGS_dma-uncached   := +mode=dma +block_cycles=253
+POWER_ARGS_mmio-idle      := +mode=idle +block_cycles=255
+POWER_WORKLOADS = $(POWER_WORKLOADS_$(BLOCK))
 
 .PHONY: power-coproc-model power-coproc-run power-coproc-workloads power-coproc-block
 power-coproc-model:
+	@test -n "$(BLOCK_POWER_TB_$(BLOCK))" || { echo "power-coproc-model: no power harness for BLOCK=$(BLOCK)"; exit 1; }
 	@test -f $(BLOCK_NET) || { echo "power-coproc-model: $(BLOCK_NET) missing - run synth-coproc-block BLOCK=$(BLOCK) ROUNDS_PER_CYCLE=$(ROUNDS_PER_CYCLE) first"; exit 1; }
-	$(YOSYS) -q -l $(BLOCK_DIR)/glsim.log -p 'read_liberty -ignore_miss_func $(TECH_CELLS)' \
+	$(YOSYS) -q -l $(BLOCK_DIR)/power_net.log -p 'read_liberty -lib $(TECH_CELLS)' \
 		-p 'read_verilog $(BLOCK_NET)' -p 'hierarchy -top $(BLOCK_TOP)' \
+		-p 'rename -hide w:*func* c:*func*' -p 'write_verilog -noattr $(BLOCK_POWER_NET)'
+	$(YOSYS) -q -l $(BLOCK_DIR)/glsim.log -p 'read_liberty -ignore_miss_func $(TECH_CELLS)' \
+		-p 'read_verilog $(BLOCK_POWER_NET)' -p 'hierarchy -top $(BLOCK_TOP)' \
 		-p 'write_verilog -noattr $(BLOCK_GLSIM)'
-	python3 $(YOSYS_DIR)/scripts/block_glwrap.py $(BLOCK_GLSIM) $(BLOCK_TOP) $(BLOCK)_gl $(BLOCK_GLWRAP)
+	python3 $(YOSYS_DIR)/scripts/block_glwrap.py $(BLOCK_GLSIM) $(BLOCK_TOP) $(BLOCK)_gl $(BLOCK_GLWRAP) \
+		$(BLOCK_GLPORTS_$(BLOCK))
 	rm -rf $(BLOCK_GLBUILD)
 	$(VERILATOR) --cc --exe --build -O1 -Wno-fatal -Wno-lint -Wno-style -Wno-UNOPTFLAT \
-		--trace-saif --trace-underscore --timescale 1ps/1ps -DKECCAK_GL -GRoundsPerCycle=$(ROUNDS_PER_CYCLE) \
+		--trace-saif --trace-underscore --no-trace-params --timescale 1ps/1ps -DKECCAK_GL -GRoundsPerCycle=$(ROUNDS_PER_CYCLE) \
 		+incdir+$(COPROC_CC_DIR)/include \
 		-CFLAGS "-O1 -std=c++17 -I$(COPROC_TB)" -MAKEFLAGS "OBJCACHE=" \
-		$(COPROC_CVA6_PKGS) $(BLOCK_GLSIM) $(BLOCK_GLWRAP) $(BLOCK_POWER_TOP_$(BLOCK)) \
+		$(BLOCK_POWER_PKGS_$(BLOCK)) $(BLOCK_GLSIM) $(BLOCK_GLWRAP) $(BLOCK_POWER_TOP_$(BLOCK)) \
 		--top-module $(notdir $(basename $(BLOCK_POWER_TOP_$(BLOCK)))) \
 		--Mdir $(BLOCK_GLBUILD) -o Vpower $(BLOCK_POWER_TB_$(BLOCK)) > $(BLOCK_DIR)/glsim_build.log 2>&1 \
 		|| (tail -30 $(BLOCK_DIR)/glsim_build.log; exit 1)
@@ -196,7 +230,7 @@ power-coproc-run:
 	cd $(BLOCK_DIR) && $(BLOCK_GLBUILD)/Vpower +saif=$(BLOCK_DIR)/$(POWER_STEM).saif \
 		+stats=$(BLOCK_DIR)/$(POWER_STEM)_workload.json $(if $(WORKLOAD),+name=$(WORKLOAD)) \
 		$(POWER_ARGS_$(WORKLOAD)) $(POWER_PLUSARGS)
-	cd $(BLOCK_DIR) && NETLIST="$(BLOCK_NET)" TOP_DESIGN="$(BLOCK_TOP)" \
+	cd $(BLOCK_DIR) && NETLIST="$(BLOCK_POWER_NET)" TOP_DESIGN="$(BLOCK_TOP)" \
 		BLOCK_PERIOD_NS="$(BLOCK_PERIOD_NS)" BLOCK_SAIF="$(BLOCK_DIR)/$(POWER_STEM).saif" \
 		BLOCK_SAIF_SCOPE="$(BLOCK_SAIF_SCOPE)" \
 		$(STA) -no_init -exit $(YOSYS_DIR)/scripts/block_power.tcl > $(BLOCK_DIR)/$(POWER_STEM).rpt 2>&1

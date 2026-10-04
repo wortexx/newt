@@ -3,11 +3,10 @@
 // SPDX-License-Identifier: SHL-0.51
 //
 // Testbench-only wrapper: exposes keccak_mmio's AXI subordinate port as flat
-// single-beat channels so the C++ harness acts as the AXI manager without
-// depending on the packed struct layout. Widths match Cheshire's external
-// subordinate port (48-bit address, 64-bit data, 2-bit user); the id is 4 bits.
-
-`include "axi/typedef.svh"
+// channels (single beats, or INCR bursts via aw_len/w_last) so the C++ harness
+// acts as the AXI manager without depending on the packed struct layout. The
+// struct types (keccak_mmio_tb_pkg) match Cheshire's external subordinate port.
+// With KECCAK_GL defined it drives the gate-level model instead of the RTL.
 
 module keccak_mmio_tb_top #(
   parameter int unsigned RoundsPerCycle = 1
@@ -38,15 +37,8 @@ module keccak_mmio_tb_top #(
   output logic        r_last_o
 );
 
-  typedef logic [47:0] addr_t;
-  typedef logic [63:0] data_t;
-  typedef logic [7:0]  strb_t;
-  typedef logic [3:0]  id_t;
-  typedef logic [1:0]  user_t;
-  `AXI_TYPEDEF_ALL(axi, addr_t, id_t, data_t, strb_t, user_t)
-
-  axi_req_t  axi_req;
-  axi_resp_t axi_rsp;
+  keccak_mmio_tb_pkg::axi_req_t  axi_req;
+  keccak_mmio_tb_pkg::axi_resp_t axi_rsp;
 
   always_comb begin
     axi_req          = '0;
@@ -67,20 +59,32 @@ module keccak_mmio_tb_top #(
     axi_req.r_ready  = r_ready_i;
   end
 
+`ifdef KECCAK_GL
+  // Gate-level model of the synthesized block (block-synth.mk power flow):
+  // keccak_mmio_gl wraps the netlist's bit-blasted ports. RoundsPerCycle is
+  // fixed by the netlist, so the parameter only has to match it.
+  keccak_mmio_gl i_dut (
+    .clk_i,
+    .rst_ni,
+    .axi_req_i ( axi_req ),
+    .axi_rsp_o ( axi_rsp )
+  );
+`else
   keccak_mmio #(
-    .RoundsPerCycle ( RoundsPerCycle ),
-    .AddrWidth      ( 48             ),
-    .DataWidth      ( 64             ),
-    .IdWidth        ( 4              ),
-    .UserWidth      ( 2              ),
-    .axi_req_t      ( axi_req_t      ),
-    .axi_rsp_t      ( axi_resp_t     )
+    .RoundsPerCycle ( RoundsPerCycle                 ),
+    .AddrWidth      ( 48                             ),
+    .DataWidth      ( 64                             ),
+    .IdWidth        ( 5                              ),
+    .UserWidth      ( 2                              ),
+    .axi_req_t      ( keccak_mmio_tb_pkg::axi_req_t  ),
+    .axi_rsp_t      ( keccak_mmio_tb_pkg::axi_resp_t )
   ) i_dut (
     .clk_i,
     .rst_ni,
     .axi_req_i ( axi_req ),
     .axi_rsp_o ( axi_rsp )
   );
+`endif
 
   assign aw_ready_o = axi_rsp.aw_ready;
   assign w_ready_o  = axi_rsp.w_ready;

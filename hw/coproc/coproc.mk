@@ -56,7 +56,8 @@ COPROC_MMIO_SEARCH = -y $(COPROC_AXI_DIR)/src -y $(COPROC_CC_DIR)/src +libext+.s
 define coproc_mmio_test
 COPROC_TOP_keccak_mmio_r$(1)   := keccak_mmio_tb_top
 COPROC_SRCS_keccak_mmio_r$(1)   = $$(COPROC_MMIO_PKGS) $$(COPROC_KECCAK_SRCS) \
-                                  $(COPROC_DIR)/keccak_mmio.sv $(COPROC_TB)/keccak_mmio_tb_top.sv
+                                  $(COPROC_DIR)/keccak_mmio.sv $(COPROC_TB)/keccak_mmio_tb_pkg.sv \
+                                  $(COPROC_TB)/keccak_mmio_tb_top.sv
 COPROC_TB_keccak_mmio_r$(1)    := $(COPROC_TB)/tb_keccak_mmio.cpp
 COPROC_FLAGS_keccak_mmio_r$(1) := -GRoundsPerCycle=$(1) -CFLAGS -DROUNDS_PER_CYCLE=$(1) \
                                   $$(COPROC_MMIO_SEARCH)

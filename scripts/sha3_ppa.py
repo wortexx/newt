@@ -230,6 +230,15 @@ def sha3_256_slopes(csv_name):
     return out
 
 
+def energy_per_block(p, cycles, period_ns):
+    """Energy of `cycles` cycles at period_ns from a power_<workload>.json run.
+    Switching and internal energy per cycle do not depend on the period;
+    leakage energy scales with it."""
+    t_sim = p["workload"]["clock_period_ns"]
+    dyn = (p["internal_w"] + p["switching_w"]) * t_sim * 1e-9
+    return cycles * (dyn + p["leakage_w"] * period_ns * 1e-9)
+
+
 def energy_section(block_dir, achieved_ns, achieved_src=""):
     """Task 5.5: energy per byte of the coprocessor, from the activity-annotated
     power of each SoC-paced workload (power-coproc-workloads) and the measured
@@ -242,12 +251,6 @@ def energy_section(block_dir, achieved_ns, achieved_src=""):
         runs[name] = json.loads(f.read_text())
     slopes = {r: sha3_256_slopes(c) for r, c in REGIME_CSV.items()}
     t11 = runs["idle"]["workload"]["clock_period_ns"]
-
-    def energy_per_block(p, cycles, period_ns):
-        # Switching and internal energy per cycle do not depend on the
-        # period; leakage energy scales with it.
-        dyn = (p["internal_w"] + p["switching_w"]) * t11 * 1e-9
-        return cycles * (dyn + p["leakage_w"] * period_ns * 1e-9)
 
     out = [
         "## Energy per byte (task 5.5)",
@@ -521,7 +524,7 @@ MMIO_WORKLOADS = [  # (power_<name>.json, implementation, regime)
 ]
 
 
-def mmio_section(r, cvxif):
+def mmio_section(r, cvxif, achieved_ns=None):
     """Task 8.1: block synthesis and activity-annotated power of keccak_mmio
     at the SoC's R, next to keccak_cvxif's figures. [] when not run yet."""
     d = BLOCK_DIR / f"keccak_mmio_r{r}"
@@ -570,17 +573,20 @@ def mmio_section(r, cvxif):
         "only: the CPU, the iDMA and the interconnect are not in these figures.",
         "",
         f"| implementation | regime | cycles/block (workload / measured) | power @ {t11:.1f} ns "
-        f"(mW) | energy/block (nJ) | energy/byte (pJ/B) |",
-        "|---|---|---:|---:|---:|---:|",
+        f"(mW) | energy/block @ {t11:.1f} ns (nJ) | energy/byte @ {t11:.1f} ns (pJ/B) | "
+        "energy/byte @ achieved period |",
+        "|---|---|---:|---:|---:|---:|---:|",
     ]
     for name, impl, regime in MMIO_WORKLOADS:
         p = runs[name]
         cyc = p["workload"]["block_cycles"]
         meas = slopes[regime].get(impl)
-        e = p["power_w"] * cyc * t11 * 1e-9
+        e = energy_per_block(p, cyc, t11)
+        ach = (f"{energy_per_block(p, cyc, achieved_ns) * 1e12 / SHA3_256_RATE:.1f} pJ/B "
+               f"@ {achieved_ns:.2f} ns" if achieved_ns else "pending (task 5.4)")
         out.append(f"| {impl} | {regime} | {cyc} / {f'{meas:.0f}' if meas else '—'} | "
                    f"{p['power_w'] * 1e3:.2f} | {e * 1e9:.2f} | "
-                   f"{e * 1e12 / SHA3_256_RATE:.1f} |")
+                   f"{e * 1e12 / SHA3_256_RATE:.1f} | {ach} |")
     out += [
         "",
         f"**Idle accelerator: {idle['power_w'] * 1e3:.2f} mW** (internal "
@@ -688,7 +694,8 @@ def main(argv=None):
                             f"`{ach[1]}`, tt, SoC P&R run {a.pnr_run_id or '?'}; see the P&R "
                             "section")
     out += energy_section(power.parent, achieved, achieved_src)
-    out += mmio_section(selected, next(m for m in rows if m["rounds_per_cycle"] == selected))
+    out += mmio_section(selected, next(m for m in rows if m["rounds_per_cycle"] == selected),
+                        achieved)
     if pnr_run:
         out += pnr_section(pnr_run, pnr_metrics(a.pnr_ref), a.pnr_run_id, a.pnr_ref_run_id,
                            period)

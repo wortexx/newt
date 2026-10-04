@@ -69,7 +69,16 @@ Stage: block synthesis (yosys + OpenSTA, no placement). Corner: `typ_1p20V_25C`.
 | `keccak_mmio` | 79,446 | 1,004,152 | 2,032 | 7.46 | 3.41 | 4 |
 | `keccak_cvxif` | 72,526 | 941,886 | 2,006 | 7.67 | 3.19 | 5 (`kperm`) |
 
-Power: not run yet (`make power-coproc-workloads BLOCK=keccak_mmio ROUNDS_PER_CYCLE=6`).
+Power: block synthesis netlist, gate-level simulation (Verilator) + OpenSTA, `typ_1p20V_25C`, 11.0 ns ideal clock. Activity: annotated from the SAIF of each workload (not default activity); every run annotates all pins (100.0 % minimum) and passes its gate-level functional check. Workloads drive the AXI port as the SoC does, per block: *mmio-cpu*, 17 single-beat lane stores, START, STATUS polls; *mmio-dma*, one 17-beat burst, START, polls; each over the measured cycles per block. Accelerator only: the CPU, the iDMA and the interconnect are not in these figures.
+
+| implementation | regime | cycles/block (workload / measured) | power @ 11.0 ns (mW) | energy/block @ 11.0 ns (nJ) | energy/byte @ 11.0 ns (pJ/B) | energy/byte @ achieved period |
+|---|---|---:|---:|---:|---:|---:|
+| mmio-cpu | cached | 265 / 265 | 10.84 | 31.60 | 232.4 | 232.6 pJ/B @ 19.23 ns |
+| mmio-dma | cached | 255 / 255 | 11.00 | 30.85 | 226.9 | 227.1 pJ/B @ 19.23 ns |
+| mmio-cpu | uncached | 304 / 304 | 10.45 | 34.95 | 257.0 | 257.2 pJ/B @ 19.23 ns |
+| mmio-dma | uncached | 253 / 253 | 11.02 | 30.68 | 225.6 | 225.8 pJ/B @ 19.23 ns |
+
+**Idle accelerator: 9.88 mW** (internal 9.87, switching 0.003, leakage 0.013); like the coprocessor, its state flip-flops are not clock-gated.
 
 ## SoC place and route (task 5.4)
 
