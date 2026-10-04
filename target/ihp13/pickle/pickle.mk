@@ -30,11 +30,6 @@ RTL_NAME	?= $(TOP_DESIGN)
 # Patches #
 ###########
 
-# Patches to make to RTL before pickling
-define rtl-patches
-	sed -i "s| << riscv::XLEN-2| << (riscv::XLEN-2)|g" $(shell $(BENDER) path cva6)/core/include/ariane_pkg.sv
-endef
-
 # Function to apply replacements and patches at a given pickled stage
 # Skip failing Hunks/patches and continue
 define apply-patches
@@ -59,7 +54,6 @@ $(BENDER_SOURCES): $(CHS_HW_ALL) $(IG_ROOT)/Bender.yml $(wildcard $(IG_ROOT)/hw/
 
 # Pickle all synthesizable RTL into a single file
 $(MORTY_OUT): $(BENDER_SOURCES) $(wildcard $(PICKLE_DIR)/patches/morty/*) $(HW_CONF_TARGETS) $(IG_CVA6_PKG_FILE)
-	$(call rtl-patches,)
 	$(MORTY) -q -f $< -o $@ $(foreach d,$(MORTY_DEFINES),-D $(d)=1) --keep_defines --top $(TOP_DESIGN)
 	$(call apply-patches,morty)
 	cp $(RTL_CONF_JSON) $(PICKLE_OUT)/$(RTL_NAME).conf.json

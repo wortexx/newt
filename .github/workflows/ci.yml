@@ -164,7 +164,7 @@ jobs:
               attempt=$((attempt + 1))
             done
           }
-          try() { bender script verilator -t rtl -t asic -t ihp13 -t cva6 -t cv64a6_imafdcsclic_sv39 > /tmp/verilator-flist.f; }
+          try() { bender script verilator -t rtl -t asic -t ihp13 -t cva6 -t cv64a6_imafdchsclic_sv39 > /tmp/verilator-flist.f; }
           retry try
 
           mapfile -t FLAGS < <(grep -E '^\+incdir|^\+define' /tmp/verilator-flist.f | sort -u)

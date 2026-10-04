@@ -173,5 +173,7 @@ rotate credentials, and check for drift. Planning and rationale live in
   existing file's license family when editing, and add one to new
   hardware/script files (see any existing `.sv`/Makefile header for the
   format).
-- **CVA6 config** is `cv64a6_imafdcsclic_sv39`; CV-X-IF exists on the core
-  but is disabled/tied off (`CvxifEn = 0`) until the thesis work enables it.
+- **CVA6 config** is `cv64a6_imafdchsclic_sv39` (CVA6 `pulp-v2.0.0`, with the
+  H extension disabled via `IG_CVA6_PKG_PARAMS`); CV-X-IF exists on the core
+  but is disabled/tied off (`CvxifEn = 0`) until the thesis work enables it,
+  and the native Zkn crypto unit is pinned off (`ZKN = 0`) in the Cheshire fork.

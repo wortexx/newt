@@ -18,8 +18,10 @@ So the documented, non-invasive extension mechanism is **CV-X-IF** (Core-V eXten
 `iguana.mk` pins the exact CVA6 configuration Basilisk uses:
 
 ```
-IG_CVA6_CONFIG := cv64a6_imafdcsclic_sv39
+IG_CVA6_CONFIG := cv64a6_imafdchsclic_sv39
 ```
+
+(CVA6 `pulp-v2.0.0` since `openspec/changes/bump-cva6-pulp-v2`; before that `pulp-v1.0.0` with `cv64a6_imafdcsclic_sv39`, where Cheshire's hardcoded `RVH: 1` silently kept the hypervisor extension in. v2 also ships a native Zkn unit, pinned off, and the CV-X-IF 1.0 interface.)
 
 with `IG_CVA6_PKG_PARAMS` disabling the hypervisor extension, configuring a 16KB write-through D-cache, `L1CACHE_WAYS := 4` (cache associativity, not a physical partition — see note below), and `SCOREBOARD_ENTRIES := 4`. These parameters matter for the thesis because CV-X-IF instruction issue/retire interacts with the core's existing scoreboard and decode/issue logic — the scoreboard depth in particular affects how many in-flight coprocessor instructions can be tracked, which should be characterized rather than assumed to "just work" with a coprocessor attached.
 

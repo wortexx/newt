@@ -834,6 +834,21 @@ internet. Change: `openspec/changes/xcelium-sim-lane`. How to use it: `target/xc
 
 ---
 
+## Phase 15 — CVA6 bumped to pulp-v2.0.0  🚧 in progress
+
+CVA6 moves `pulp-v1.0.0` (`9338c2c`) → `pulp-v2.0.0` (`4c02b24`) via the Cheshire fork tag `v0.3.1-newt.2`, which
+cherry-picks upstream Cheshire's own CVA6 bump (`71f9cb2`, on `main`, unreleased) and pins `ZKN = 0`. Change:
+`openspec/changes/bump-cva6-pulp-v2`. It is on its own branch, separate from `sha3-cvxif-coprocessor`, whose
+`keccak_cvxif` still targets the pre-1.0 `cvxif_pkg` that v2 removes; that port is a follow-up.
+
+- [x] **Fork commits** prepared (`e6b9c0d`); push + annotated tag pending.
+- [x] **Pins / config / dead rules.** Lock moves `cheshire`, `cva6`, `clic` (3.0.0), `fpnew` (`pulp-v0.2.3`).
+      `IG_CVA6_CONFIG` → `cv64a6_imafdchsclic_sv39`. Deleted `wt_axi_adapter2.patch` (fixed upstream) and the
+      `rtl-patches` `ariane_pkg.sv` sed (its target never existed in `pulp-v1.0.0`).
+- [ ] **Finding to confirm:** on v1, Cheshire's hardcoded `RVH: 1` overrode `CVA6ConfigHExtEn=0`, so the netlist
+      has been carrying the H extension. On v2 the param takes effect; expect an area drop to attribute.
+- [ ] Pickle sweep, keep-hier check, sim, synth before/after (tasks 1, 3.3–4.3).
+
 ## Risks
 
 | Risk | Mitigation |

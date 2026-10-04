@@ -62,7 +62,11 @@ BOOTROM_NUM_PARTS 	:= 2
 FMA_CONF        	:= OPT
 
 
-IG_CVA6_CONFIG := cv64a6_imafdcsclic_sv39
+# pulp-v2 folds the H extension into the name; this is the WT variant (Cheshire
+# itself builds _wb). In pulp-v2 Cheshire derives its whole CVA6 config from this
+# package, so every param below now reaches the core, HExtEn included (pulp-v1
+# took RVH from Cheshire's hardcoded struct, which left HExtEn=0 dead).
+IG_CVA6_CONFIG := cv64a6_imafdchsclic_sv39
 IG_CVA6_PKG_FILE := $(shell $(BENDER) path cva6)/core/include/$(IG_CVA6_CONFIG)_config_pkg.sv
 # deactivate hypervisor extension (large and not needed), cut D-cache in half, switch to WT cache
 IG_CVA6_PKG_PARAMS := \

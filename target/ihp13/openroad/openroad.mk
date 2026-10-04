@@ -31,10 +31,9 @@ LOG_PATH			:= "$(OPENROAD_OUT_DIR)/$(PROJ_NAME)_$(shell date +"%Y-%m-%d_%H_%M_%Z
 ###########
 
 # Patch to the vendored PDK's checked-out content, applied fresh before
-# every backend run (matches the existing rtl-patches pattern in
-# ../pickle/pickle.mk, which post-patches CVA6's ariane_pkg.sv the same
-# way - established project convention for a vendored dependency, not
-# something new). Every SRAM macro's A_DOUT output bus declares
+# every backend run (the same pattern ../pickle/pickle.mk used to
+# post-patch CVA6's ariane_pkg.sv until the CVA6 pulp-v2 bump retired it).
+# Every SRAM macro's A_DOUT output bus declares
 # `max_capacitance : "6.4e-14"` - as picofarads (this library's own
 # capacitive_load_unit), 14 orders of magnitude too small (a min buffer's
 # own input cap is ~0.001pF) - which trips OpenROAD 2c56926's resizer

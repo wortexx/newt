@@ -25,7 +25,8 @@ context: |
   - Upstream is dormant (since 2024-10); we own all tooling decisions
   - PROJ_NAME/RTL_NAME stay "basilisk" — many scripts hardcode it; do not rename
   - Modify dependencies (cheshire, cva6) via forks pinned in Bender.yml, not patches
-  - CVA6 config: cv64a6_imafdcsclic_sv39; CV-X-IF exists but is disabled/tied off
+  - CVA6 pulp-v2.0.0, config cv64a6_imafdchsclic_sv39 (H ext off via iguana.mk);
+    CV-X-IF exists but is disabled/tied off; native Zkn pinned off in the fork
   - Licensing: Solderpad 0.51 for hardware/scripts, Apache-2.0 for software;
     keep SPDX headers in new files
   - Synth needs >35 GB RAM, ~2.5 h; backend >24 h and does not close timing

@@ -21,7 +21,9 @@ dependencies:
   # Fork of v0.3.1 carrying newt patches, pinned by tag v0.3.1-newt.<N> (branch
   # newt/v0.3.1). newt.1: address maps built without constant functions, which
   # Xcelium rejects. See openspec/changes/xcelium-sim-lane.
-  cheshire:           { git: https://github.com/wortexx/cheshire.git,             rev: v0.3.1-newt.1 }
+  # newt.2: upstream's CVA6 pulp-v2.0.0 bump (71f9cb2, also clic 3.0.0) cherry-
+  # picked, plus CVA6 ZKN pinned off. See openspec/changes/bump-cva6-pulp-v2.
+  cheshire:           { git: https://github.com/wortexx/cheshire.git,             rev: v0.3.1-newt.2 }
   hyperbus:           { git: https://github.com/pulp-platform/hyperbus,           version: 0.0.4    }
   register_interface: { git: https://github.com/pulp-platform/register_interface, version: 0.4.5    }
 
