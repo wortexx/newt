@@ -41,7 +41,7 @@ Caveats: there is no clock tree, so a real clock network adds power on top of th
 
 Stage: block synthesis netlist, gate-level simulation (Verilator) + OpenSTA. Corner: `typ_1p20V_25C`. Activity: annotated from the SAIF of each workload below (not default activity); every run annotates all pins (100.0 % minimum) and passes its gate-level functional check. Coprocessor only: the CPU's energy is not in these figures.
 
-Each workload is SHA3-256 absorb paced like the SoC: per block, 17 `kxor`, then one `kperm` or 24 `shatr`, over the measured cycles per block of that implementation and cache regime (*cached*: message in the D-cache, `docs/results/sha3-ise.md`; *uncached*: message evicted, `docs/results/sha3-mmio-uncached.md`). Energy per block = average power × cycles per block × clock period; per byte, divided by the 136-byte rate. At another period, switching and internal energy per cycle stay, and leakage scales with the period. Achieved period: 19.23 ns (11.0 ns constraint minus WNS −8.23 ns, post-global-route, tt, SoC P&R run 37162759719 with both arms; the critical path is outside the coprocessor (WNS −8.36 ns without it)).
+Each workload is SHA3-256 absorb paced like the SoC: per block, 17 `kxor`, then one `kperm` or 24 `shatr`, over the measured cycles per block of that implementation and cache regime (*cached*: message in the D-cache, `docs/results/sha3-ise.md`; *uncached*: message evicted, `docs/results/sha3-mmio-uncached.md`). Energy per block = average power × cycles per block × clock period; per byte, divided by the 136-byte rate. At another period, switching and internal energy per cycle stay, and leakage scales with the period. Achieved period: 19.23 ns (11.0 ns constraint minus WNS -8.23 ns after `grt`, tt, SoC P&R run 37162759719; see the P&R section).
 
 | implementation | regime | cycles/block (workload / measured) | power @ 11.0 ns (mW) | energy/block @ 11.0 ns (nJ) | energy/byte @ 11.0 ns (pJ/B) | energy/byte @ achieved period |
 |---|---|---:|---:|---:|---:|---:|
@@ -59,6 +59,27 @@ Each workload is SHA3-256 absorb paced like the SoC: per block, 17 `kxor`, then 
 | sw-xkcp-opt64 | 16,842 | 13,253.0 |
 
 Caveats: no clock tree (ideal clock), so a real clock network adds power, mostly in the sequential share; typical corner; the CPU, caches and interconnect are outside the block. The P&R-stage figures are task 5.4.
+
+## SoC place and route (task 5.4)
+
+P&R lane run 37162759719 (the SoC with both SHA-3 arms, `keccak_cvxif` and `keccak_mmio`, R = 6) against run 37108127061 (the pre-coprocessor tree, the clean reference; `docs/infra-plan.md` Phase 11). Same flow and settings: taped-out die, `gpl` pass 2 timing-driven repair virtual, `stop_after=grt`. **Stage used: grt**, the latest stage the run reached (the lane's gate; detailed routing is best-effort and was not run). Corner: `tt` (`typ_1p20V_25C`). Constraint: 11.0 ns.
+
+| | reference | with both arms |
+|---|---:|---:|
+| WNS / TNS after `dpl` (ns) | -0.87 / -306 | -0.87 / -171 |
+| WNS / TNS after `cts` (ns) | -3.18 / -19,363 | -2.70 / -14,766 |
+| WNS / TNS after `grt` (ns) | -8.36 / -44,095 | -8.23 / -45,143 |
+| `grt` total demand | 83.57 % | 77.33 % |
+| `grt` Metal3 demand | 108.99 % | 95.27 % |
+| `grt` wirelength (µm) | 169,944,327 | 160,795,498 |
+| utilization entering `dpl` (`DPL-0009`) | 60.8 % | 68.1 % |
+| HPWL after `dpl` / after `cts` (M µm) | 81.0 / 124.7 | 86.0 / 116.1 |
+
+Achieved period: 19.23 ns (11.0 ns minus WNS -8.23 ns after `grt`), used by the energy section. The critical path is outside the SHA-3 blocks: WNS barely moves against the reference.
+
+**SoC power: not reported.** The lane's `report_power` uses default activity (no workload SAIF), which the evaluation spec rejects as workload power. In this netlist it is also broken: from `pre_place` on, the combinational share collapses against the reference (0.006 vs 0.237 W), because OpenSTA's default activity stops propagating (`docs/infra-plan.md` Phase 17, not investigated). The SHA-3 blocks' power is the activity-annotated block power in the sections above.
+
+Caveats: one run each, and placement varies from run to run: congestion fell although the netlist grew. Area, power and energy of the SHA-3 blocks themselves come from synthesis (per instance) and from block-level gate-level power, not from this delta.
 
 ## SoC synthesis (task 5.3)
 

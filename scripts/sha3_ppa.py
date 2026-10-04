@@ -32,10 +32,17 @@ back-end in both cache regimes, at the 11.0 ns constraint and, with
 --achieved-period-ns, at the period P&R achieved; plus the idle
 coprocessor's cost per byte of the software baselines.
 
+With --pnr RUN_DIR --pnr-ref REF_DIR (task 5.4) it adds the SoC P&R
+section from two P&R lane runs' `pnr-reports` artifacts (`gh run download
+<id> -n pnr-reports -D <dir>`): stages reached, WNS/TNS per stage, grt
+congestion and placement figures, against the pre-coprocessor reference.
+
 Usage: scripts/sha3_ppa.py [--out docs/results/sha3-ppa.md]
                            [--soc RUN_DIR --soc-ref REF_DIR]
                            [--soc-run-id N --soc-ref-run-id N]
-                           [--achieved-period-ns T]
+                           [--pnr RUN_DIR --pnr-ref REF_DIR]
+                           [--pnr-run-id N --pnr-ref-run-id N]
+                           [--achieved-period-ns T --achieved-period-source TEXT]
 """
 
 import argparse
@@ -302,6 +309,132 @@ def energy_section(block_dir, achieved_ns, achieved_src=""):
     return out
 
 
+PNR_STAGES = ["dpl", "cts", "grt"]
+
+
+def pnr_metrics(d):
+    """Stage outcomes, WNS/TNS per stage, grt congestion and placement figures
+    from a P&R lane run's `pnr-reports` artifact (gh run download <id> -n
+    pnr-reports -D <dir>)."""
+    d = Path(d)
+    rep = d / "reports"
+    status = {}
+    for line in (d / "save" / "pnr_status.log").read_text().splitlines():
+        f = line.split()
+        if len(f) >= 2 and status.get(f[0]) != "ok":  # keep "ok" over a later stop-after
+            status[f[0]] = f[1]
+    timing = {}
+    for s in PNR_STAGES:
+        f = rep / f"basilisk.{s}.rpt"
+        if f.exists():
+            t = f.read_text(errors="replace")
+            wns = re.search(r"^wns max (\S+)", t, re.M)
+            tns = re.search(r"^tns max (\S+)", t, re.M)
+            if wns and tns:
+                timing[s] = (float(wns.group(1)), float(tns.group(1)))
+    grt = (rep / "pnr_grt.log").read_text(errors="replace")
+    dpl = (rep / "pnr_dpl.log").read_text(errors="replace")
+    cts = (rep / "pnr_cts.log").read_text(errors="replace")
+    total = re.findall(r"^Total\s+\d+\s+\d+\s+([\d.]+)%", grt, re.M)
+    metal3 = re.findall(r"^Metal3\s+\d+\s+\d+\s+([\d.]+)%", grt, re.M)
+    wl = re.findall(r"GRT-0018\] Total wirelength: (\d+)", grt)
+    util = re.search(r"DPL-0009\] Utilization: ([\d.]+)%", dpl)
+    hpwl_dpl = re.search(r"DPL-0022\] HPWL after\s+([\d.]+)", dpl)
+    hpwl_cts = re.findall(r"legalized HPWL\s+([\d.]+)", cts)
+    return {
+        "status": status, "timing": timing,
+        "grt_demand_pct": float(total[-1]) if total else None,
+        "grt_metal3_pct": float(metal3[-1]) if metal3 else None,
+        "grt_wirelength_um": int(wl[-1]) if wl else None,
+        "dpl_util_pct": float(util.group(1)) if util else None,
+        "hpwl_dpl_um": float(hpwl_dpl.group(1)) if hpwl_dpl else None,
+        "hpwl_cts_um": float(hpwl_cts[-1]) if hpwl_cts else None,
+    }
+
+
+PNR_GATED = ["floorplan", "pre_place", "gpl", "dpl", "cts", "grt"]
+
+
+def pnr_latest(m):
+    """The latest gated stage a P&R run reached (status ok)."""
+    reached = [s for s in PNR_GATED if m["status"].get(s) == "ok"]
+    return reached[-1] if reached else None
+
+
+def pnr_achieved_period(m, period):
+    """(period, source) achieved by a P&R run: the constraint minus the WNS
+    after its latest stage, or None when that stage has no timing report."""
+    latest = pnr_latest(m)
+    if latest not in m["timing"]:
+        return None
+    wns = m["timing"][latest][0]
+    return period - wns, latest, wns
+
+
+def pnr_section(run, ref, run_id, ref_id, period):
+    """Task 5.4: SoC P&R with the SHA-3 arms against the pre-coprocessor
+    reference, at the latest stage the run reached."""
+    latest = pnr_latest(run)
+
+    def num(x, fmt):
+        return format(x, fmt) if x is not None else "—"
+
+    out = [
+        "## SoC place and route (task 5.4)",
+        "",
+        f"P&R lane run {run_id or '?'} (the SoC with both SHA-3 arms, `keccak_cvxif` and "
+        f"`keccak_mmio`, R = {soc_rounds_per_cycle()}) against run {ref_id or '?'} (the "
+        "pre-coprocessor tree, the clean reference; `docs/infra-plan.md` Phase 11). Same flow and "
+        "settings: taped-out die, `gpl` pass 2 timing-driven repair virtual, `stop_after=grt`. "
+        f"**Stage used: {latest or 'none'}**, the latest stage the run reached (the lane's gate; "
+        "detailed routing is best-effort and was not run). Corner: `tt` "
+        f"(`typ_1p20V_25C`). Constraint: {period:.1f} ns.",
+        "",
+        "| | reference | with both arms |",
+        "|---|---:|---:|",
+    ]
+    for s in PNR_STAGES:
+        if s in run["timing"] and s in ref["timing"]:
+            (rw, rt), (fw, ft) = run["timing"][s], ref["timing"][s]
+            out.append(f"| WNS / TNS after `{s}` (ns) | {fw:.2f} / {ft:,.0f} | "
+                       f"{rw:.2f} / {rt:,.0f} |")
+    out += [
+        f"| `grt` total demand | {num(ref['grt_demand_pct'], '.2f')} % | "
+        f"{num(run['grt_demand_pct'], '.2f')} % |",
+        f"| `grt` Metal3 demand | {num(ref['grt_metal3_pct'], '.2f')} % | "
+        f"{num(run['grt_metal3_pct'], '.2f')} % |",
+        f"| `grt` wirelength (µm) | {num(ref['grt_wirelength_um'], ',')} | "
+        f"{num(run['grt_wirelength_um'], ',')} |",
+        f"| utilization entering `dpl` (`DPL-0009`) | {num(ref['dpl_util_pct'], '.1f')} % | "
+        f"{num(run['dpl_util_pct'], '.1f')} % |",
+        f"| HPWL after `dpl` / after `cts` (M µm) | "
+        f"{num(ref['hpwl_dpl_um'] and ref['hpwl_dpl_um'] / 1e6, '.1f')} / "
+        f"{num(ref['hpwl_cts_um'] and ref['hpwl_cts_um'] / 1e6, '.1f')} | "
+        f"{num(run['hpwl_dpl_um'] and run['hpwl_dpl_um'] / 1e6, '.1f')} / "
+        f"{num(run['hpwl_cts_um'] and run['hpwl_cts_um'] / 1e6, '.1f')} |",
+        "",
+    ]
+    ach = pnr_achieved_period(run, period)
+    if ach:
+        out += [f"Achieved period: {ach[0]:.2f} ns ({period:.1f} ns minus WNS {ach[2]:.2f} ns "
+                f"after `{ach[1]}`), used by the energy section. The critical path is outside the "
+                "SHA-3 blocks: WNS barely moves against the reference.", ""]
+    out += [
+        "**SoC power: not reported.** The lane's `report_power` uses default activity (no "
+        "workload SAIF), which the evaluation spec rejects as workload power. In this netlist it "
+        "is also broken: from `pre_place` on, the combinational share collapses against the "
+        "reference (0.006 vs 0.237 W), because OpenSTA's default activity stops propagating "
+        "(`docs/infra-plan.md` Phase 17, not investigated). The SHA-3 blocks' power is the "
+        "activity-annotated block power in the sections above.",
+        "",
+        "Caveats: one run each, and placement varies from run to run: congestion fell although "
+        "the netlist grew. Area, power and energy of the SHA-3 blocks themselves come from "
+        "synthesis (per instance) and from block-level gate-level power, not from this delta.",
+        "",
+    ]
+    return out
+
+
 MMIO_WORKLOADS = [  # (power_<name>.json, implementation, regime)
     ("cpu-cached", "mmio-cpu", "cached"),
     ("dma-cached", "mmio-dma", "cached"),
@@ -391,6 +524,10 @@ def main(argv=None):
     ap.add_argument("--soc-ref-run-id", help="synth lane run id of --soc-ref, for the report")
     ap.add_argument("--achieved-period-ns", type=float,
                     help="clock period the P&R lane achieved (task 5.4), for the energy table")
+    ap.add_argument("--pnr", help="pnr-reports artifact dir of the SoC P&R run (task 5.4)")
+    ap.add_argument("--pnr-ref", help="pnr-reports artifact dir of the reference P&R run")
+    ap.add_argument("--pnr-run-id", help="P&R lane run id of --pnr, for the report")
+    ap.add_argument("--pnr-ref-run-id", help="P&R lane run id of --pnr-ref, for the report")
     ap.add_argument("--achieved-period-source", default="",
                     help="where --achieved-period-ns comes from (run, stage, corner), for the report")
     a = ap.parse_args(argv)
@@ -458,8 +595,22 @@ def main(argv=None):
     power = BLOCK_DIR / f"keccak_cvxif_r{selected}" / "power.json"
     if power.exists():
         out += power_section(json.loads(power.read_text()))
-    out += energy_section(power.parent, a.achieved_period_ns, a.achieved_period_source)
+    if bool(a.pnr) != bool(a.pnr_ref):
+        sys.exit("sha3_ppa: --pnr and --pnr-ref go together")
+    pnr_run = pnr_metrics(a.pnr) if a.pnr else None
+    achieved, achieved_src = a.achieved_period_ns, a.achieved_period_source
+    if achieved is None and pnr_run:
+        ach = pnr_achieved_period(pnr_run, period)
+        if ach:
+            achieved = ach[0]
+            achieved_src = (f"{period:.1f} ns constraint minus WNS {ach[2]:.2f} ns after "
+                            f"`{ach[1]}`, tt, SoC P&R run {a.pnr_run_id or '?'}; see the P&R "
+                            "section")
+    out += energy_section(power.parent, achieved, achieved_src)
     out += mmio_section(selected, next(m for m in rows if m["rounds_per_cycle"] == selected))
+    if pnr_run:
+        out += pnr_section(pnr_run, pnr_metrics(a.pnr_ref), a.pnr_run_id, a.pnr_ref_run_id,
+                           period)
     if a.soc:
         out += soc_section(soc_metrics(a.soc), soc_metrics(a.soc_ref), a.soc_run_id,
                            a.soc_ref_run_id)
