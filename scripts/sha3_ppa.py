@@ -32,6 +32,10 @@ back-end in both cache regimes, at the 11.0 ns constraint and, with
 --achieved-period-ns, at the period P&R achieved; plus the idle
 coprocessor's cost per byte of the software baselines.
 
+With --soc-both DIR (task 8.2) it adds the SoC synthesis with both SHA-3
+blocks: totals against the reference and the coprocessor-only run, each
+block's kept-hierarchy instance, and the per-instance synthesis spread.
+
 With --pnr RUN_DIR --pnr-ref REF_DIR (task 5.4) it adds the SoC P&R
 section from two P&R lane runs' `pnr-reports` artifacts (`gh run download
 <id> -n pnr-reports -D <dir>`): stages reached, WNS/TNS per stage, grt
@@ -40,6 +44,7 @@ congestion and placement figures, against the pre-coprocessor reference.
 Usage: scripts/sha3_ppa.py [--out docs/results/sha3-ppa.md]
                            [--soc RUN_DIR --soc-ref REF_DIR]
                            [--soc-run-id N --soc-ref-run-id N]
+                           [--soc-both RUN_DIR --soc-both-run-id N]
                            [--pnr RUN_DIR --pnr-ref REF_DIR]
                            [--pnr-run-id N --pnr-ref-run-id N]
                            [--achieved-period-ns T --achieved-period-source TEXT]
@@ -309,6 +314,79 @@ def energy_section(block_dir, achieved_ns, achieved_src=""):
     return out
 
 
+def instance_metrics(d, module):
+    """(cells, area, flip-flops) of a kept-hierarchy module in a synth lane
+    run's area report, or None."""
+    text = (reports_dir(d) / "basilisk_area.rpt").read_text()
+    m = re.search(r"=== (" + module + r"\S*) ===(.*?)Chip area for module '\\\1': ([\d.]+)",
+                  text, re.S)
+    if not m:
+        return None
+    kc = re.search(r"^\s+(\d+)\s+\S+\s+cells$", m.group(2), re.M)
+    kd = sum(int(n) for n, _ in re.findall(r"^\s+(\d+)\s+\S+\s+(sg13g2_\w*df\w*)$",
+                                            m.group(2), re.M))
+    return int(kc.group(1)) if kc else None, float(m.group(3)), kd
+
+
+def soc_both_section(run, ref, single, d_run, d_single, ids):
+    """Task 8.2: SoC synthesis with both SHA-3 blocks, against the
+    pre-coprocessor reference and the coprocessor-only run (task 5.3)."""
+    run_id, ref_id, single_id = ids
+    out = [
+        "## SoC synthesis with both arms (task 8.2)",
+        "",
+        f"Synth lane run {run_id or '?'} (SoC with `keccak_cvxif` and `keccak_mmio`, "
+        f"R = {soc_rounds_per_cycle()}) against run {ref_id or '?'} (before the coprocessor) and "
+        f"run {single_id or '?'} (coprocessor only, task 5.3). Same flow: Yosys synthesis, "
+        f"`typ_1p20V_25C`. Yosys `CHECK` problems: {run['check']}.",
+        "",
+        "| | reference | coprocessor only | both arms | delta vs reference |",
+        "|---|---:|---:|---:|---:|",
+        f"| cells | {ref['cells']:,} | {single['cells']:,} | {run['cells']:,} | "
+        f"{pct(run['cells'], ref['cells'])} |",
+        f"| area (µm²) | {ref['area']:,.0f} | {single['area']:,.0f} | {run['area']:,.0f} | "
+        f"{pct(run['area'], ref['area'])} |",
+        f"| flip-flops | {ref['dffs']:,} | {single['dffs']:,} | {run['dffs']:,} | "
+        f"{pct(run['dffs'], ref['dffs'])} |",
+        "",
+        "Each block is its own instance (kept hierarchy):",
+        "",
+        "| instance | cells | area (µm²) | flip-flops | share of SoC area |",
+        "|---|---:|---:|---:|---:|",
+    ]
+    insts = {}
+    for name in ("keccak_cvxif", "keccak_mmio"):
+        v = instance_metrics(d_run, name)
+        insts[name] = v
+        if v:
+            out.append(f"| `i_{name}` | {v[0]:,} | {v[1]:,.0f} | {v[2]:,} | "
+                       f"{v[1] / run['area'] * 100:.2f} % |")
+    single_cvxif = instance_metrics(d_single, "keccak_cvxif")
+    block = BLOCK_DIR / f"keccak_cvxif_r{soc_rounds_per_cycle()}" / "metrics.json"
+    block_area = json.loads(block.read_text())["area_um2"] if block.exists() else None
+    if insts["keccak_cvxif"] and single_cvxif:
+        out += [
+            "",
+            f"Synthesis spread: the same `keccak_cvxif` RTL comes out at "
+            f"{single_cvxif[1]:,.0f} µm² in run {single_id or '?'}, "
+            f"{insts['keccak_cvxif'][1]:,.0f} µm² here"
+            + (f", and {block_area:,.0f} µm² as a standalone block" if block_area else "")
+            + ". Neither the block's RTL nor its parameters changed between the runs, yet its "
+            "synthesized area differs by up to 11 % between them, far outside the ±0.04 % "
+            "run-to-run noise the SoC flow shows on untouched modules. The cause is not "
+            "investigated. Per-instance SoC areas carry that uncertainty; the R sweep's "
+            "block-level areas come from one consistent flow.",
+        ]
+    cva6 = (ref["modules"].get("cva6", 0), run["modules"].get("cva6", 0))
+    out += [
+        "",
+        f"`cva6`: {cva6[0]:,.0f} → {cva6[1]:,.0f} µm² ({cva6[1] - cva6[0]:+,.0f}), as in task "
+        "5.3 with CV-X-IF on; not investigated.",
+        "",
+    ]
+    return out
+
+
 PNR_STAGES = ["dpl", "cts", "grt"]
 
 
@@ -524,6 +602,9 @@ def main(argv=None):
     ap.add_argument("--soc-ref-run-id", help="synth lane run id of --soc-ref, for the report")
     ap.add_argument("--achieved-period-ns", type=float,
                     help="clock period the P&R lane achieved (task 5.4), for the energy table")
+    ap.add_argument("--soc-both", help="synth-reports artifact dir of the SoC run with both "
+                    "SHA-3 blocks (task 8.2); needs --soc and --soc-ref")
+    ap.add_argument("--soc-both-run-id", help="synth lane run id of --soc-both, for the report")
     ap.add_argument("--pnr", help="pnr-reports artifact dir of the SoC P&R run (task 5.4)")
     ap.add_argument("--pnr-ref", help="pnr-reports artifact dir of the reference P&R run")
     ap.add_argument("--pnr-run-id", help="P&R lane run id of --pnr, for the report")
@@ -614,6 +695,12 @@ def main(argv=None):
     if a.soc:
         out += soc_section(soc_metrics(a.soc), soc_metrics(a.soc_ref), a.soc_run_id,
                            a.soc_ref_run_id)
+    if a.soc_both:
+        if not a.soc:
+            sys.exit("sha3_ppa: --soc-both needs --soc (coprocessor only) and --soc-ref")
+        out += soc_both_section(soc_metrics(a.soc_both), soc_metrics(a.soc_ref),
+                                soc_metrics(a.soc), a.soc_both, a.soc,
+                                (a.soc_both_run_id, a.soc_ref_run_id, a.soc_run_id))
     Path(a.out).parent.mkdir(parents=True, exist_ok=True)
     Path(a.out).write_text("\n".join(out))
     print(f"sha3_ppa: wrote {a.out} (selected R={selected})")

@@ -60,6 +60,17 @@ Each workload is SHA3-256 absorb paced like the SoC: per block, 17 `kxor`, then 
 
 Caveats: no clock tree (ideal clock), so a real clock network adds power, mostly in the sequential share; typical corner; the CPU, caches and interconnect are outside the block. The P&R-stage figures are task 5.4.
 
+## MMIO accelerator block (`keccak_mmio`, task 8.1)
+
+Stage: block synthesis (yosys + OpenSTA, no placement). Corner: `typ_1p20V_25C`. Constraint: 11.0 ns. R = 6, the SoC's value, so it shares the coprocessor's round datapath; the AXI front end is `axi_to_detailed_mem` with a 5-bit ID, as on Cheshire's external port. `CHECK` problems: 0; structural warnings: 0.
+
+| block | cells | area (µm²) | flip-flops | critical path (ns) | slack @ 11.0 ns | permutation cycles |
+|---|---:|---:|---:|---:|---:|---:|
+| `keccak_mmio` | 79,446 | 1,004,152 | 2,032 | 7.46 | 3.41 | 4 |
+| `keccak_cvxif` | 72,526 | 941,886 | 2,006 | 7.67 | 3.19 | 5 (`kperm`) |
+
+Power: not run yet (`make power-coproc-workloads BLOCK=keccak_mmio ROUNDS_PER_CYCLE=6`).
+
 ## SoC place and route (task 5.4)
 
 P&R lane run 37162759719 (the SoC with both SHA-3 arms, `keccak_cvxif` and `keccak_mmio`, R = 6) against run 37108127061 (the pre-coprocessor tree, the clean reference; `docs/infra-plan.md` Phase 11). Same flow and settings: taped-out die, `gpl` pass 2 timing-driven repair virtual, `stop_after=grt`. **Stage used: grt**, the latest stage the run reached (the lane's gate; detailed routing is best-effort and was not run). Corner: `tt` (`typ_1p20V_25C`). Constraint: 11.0 ns.
@@ -107,3 +118,24 @@ Modules whose area moved by ≥ 500 µm² (reference → with coprocessor):
 `cva6` shrinking while CV-X-IF is switched on (its `cvxif_fu` becomes live) is beyond the ±0.04 % ABC noise seen on untouched modules; its cause has not been investigated. The SoC delta therefore differs from the coprocessor's own area by that amount.
 
 `synth-baseline.json` (2026-09-17) predates the Cheshire v0.3.1 bump; the reference run is within 0.05 % of it on every metric, so that bump moved the SoC by noise only. Timing (WNS) is not available from the synth lane's STA (a known gap in `basilisk.sdc`, also unavailable in the baseline); SoC timing comes from P&R (task 5.4).
+
+## SoC synthesis with both arms (task 8.2)
+
+Synth lane run 37218328058 (SoC with `keccak_cvxif` and `keccak_mmio`, R = 6) against run 36447894410 (before the coprocessor) and run 37005575294 (coprocessor only, task 5.3). Same flow: Yosys synthesis, `typ_1p20V_25C`. Yosys `CHECK` problems: 0.
+
+| | reference | coprocessor only | both arms | delta vs reference |
+|---|---:|---:|---:|---:|
+| cells | 735,557 | 801,008 | 873,391 | +137,834 (+18.74 %) |
+| area (µm²) | 17,771,117 | 18,610,805 | 19,630,376 | +1,859,259 (+10.46 %) |
+| flip-flops | 89,249 | 91,344 | 94,128 | +4,879 (+5.47 %) |
+
+Each block is its own instance (kept hierarchy):
+
+| instance | cells | area (µm²) | flip-flops | share of SoC area |
+|---|---:|---:|---:|---:|
+| `i_keccak_cvxif` | 74,805 | 961,583 | 2,006 | 4.90 % |
+| `i_keccak_mmio` | 63,759 | 857,083 | 2,025 | 4.37 % |
+
+Synthesis spread: the same `keccak_cvxif` RTL comes out at 867,261 µm² in run 37005575294, 961,583 µm² here, and 941,886 µm² as a standalone block. Neither the block's RTL nor its parameters changed between the runs, yet its synthesized area differs by up to 11 % between them, far outside the ±0.04 % run-to-run noise the SoC flow shows on untouched modules. The cause is not investigated. Per-instance SoC areas carry that uncertainty; the R sweep's block-level areas come from one consistent flow.
+
+`cva6`: 6,760,001 → 6,705,262 µm² (-54,739), as in task 5.3 with CV-X-IF on; not investigated.
