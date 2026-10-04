@@ -49,6 +49,8 @@ What now changes in the built core, from comparing v1 Cheshire's hardcoded struc
 
 The Zkn logic needs `ZKN && RVB`, and `RVB` is also 0. The `aes` unit is only generated under `if (CVA6Cfg.ZKN)` in `ex_stage.sv`, so with both off nothing reaches the netlist.
 
+The pin is also forced in practice: `pulp-v2.0.0`'s own `Bender.yml` does not list `core/aes.sv` or `core/include/aes_pkg.sv`, so they are absent from `bender sources`. Turning `ZKN` on would need a CVA6 fork that adds them. With it off, `ex_stage.sv` references `aes` only inside a generate branch that is never elaborated. Upstream Cheshire builds that way. Whether morty's pickler tolerates the undefined module is checked in task 3.4.
+
 ### D4. Lock the fork's tested subtree by hand
 This follows Phase 13's policy. Only the entries the cherry-pick moves are changed:
 - `cheshire` → the fork commit;
