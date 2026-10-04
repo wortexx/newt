@@ -218,7 +218,7 @@ def sha3_256_slopes(csv_name):
     return out
 
 
-def energy_section(block_dir, achieved_ns):
+def energy_section(block_dir, achieved_ns, achieved_src=""):
     """Task 5.5: energy per byte of the coprocessor, from the activity-annotated
     power of each SoC-paced workload (power-coproc-workloads) and the measured
     cycles per block. Returns markdown lines, or [] when the runs are missing."""
@@ -253,7 +253,8 @@ def energy_section(block_dir, achieved_ns):
         "*uncached*: message evicted, `docs/results/sha3-mmio-uncached.md`). Energy per block = "
         "average power × cycles per block × clock period; per byte, divided by the 136-byte "
         "rate. At another period, switching and internal energy per cycle stay, and leakage "
-        "scales with the period.",
+        "scales with the period." + (f" Achieved period: {achieved_ns:.2f} ns ({achieved_src})."
+                                     if achieved_ns else ""),
         "",
         f"| implementation | regime | cycles/block (workload / measured) | power @ {t11:.1f} ns "
         f"(mW) | energy/block @ {t11:.1f} ns (nJ) | energy/byte @ {t11:.1f} ns (pJ/B) | "
@@ -301,6 +302,85 @@ def energy_section(block_dir, achieved_ns):
     return out
 
 
+MMIO_WORKLOADS = [  # (power_<name>.json, implementation, regime)
+    ("cpu-cached", "mmio-cpu", "cached"),
+    ("dma-cached", "mmio-dma", "cached"),
+    ("cpu-uncached", "mmio-cpu", "uncached"),
+    ("dma-uncached", "mmio-dma", "uncached"),
+]
+
+
+def mmio_section(r, cvxif):
+    """Task 8.1: block synthesis and activity-annotated power of keccak_mmio
+    at the SoC's R, next to keccak_cvxif's figures. [] when not run yet."""
+    d = BLOCK_DIR / f"keccak_mmio_r{r}"
+    if not (d / "metrics.json").exists():
+        return []
+    m = json.loads((d / "metrics.json").read_text())
+    period = m["clock_period_ns"]
+    out = [
+        "## MMIO accelerator block (`keccak_mmio`, task 8.1)",
+        "",
+        f"Stage: {m['stage']}. Corner: `{m['corner']}`. Constraint: {period:.1f} ns. R = {r}, "
+        "the SoC's value, so it shares the coprocessor's round datapath; the AXI front end is "
+        "`axi_to_detailed_mem` with a 5-bit ID, as on Cheshire's external port. "
+        f"`CHECK` problems: {m['check_problems']}; structural warnings: "
+        f"{m['structural_check_warnings']}.",
+        "",
+        "| block | cells | area (µm²) | flip-flops | critical path (ns) | "
+        f"slack @ {period:.1f} ns | permutation cycles |",
+        "|---|---:|---:|---:|---:|---:|---:|",
+        f"| `keccak_mmio` | {m['cells']:,} | {m['area_um2']:,.0f} | {m['dffs']:,} | "
+        f"{m['critical_path_ns']:.2f} | {m['worst_slack_ns']:.2f} | {m.get('perm_cycles', '—')} |",
+    ]
+    if cvxif:
+        out.append(f"| `keccak_cvxif` | {cvxif['cells']:,} | {cvxif['area_um2']:,.0f} | "
+                   f"{cvxif['dffs']:,} | {cvxif['critical_path_ns']:.2f} | "
+                   f"{cvxif['worst_slack_ns']:.2f} | {cvxif['kperm_cycles']} (`kperm`) |")
+    out.append("")
+    runs = {}
+    for name, _, _ in MMIO_WORKLOADS + [("mmio-idle", None, None)]:
+        f = d / f"power_{name}.json"
+        if not f.exists():
+            return out + ["Power: not run yet (`make power-coproc-workloads BLOCK=keccak_mmio "
+                          f"ROUNDS_PER_CYCLE={r}`).", ""]
+        runs[name] = json.loads(f.read_text())
+    slopes = {reg: sha3_256_slopes(c) for reg, c in REGIME_CSV.items()}
+    idle = runs["mmio-idle"]
+    t11 = idle["workload"]["clock_period_ns"]
+    out += [
+        "Power: block synthesis netlist, gate-level simulation (Verilator) + OpenSTA, "
+        f"`{idle['corner']}`, {t11:.1f} ns ideal clock. Activity: annotated from the SAIF of each "
+        "workload (not default activity); every run annotates all pins "
+        f"({min(x['annotated_fraction'] for x in runs.values()) * 100:.1f} % minimum) and passes "
+        "its gate-level functional check. Workloads drive the AXI port as the SoC does, per "
+        "block: *mmio-cpu*, 17 single-beat lane stores, START, STATUS polls; *mmio-dma*, one "
+        "17-beat burst, START, polls; each over the measured cycles per block. Accelerator "
+        "only: the CPU, the iDMA and the interconnect are not in these figures.",
+        "",
+        f"| implementation | regime | cycles/block (workload / measured) | power @ {t11:.1f} ns "
+        f"(mW) | energy/block (nJ) | energy/byte (pJ/B) |",
+        "|---|---|---:|---:|---:|---:|",
+    ]
+    for name, impl, regime in MMIO_WORKLOADS:
+        p = runs[name]
+        cyc = p["workload"]["block_cycles"]
+        meas = slopes[regime].get(impl)
+        e = p["power_w"] * cyc * t11 * 1e-9
+        out.append(f"| {impl} | {regime} | {cyc} / {f'{meas:.0f}' if meas else '—'} | "
+                   f"{p['power_w'] * 1e3:.2f} | {e * 1e9:.2f} | "
+                   f"{e * 1e12 / SHA3_256_RATE:.1f} |")
+    out += [
+        "",
+        f"**Idle accelerator: {idle['power_w'] * 1e3:.2f} mW** (internal "
+        f"{idle['internal_w'] * 1e3:.2f}, switching {idle['switching_w'] * 1e3:.3f}, leakage "
+        f"{idle['leakage_w'] * 1e3:.3f}); like the coprocessor, its state flip-flops are not "
+        "clock-gated.",
+        "",
+    ]
+    return out
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -311,6 +391,8 @@ def main(argv=None):
     ap.add_argument("--soc-ref-run-id", help="synth lane run id of --soc-ref, for the report")
     ap.add_argument("--achieved-period-ns", type=float,
                     help="clock period the P&R lane achieved (task 5.4), for the energy table")
+    ap.add_argument("--achieved-period-source", default="",
+                    help="where --achieved-period-ns comes from (run, stage, corner), for the report")
     a = ap.parse_args(argv)
     if bool(a.soc) != bool(a.soc_ref):
         sys.exit("sha3_ppa: --soc and --soc-ref go together")
@@ -376,7 +458,8 @@ def main(argv=None):
     power = BLOCK_DIR / f"keccak_cvxif_r{selected}" / "power.json"
     if power.exists():
         out += power_section(json.loads(power.read_text()))
-    out += energy_section(power.parent, a.achieved_period_ns)
+    out += energy_section(power.parent, a.achieved_period_ns, a.achieved_period_source)
+    out += mmio_section(selected, next(m for m in rows if m["rounds_per_cycle"] == selected))
     if a.soc:
         out += soc_section(soc_metrics(a.soc), soc_metrics(a.soc_ref), a.soc_run_id,
                            a.soc_ref_run_id)

@@ -37,6 +37,29 @@ Workload: SHA3-256 absorb, SoC-paced, R = 6. 32 blocks of 135 cycles: 17 `kxor` 
 
 Caveats: there is no clock tree, so a real clock network adds power on top of the sequential share. The flip-flops are not clock-gated, so they draw internal power every cycle, idle cycles included, which is why the sequential share dominates. The corner is typical. The P&R-stage figure is task 5.4.
 
+## Energy per byte (task 5.5)
+
+Stage: block synthesis netlist, gate-level simulation (Verilator) + OpenSTA. Corner: `typ_1p20V_25C`. Activity: annotated from the SAIF of each workload below (not default activity); every run annotates all pins (100.0 % minimum) and passes its gate-level functional check. Coprocessor only: the CPU's energy is not in these figures.
+
+Each workload is SHA3-256 absorb paced like the SoC: per block, 17 `kxor`, then one `kperm` or 24 `shatr`, over the measured cycles per block of that implementation and cache regime (*cached*: message in the D-cache, `docs/results/sha3-ise.md`; *uncached*: message evicted, `docs/results/sha3-mmio-uncached.md`). Energy per block = average power × cycles per block × clock period; per byte, divided by the 136-byte rate. At another period, switching and internal energy per cycle stay, and leakage scales with the period. Achieved period: 19.23 ns (11.0 ns constraint minus WNS −8.23 ns, post-global-route, tt, SoC P&R run 37162759719 with both arms; the critical path is outside the coprocessor (WNS −8.36 ns without it)).
+
+| implementation | regime | cycles/block (workload / measured) | power @ 11.0 ns (mW) | energy/block @ 11.0 ns (nJ) | energy/byte @ 11.0 ns (pJ/B) | energy/byte @ achieved period |
+|---|---|---:|---:|---:|---:|---:|
+| ise-kperm | cached | 135 / 135 | 12.91 | 19.18 | 141.0 | 141.1 pJ/B @ 19.23 ns |
+| ise-shatr | cached | 232 / 232 | 14.18 | 36.19 | 266.1 | 266.2 pJ/B @ 19.23 ns |
+| ise-kperm | uncached | 281 / 280 | 10.19 | 31.50 | 231.6 | 231.8 pJ/B @ 19.23 ns |
+| ise-shatr | uncached | 377 / 377 | 11.67 | 48.40 | 355.8 | 356.1 pJ/B @ 19.23 ns |
+
+**Idle coprocessor: 9.73 mW** (internal 9.71, switching 0.005, leakage 0.012). Its flip-flops are not clock-gated, so the block draws this whenever the SoC is clocked, whatever runs. The software baselines' own energy is CPU energy, which this flow does not measure (it would need a gate-level CVA6 simulation); what the coprocessor adds to them is this idle power over their cycles:
+
+| baseline (cached) | cycles/block | coprocessor idle energy/byte @ 11.0 ns (pJ/B) |
+|---|---:|---:|
+| sw-rvcrypto | 49,614 | 39,040.9 |
+| sw-xkcp-ref64 | 82,965 | 65,283.9 |
+| sw-xkcp-opt64 | 16,842 | 13,253.0 |
+
+Caveats: no clock tree (ideal clock), so a real clock network adds power, mostly in the sequential share; typical corner; the CPU, caches and interconnect are outside the block. The P&R-stage figures are task 5.4.
+
 ## SoC synthesis (task 5.3)
 
 Synth lane run 37005575294 (SoC with `keccak_cvxif`, R = 6) against run 36447894410, the same flow on the tree just before the coprocessor (Cheshire fork `v0.3.1-newt.1`, CV-X-IF off). Stage: Yosys synthesis, `typ_1p20V_25C`. CVA6 `cv64a6_imafdcsclic_sv39`, hypervisor extension on (ADR-0004). Yosys `CHECK` problems: 0 (reference: 0).
