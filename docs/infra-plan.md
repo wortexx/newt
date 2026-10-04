@@ -58,6 +58,7 @@ Phase 10 (Actions version upgrade)  — independent maintenance, any time
 Phase 12 (yosys fork retired -> upstream v0.69)  ✅  — unblocks Phase 8
 Phase 11 (backend routability)      — design work; gates a detail-routed DEF, nothing else
 Phase 13 (Cheshire 4a270af -> v0.3.1)  ✅  — dependency maintenance; synth drift ≤0.32%
+Phase 17 (SoC default-activity power collapse) — finding; gates any SoC-level power delta
 ```
 
 **Do Phase 2 first among the technical work** — it is the long pole; everything meaningful
@@ -841,6 +842,57 @@ internet. Change: `openspec/changes/xcelium-sim-lane`. How to use it: `target/xc
     network route dropped.
   - Label-triggered synth runs (`full-synth`) wait for a deallocated runner VM. `synth.yml` has no
     start step, so start the VM (`az vm start`) or wait for `pnr.yml`.
+
+---
+
+## Phase 17 — SoC default-activity power collapses with the SHA-3 arms *(finding, 2026-10-04, not investigated)*
+
+Found in P&R run `37162759719` (`sha3-cvxif-coprocessor` at `4c25003`, both `keccak_cvxif` and
+`keccak_mmio` at R = 6, task 5.4). It is compared with the pre-coprocessor reference run
+`37108127061` (Phase 11). Both runs used the same OpenROAD build (26Q3-1740-g2c56926971), the same
+flow settings and the same SDC, and gave identical `check_setup` warnings. The SoC's
+`report_power -corner tt` (default activity: the flow reads no SAIF or VCD) roughly halves:
+
+| stage | reference: total / combinational | both arms: total / combinational |
+|---|---:|---:|
+| `pre_place` | 1.03 W / 0.237 W | 0.61 W / 0.006 W |
+| `gpl2` | 1.08 W / 0.411 W | 0.49 W / 0.013 W |
+| `grt` | 1.82 W / 0.470 W | 0.98 W / 0.019 W |
+
+At `grt`, sequential switching drops from 34 mW to 1.6 mW, and macro power from 0.113 W to
+0.029 W. The gap is already there at `pre_place`, right after the netlist is read and before
+any placement. So it comes from the synthesized netlist as OpenSTA sees it, not from P&R.
+Something in that netlist stops OpenSTA's default activity from propagating past the
+flip-flops. Candidates, none checked:
+
+- a reset or test net that becomes constant;
+- a large combinational loop that OpenSTA breaks so that activity stops there;
+- an interaction with CV-X-IF being enabled in CVA6.
+
+Impact: SoC default-activity power is not a workload figure, and the `sha3-evaluation` spec
+already rejects it. The thesis energy figures come from activity-annotated block power
+(`docs/results/sha3-ppa.md`, tasks 5.2 and 5.5) and are not affected. But no SoC-level power
+delta can be quoted from these runs, and the lane's power reports cannot be trusted until this
+is understood. Timing and routing results are unaffected: WNS at `grt` is −8.23 ns, against
+−8.36 ns on the reference.
+
+- [ ] **Diagnose in the lane.** Add a diagnostics step (or a `stop_after=pre_place` dispatch
+      with an extra report) that runs on the `pre_place` checkpoint of both netlists:
+      `report_activity_annotation`; `report_power -instances` for the top contributors;
+      `get_property` activity on `rst_ni`, the test-mode and boot-mode inputs, and a sample of
+      flip-flop Q pins in CVA6, the LLC and the coprocessor; and a `report_power` per
+      hierarchy (`i_keccak_cvxif`, `i_keccak_mmio`, `gen_cva6_cores`). The netlist exists
+      only in the self-hosted VM's synth cache, so this is the cheap path. A local synthesis
+      needs > 35 GB RAM and ~2.5 h.
+- [ ] **Isolate the trigger.** If the diagnostics do not name it, compare a netlist with only
+      `keccak_cvxif` (synth run `37005575294`'s tree, task 5.3) and one with only
+      `keccak_mmio`, to see which change sets it off.
+- [ ] **Fix or document.** Fix it in the RTL or flow if it is a real defect (e.g. a stuck
+      net). If it is an OpenSTA propagation artefact, record it, and set an explicit
+      `set_power_activity` default in `scripts/reports.tcl` so the lane's power reports are
+      comparable across netlists.
+- [ ] **Re-measure.** Re-run the SoC power figures for the reference and the both-arms
+      netlist on the same settings, and update `sha3-cvxif-coprocessor` task 5.4.
 
 ---
 
