@@ -193,6 +193,15 @@ jobs:
               [ "$p" = "$f" ] && continue # don't pass the linted file twice if it's itself a package file
               PKG_ARGS+=("$p")
             done
+            # Testbench packages are not in Bender.yml, so the list above
+            # misses them (hw/coproc/tb/keccak_mmio_tb_pkg.sv, imported by
+            # keccak_mmio_tb_top.sv). Also pass the package files that sit
+            # next to the linted file, skipping any already in the list.
+            for p in $(grep -lE '^[[:space:]]*package[[:space:]]' "$(dirname "$f")"/*.sv 2>/dev/null); do
+              [ "$(realpath "$p")" = "$(realpath "$f")" ] && continue
+              printf '%s\n' "${PKG_FILES[@]}" | xargs -r realpath | grep -qxF "$(realpath "$p")" && continue
+              PKG_ARGS+=("$p")
+            done
             # Elaborate only from the linted file's own modules (each one in
             # turn as --top-module), never from every module in the package
             # files above: a package file can also hold unrelated modules,
