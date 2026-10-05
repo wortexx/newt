@@ -801,7 +801,7 @@ Change: `openspec/changes/bump-cheshire-v0-3-1`. The CVA6 pin (`pulp-v1.0.0`) is
 ## Phase 14 — Xcelium simulation lane  ✅ done (2026-09-28, #51)
 
 The first licensed simulator this project has actually run. Cadence Xcelium (`xrun` 24.03-s004) lives on a
-restricted AWS VM (`ip-10-0-92-146.eu-central-1.compute.internal`, 2 cores, 7 GB) with no git, Bender, Docker or
+restricted AWS VM (2 cores, 7 GB) with no git, Bender, Docker or
 internet. Change: `openspec/changes/xcelium-sim-lane`. How to use it: `target/xcelium/README.md`.
 
 - [x] **Bundle, not checkout.** `make ig-xrun-bundle` builds one ~1.4 MB archive: the Bender closure (570 files,
