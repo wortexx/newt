@@ -3,7 +3,7 @@
 A Keccak-f[1600] coprocessor attached to CVA6 through the core's CV-X-IF port,
 with no change to CVA6's RTL. It executes a five-instruction SHA-3 instruction-set
 extension (ISE). Planning, rationale and requirements are in
-[`openspec/changes/sha3-cvxif-coprocessor/`](../../openspec/changes/sha3-cvxif-coprocessor/):
+[`openspec/changes/archive/2026-10-05-sha3-cvxif-coprocessor/`](../../openspec/changes/archive/2026-10-05-sha3-cvxif-coprocessor/):
 the encoding and behaviour contract is spec `keccak-coprocessor`, and the
 microarchitecture is design D2–D5.
 

@@ -14,7 +14,7 @@ superseded_by: ""
 [`docs/infra-plan.md`](../infra-plan.md) and Phase 7's decision item: mechanism
 1 (CV-X-IF) vs 2 (`Zknh`), and which hashes. The work is carried out by the
 OpenSpec change
-[`sha3-cvxif-coprocessor`](../../openspec/changes/sha3-cvxif-coprocessor/), whose
+[`sha3-cvxif-coprocessor`](../../openspec/changes/archive/2026-10-05-sha3-cvxif-coprocessor/), whose
 `design.md` D1 records the same decision in planning form. It is built on
 [ADR-0002](adr-0002-bender-pinned-forks-not-patches.md): the one dependency change it
 needs goes into the Cheshire fork.
@@ -270,7 +270,7 @@ message length. `Zknh` is not implemented.**
   thesis plan) and [`docs/infra-plan.md`](../infra-plan.md) ("ISA integration",
   Phases 7, 11, 14 and 15).
 - **REF-006**:
-  [`openspec/changes/sha3-cvxif-coprocessor/`](../../openspec/changes/sha3-cvxif-coprocessor/)
+  [`openspec/changes/archive/2026-10-05-sha3-cvxif-coprocessor/`](../../openspec/changes/archive/2026-10-05-sha3-cvxif-coprocessor/)
   (design D1–D9) and [`hw/coproc/README.md`](../../hw/coproc/README.md).
 - **REF-007**: [ADR-0002](adr-0002-bender-pinned-forks-not-patches.md): the
   Cheshire fork that carries the CV-X-IF port and `Cva6CvxifEn`.

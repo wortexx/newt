@@ -20,8 +20,8 @@ them end-to-end through the real synthesis/P&R flow to get silicon-realistic
 PPA (power/performance/area) numbers on real, fabricable IHP silicon. Decided
 2026-10-01: SHA-3 (Keccak) instructions in a CV-X-IF coprocessor, with a
 memory-mapped Keccak accelerator as the comparison arm. `Zknh` was rejected.
-The work is tracked in
-[`openspec/changes/sha3-cvxif-coprocessor/`](openspec/changes/sha3-cvxif-coprocessor/). See [`docs/custom-isa-extension.md`](docs/custom-isa-extension.md)
+The work was tracked in
+[`openspec/changes/archive/2026-10-05-sha3-cvxif-coprocessor/`](openspec/changes/archive/2026-10-05-sha3-cvxif-coprocessor/). See [`docs/custom-isa-extension.md`](docs/custom-isa-extension.md)
 for the full thesis plan and [`docs/infra-plan.md`](docs/infra-plan.md) for
 the CI/infrastructure plan (a living document — check it for current phase
 status before assuming something described there is finished).

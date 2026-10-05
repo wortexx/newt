@@ -14,7 +14,7 @@ superseded_by: ""
 [`docs/infra-plan.md`](../infra-plan.md) Phase 15: whether the thesis baseline
 should turn H off. It is also the prerequisite of task 5.3 (SoC synthesis) in
 the OpenSpec change
-[`sha3-cvxif-coprocessor`](../../openspec/changes/sha3-cvxif-coprocessor/).
+[`sha3-cvxif-coprocessor`](../../openspec/changes/archive/2026-10-05-sha3-cvxif-coprocessor/).
 
 ## Context
 
@@ -121,5 +121,5 @@ H stays on, and why.
 - **REF-003**: [ADR-0002](adr-0002-bender-pinned-forks-not-patches.md): the
   Cheshire fork as the place for dependency changes.
 - **REF-004**: [ADR-0003](adr-0003-sha3-via-cvxif.md) and
-  [`openspec/changes/sha3-cvxif-coprocessor/`](../../openspec/changes/sha3-cvxif-coprocessor/)
+  [`openspec/changes/archive/2026-10-05-sha3-cvxif-coprocessor/`](../../openspec/changes/archive/2026-10-05-sha3-cvxif-coprocessor/)
   (task 5.3).

@@ -25,7 +25,7 @@ instructions for a cryptographic (SHA) coprocessor on CVA6 / Cheshire, targeting
 
 ### ISA integration — decided 2026-10-01: SHA-3 via CV-X-IF (+ MMIO comparison arm)
 
-**Decision:** option 1 with SHA-3/Keccak. The instructions are `shatr` (one Keccak-f round, after arXiv:2508.20653) plus `kclr`/`kxor`/`krd`/`kperm`, on `custom-1` in a CV-X-IF coprocessor, with no CVA6 RTL change. A memory-mapped Keccak accelerator is built as a **comparison arm**, not as a fallback. Its job is the measured ISE-vs-MMIO crossover. `Zknh` was rejected: its speedup (~1.4–2.3×) and its hardware (~2.5k gates, no flip-flops) are too small to give a measurable PPA result on this flow. Change: `openspec/changes/sha3-cvxif-coprocessor/` (design D1). Decision record: [ADR-0003](adr/adr-0003-sha3-via-cvxif.md).
+**Decision:** option 1 with SHA-3/Keccak. The instructions are `shatr` (one Keccak-f round, after arXiv:2508.20653) plus `kclr`/`kxor`/`krd`/`kperm`, on `custom-1` in a CV-X-IF coprocessor, with no CVA6 RTL change. A memory-mapped Keccak accelerator is built as a **comparison arm**, not as a fallback. Its job is the measured ISE-vs-MMIO crossover. `Zknh` was rejected: its speedup (~1.4–2.3×) and its hardware (~2.5k gates, no flip-flops) are too small to give a measurable PPA result on this flow. Change: `openspec/changes/archive/2026-10-05-sha3-cvxif-coprocessor/` (design D1). Decision record: [ADR-0003](adr/adr-0003-sha3-via-cvxif.md).
 
 The options as they were framed:
 
@@ -370,7 +370,7 @@ map to `main.bicep` declarations exactly, with no exception left.
 
 ## Phase 7 — Coprocessor scaffolding  *(parallel track, not infra)*
 
-Executed as `openspec/changes/sha3-cvxif-coprocessor/`; its `tasks.md` is the detailed checklist.
+Executed as `openspec/changes/archive/2026-10-05-sha3-cvxif-coprocessor/`; its `tasks.md` is the detailed checklist.
 
 - [ ] `hw/coproc/keccak_*.sv` + `Bender.yml` entry (change tasks 2.x).
 - [x] Config flip, **not** through `CVA6ConfigCvxifEn=1`: that package constant never reaches the

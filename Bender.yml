@@ -22,12 +22,12 @@ dependencies:
   # newt/v0.3.1). newt.1: address maps built without constant functions, which
   # Xcelium rejects. See openspec/changes/xcelium-sim-lane. newt.2: core 0's
   # CV-X-IF port exposed on cheshire_soc plus the Cva6CvxifEn config field.
-  # See openspec/changes/sha3-cvxif-coprocessor.
+  # See openspec/changes/archive/2026-10-05-sha3-cvxif-coprocessor.
   cheshire:           { git: https://github.com/wortexx/cheshire.git,             rev: v0.3.1-newt.2 }
   # Direct (not only via Cheshire) so the root package's own RTL sees common_cells'
   # exported include dirs: morty resolves `include per package, from direct
   # dependencies only (hw/coproc/ uses common_cells/assertions.svh). Same version
-  # Cheshire v0.3.1 declares. See openspec/changes/sha3-cvxif-coprocessor.
+  # Cheshire v0.3.1 declares. See openspec/changes/archive/2026-10-05-sha3-cvxif-coprocessor.
   common_cells:       { git: https://github.com/pulp-platform/common_cells.git,   version: =1.38.0  }
   hyperbus:           { git: https://github.com/pulp-platform/hyperbus,           version: 0.0.4    }
   register_interface: { git: https://github.com/pulp-platform/register_interface, version: 0.4.5    }
