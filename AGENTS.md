@@ -91,8 +91,7 @@ make ig-sim-all
 make ig-sim-rtl        # or ig-sim-sv2v / ig-sim-synth, each with an optional -gui suffix
 
 # or the open-source, Questa-free Verilator flow instead
-# (see target/verilator/README.md for status/plusargs/coverage — not yet
-# passing end-to-end as of this writing)
+# (see target/verilator/README.md for status/plusargs/coverage)
 make ig-sim-verilator
 
 # or Cadence Xcelium on the restricted VM: build one self-contained archive

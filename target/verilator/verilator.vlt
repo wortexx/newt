@@ -4,7 +4,8 @@
 //
 // Scoped Verilator lint waivers for the Verilator simulation lane. Each
 // waiver is scoped to one rule and one file/instance, with a comment
-// explaining why - see openspec/changes/verilator-sim-flow/design.md
+// explaining why - see
+// openspec/changes/archive/2026-10-06-verilator-sim-flow/design.md
 // (Risks: "CVA6/Cheshire RTL trips Verilator") for the policy this follows.
 // Do NOT add a blanket `-Wno-*` or an unscoped `lint_off` here.
 

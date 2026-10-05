@@ -4,19 +4,16 @@ An open-source (Questa-free) simulation flow for the digital SoC, built from
 scratch: a Verilator model of `iguana_soc` (compiled with `-D NO_HYPERBUS`)
 driven by a C++ testbench that bit-bangs the real JTAG-DTM + RISC-V Debug
 Module protocol to preload an ELF and run it, exactly the way a hardware
-debugger would. See `openspec/changes/verilator-sim-flow/` for the full
-design rationale and implementation record.
+debugger would. See `openspec/changes/archive/2026-10-06-verilator-sim-flow/`
+for the full design rationale and implementation record.
 
-**Status: not yet passing end-to-end.** The model builds and the JTAG-DTM
-driver runs the full sequence (init, halt request, ELF preload, `dpc` set,
-resume) with the DMI protocol reporting success throughout, but the debug
-module's status/data reads return a value that never changes across
-repeated reads — not yet root-caused; needs waveform access this
-environment doesn't have. See `openspec/changes/verilator-sim-flow/tasks.md`
-(section 3, "Green light") for the full investigation log. The instructions
-below describe how to build and run it as designed; the *run* currently
-ends in `[JTAG] ERROR: hart 0 did not report allhalted after haltreq`
-rather than a passing exit.
+**Status: passing end-to-end (2026-10-06).** `make ig-sim-verilator` boots
+`helloworld.spm.elf`, which prints `Hello World!` and exits 0, in about 2 min.
+The project's own `sha3_smoke.spm.elf` (CV-X-IF Keccak coprocessor) passes
+on the same model too. The long-standing "frozen `DMSTATUS`" blocker was the
+C++ driver shifting JTAG data MSB-first; the DTM expects LSB-first. See
+`openspec/changes/archive/2026-10-06-verilator-sim-flow/`
+(tasks.md section 3, design.md addendum) for the investigation log.
 
 ## What is and isn't simulated
 
@@ -70,7 +67,10 @@ does **not** trigger a rebuild of the model.
 
 `0` on a passing run (the target program reached `_exit(0)`); the target's
 own nonzero return code if it exited with one; `1` on a timeout or a
-JTAG/DM protocol error (printed to stderr before exiting).
+JTAG/DM protocol error (printed to stderr before exiting). Test programs
+should fail with an **even** exit code. Odd codes are erased by Cheshire's
+crt0/boot ROM handshake before the end-of-computation poll sees them, and the
+run then times out instead of failing (`docs/infra-plan.md` Phase 16).
 
 ## Known environment gotcha (local Docker/virtiofs, not this flow's design)
 
