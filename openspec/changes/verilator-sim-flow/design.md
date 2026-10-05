@@ -153,3 +153,33 @@ JTAG-DTM/DMI read path (what it shifts or which bits it captures), not in the
 RTL or `CheshireCfg`.** Next step for whoever resumes this: diff this harness's
 DMI read bit-stream against the Xcelium trace (`dmi_jtag.state_q` transitions and
 the DR shifts around one `DMSTATUS` read) — the Xcelium VCD is the reference.
+
+**Root cause identified (2026-10-05, by code reading; not yet confirmed by a run):
+the driver shifts TDI MSB-first, but the DTM expects LSB-first.** Both shift
+registers are right-shift, insert-at-MSB: `dr_d = {tdi, dr_q[40:1]}`
+(`dmi_jtag.sv`) and `jtag_ir_shift_d = {td_i, jtag_ir_shift_q[IrLength-1:1]}`
+(`dmi_jtag_tap.sv`). So the first bit sent ends up in bit 0, and data must be
+sent LSB-first. `newt_tb.cpp`'s `ShiftValue` sends `send_idx = nbits-1-k`
+(MSB-first), so every word arrives bit-reversed. The earlier claim that this
+order "matches the canonical `jtag_test.sv` exactly" was a misreading:
+`{<<{opcode_unpacked}} = opcode` puts the LSB in element 0, and `write_bits`
+sends element 0 first, so the reference is LSB-first.
+
+The reversal predicts the observed symptom exactly. A `DMSTATUS` read
+(`addr=0x11` at bits 34/38, `op=READ` at bit 0) arrives as bits 40/6/2:
+`op=NOP`, `data=0x11`, `addr=0x40`. In Idle, `dmi_jtag` still latches
+`data_q = dmi.data` on a NOP, and the next capture returns
+`{address_q, data_q=0x11, DMINoError}`. So the frozen `0x00000011` is
+`DMSTATUS`'s own DMI address echoed back with `resp=SUCCESS`. Writes reverse
+into NOPs as well, so `dmactive` and `haltreq` never reached the DM. Why the
+earlier checks passed anyway:
+
+- IDCODE readback uses only capture (TDO), and IDCODE is the IR's reset value.
+- `DMIACCESS` (`0x11` = `10001`) reads the same reversed.
+- `DTMCSR` (`0x10`) reversed is `0x01` (IDCODE), so `ResetDmi()` shifted
+  harmlessly into IDCODE.
+
+Fix: send `send_idx = k` in `ShiftValue` and correct its comment. The
+`ResetDmi`/`dmireset` and issue-to-retrieve idle-gap changes are correct
+protocol handling, and they stay. The model has to build again first (see
+tasks.md 3.0).
