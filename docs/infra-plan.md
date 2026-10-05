@@ -50,7 +50,7 @@ the GCC ≥ 13 / binutils ≥ 2.40 floor that keeping `Zknh` open required.
 ```
 Phase 0  ──►  Phase 1 (newt-eda image) ─┐
              Phase 2 (Verilator flow)  ─┴─►  Phase 3 (fast CI) ──► Phase 4 (synth CI) ──► Phase 5+6 (P&R + Azure)
-                                                                └►  Phase 7 (coprocessor RTL, ongoing, parallel)
+                                                                └►  Phase 7 (coprocessor RTL)  ✅
                                                                 └►  Phase 8 (svase→yosys-slang, exploratory, parallel)
 
 Phase 5+6  ──►  Phase 9  ✅ (post-merge CI verification — gated on `ci-pnr-lane` landing)
@@ -67,7 +67,7 @@ frequency; GitHub large runners cover synth until then.
 
 ---
 
-## Phase 0 — Repository setup
+## Phase 0 — Repository setup  ✅ done (2026-10-05)
 
 - [x] Fork `pulp-platform/cheshire-ihp130-o` → `wortexx/newt`
       (<https://github.com/wortexx/newt>).
@@ -81,11 +81,27 @@ frequency; GitHub large runners cover synth until then.
       gating jobs — see Phase 3 below; its three stub jobs are deliberately not required).
 - [x] Add `docs/` (this file). CODEOWNERS dropped — pointless for a solo repo
       (recreate as `.github/CODEOWNERS` with `* @wortexx` if collaborators join).
-- [ ] **Naming:** keep `PROJ_NAME` / `RTL_NAME = basilisk` internally for now — many scripts
-      hardcode it (`basilisk.sdc`, checkpoint/report paths). Optional dedicated rename PR later.
-- [ ] **Dependency strategy** for modified IP: fork `cheshire` (un-tie cvxif port) and,
-      when needed, `cva6` (`CvxifEn=1` / `Zknh`); point `Bender.yml` at the forks + commits.
-      Prefer forks over `pickle/patches/` for anything beyond a one-line change.
+- [x] **Naming:** `PROJ_NAME` / `RTL_NAME` stay `basilisk`. **Won't do (2026-10-05):** the
+      rename is no longer optional, because `AGENTS.md` and `openspec/config.yaml` make it a hard
+      constraint. Many scripts hardcode the name (`basilisk.sdc`, checkpoint/report paths), and
+      the thesis gains nothing from a rename.
+- [x] **Dependency strategy** for modified IP: settled by
+      [ADR-0002](adr/adr-0002-bender-pinned-forks-not-patches.md) (accepted 2026-09-13, a hard
+      constraint in `AGENTS.md`). Dependency changes go through Bender-pinned forks, not pickle
+      patches.
+  - **Cheshire is forked:** `wortexx/cheshire`, branch `newt/v0.3.1`, pinned by
+    `rev: v0.3.1-newt.2`. `newt.1` builds the address maps without the constant functions that
+    Xcelium rejects (Phase 14). `newt.2` exposes core 0's CV-X-IF port and adds the
+    `Cva6CvxifEn` config field (Phase 7).
+  - **A CVA6 fork was never needed:** CV-X-IF is enabled through Cheshire's config field, the ISE
+    needs no CVA6 RTL change ([ADR-0003](adr/adr-0003-sha3-via-cvxif.md)), and `Zknh` was
+    rejected. CVA6 still comes in through Cheshire at `pulp-v1.0.0`.
+  - **Still open:** the inherited `target/ihp13/pickle/patches/` predate ADR-0002 and remain.
+    `wt_axi_adapter2.patch` (CVA6) is about to get a second consumer, the Verilator lane
+    (`verilator-sim-flow` task 3.0). A fix shared by two lanes is the case ADR-0002 says belongs
+    in a fork. That would mean a direct `cva6` override in `Bender.yml`, so it waits until the
+    patch actually causes trouble. Phase 16's odd-exit-code fix is already planned as a
+    Cheshire fork patch, which would be the next tag (`newt.3`).
 
 ## Phase 1 — `newt-eda` tooling image  ✅ done (2026-08-30)
 
@@ -117,13 +133,19 @@ Full planning + implementation record: `openspec/changes/newt-eda-tooling-image/
       RTL remains only partially explained (bender-version schema differences ruled out as the
       cause; see Risks). Small, benign-direction, explained-enough per this proposal's own bar.
       2024 image (`phsauter/pulp-iguana:dev`) kept reachable via `make -C docker pull-legacy`.
-- [ ] **Not yet done — adoption decision pending**: flip `docker-compose.yml`/`use-docker.sh`
-      to `newt-eda:dev` as the default dev image. Gate passed; flipping the default is a
-      separate call the user makes deliberately, not an automatic consequence of a green gate.
-- [ ] Expect 2–3 days adapting `chip.tcl` to newer OpenROAD command APIs
-      (`remove_buffers` now requires instance args; `repair_timing` / `global_route` /
-      `detailed_route` flags moved; GUI / `save_image` changes) — not attempted yet; this
-      phase only had to prove the yosys synth path, not full P&R.
+- [x] Flip `docker-compose.yml`/`use-docker.sh` to `newt-eda:dev` as the default dev image.
+      Done same-day (2026-08-30, commit `2ba8bdf`, PR #7, task 5.2 of the archived
+      `newt-eda-tooling-image` change) — this list previously said "not yet done," stale.
+- [x] ~~Expect 2–3 days adapting `chip.tcl` to newer OpenROAD command APIs~~ — **deliberately
+      skipped (user decision, 2026-10-05)**, not attempted. Phase 5's staged flow
+      (`scripts/pnr/*.tcl` + `run_pnr.sh`) already carries the needed fixes for every stage
+      that actually runs in CI or produced any thesis PPA number — e.g. `drt.tcl` drops
+      `detailed_route`'s `-bottom_routing_layer`/`-top_routing_layer` (a hard error on
+      OpenROAD `2c56926`, DRT-0509/0510) in favour of `set_routing_layers`, which `chip.tcl`
+      still never got. `chip.tcl` itself was left unfixed and still hard-errors at that stage.
+      Its only remaining role is interactive local GUI debugging (`openroad -gui`), which
+      nothing currently needs — the `eda-tooling-image` spec carries no requirement on it.
+      Revisit only if GUI-based backend debugging is needed again.
 - [x] **Found and fixed along the way**: the image was missing `gawk`/`unzip`
       (`yosys.mk`/`openroad.mk` pipe logs through `gawk '{ print strftime(...) }'`; OpenROAD's
       `checkpoint.tcl` uses `unzip`) — neither is an EDA tool the original smoke test checked
@@ -189,12 +211,20 @@ Container `newt-eda`; runner `ubuntu-latest` (or an 8-core larger runner if sim 
 
 - [x] `.github/workflows/ci.yml`: all five jobs above exist and run on every push/PR.
       `lint` and `sw` are real and gating (wired into `main`'s required status checks —
-      see Phase 0 above). `sim-unit`, `sim-soc`, and `synth-coproc` are intentionally
-      scaffolded stubs — each runs its real precondition check every run and reports which
-      blocker is still open (no Phase 7 coprocessor RTL yet; the `verilator-sim-flow`
-      JTAG-DM bug, deferred per that change's tasks.md) — but always exits 0 and is not a
-      required check until it graduates via a dedicated follow-up, never automatically.
-      Full planning record: `openspec/changes/ci-fast-lane/`.
+      see Phase 0 above). Full planning record: `openspec/changes/ci-fast-lane/`.
+- [x] `sim-unit` and `synth-coproc` **graduated from stubs to real, gating jobs** once the
+      Keccak coprocessor RTL landed under `hw/coproc/` (`sha3-cvxif-coprocessor` tasks 2.6/2.7;
+      Phase 7). Both are required status checks on `main` (`contexts: ['lint', 'sw',
+      'sim-unit', 'synth-coproc']`). This corrects the line above, which until now still said
+      both were stubs blocked on "no Phase 7 coprocessor RTL yet" — stale once Phase 7 closed.
+- [ ] `sim-soc` (Verilator full-SoC boot) is **still an intentionally scaffolded stub**, and
+      correctly so: it is blocked on Phase 2's JTAG-DM bug (frozen `DMSTATUS`/SBA reads in the
+      Verilator C++ DMI read path — not an RTL bug, per the 2026-09-28 Xcelium cross-check), not
+      on missing RTL. It runs its real precondition check every time and reports that blocker,
+      but always exits 0 and is not required until a dedicated follow-up graduates it — never
+      automatically just because the blocker clears. No work has landed on the Verilator side of
+      that bug since the cross-check; `openspec/changes/verilator-sim-flow/` is still 10/14
+      tasks, all four open ones (2.5, 3.1–3.3) downstream of this same fix.
 
 ## Phase 4 — CI synth lane  ✅ done (2026-09-02)
 
@@ -368,19 +398,45 @@ map to `main.bicep` declarations exactly, with no exception left.
   attribute is the source of truth, `infra/azure/README.md` has the rotation
   steps.
 
-## Phase 7 — Coprocessor scaffolding  *(parallel track, not infra)*
+## Phase 7 — Coprocessor scaffolding  ✅ done (2026-10-05)
 
-Executed as `openspec/changes/archive/2026-10-05-sha3-cvxif-coprocessor/`; its `tasks.md` is the detailed checklist.
+Executed as `openspec/changes/archive/2026-10-05-sha3-cvxif-coprocessor/`; its `tasks.md` is the
+detailed checklist — all 9 task groups (1–9), every item, closed. Both arms (CV-X-IF ISE and the
+MMIO comparison accelerator) are built, tested, measured for PPA, and written up.
 
-- [ ] `hw/coproc/keccak_*.sv` + `Bender.yml` entry (change tasks 2.x).
 - [x] Config flip, **not** through `CVA6ConfigCvxifEn=1`: that package constant never reaches the
       core (Phase 15). Instead, Cheshire fork field `Cva6CvxifEn = 1` is set in `hw/iguana_pkg.sv`
       (change task 1.3; verified by elaboration).
 - [x] Un-tie Cheshire `cvxif_*` port (fork `v0.3.1-newt.2`, `7b53138`; change task 1.1).
-- [ ] `sw/tests/sha3_kat_*.c` — NIST CAVP SHA-3 known-answer vectors (change tasks 3.5/3.6).
-- [ ] Unit testbench (change tasks 2.2/2.4, Verilator at block level).
 - [x] Decision from `custom-isa-extension.md`: mechanism 1 (CV-X-IF), hash SHA-3. See the
       "ISA integration" section above.
+- [x] `hw/coproc/keccak_round.sv` / `keccak_pkg.sv` (shared θρπχι round + constants), `keccak_cvxif.sv`
+      (the five-instruction ISE: `kclr`/`kxor`/`krd`/`shatr`/`kperm` on `custom-1`, one in-flight
+      instruction plus an issue queue — design D3, revised) and `keccak_mmio.sv` (the MMIO comparison
+      arm behind `axi_to_detailed_mem`, design D6), all added to `Bender.yml` (change tasks 2.1, 2.3,
+      6.1). `RoundsPerCycle` swept at {1,2,3,4,6}; **R = 6** selected for the SoC (task 5.1).
+- [x] Unit testbenches: Verilator block-level TBs for `keccak_round`, `keccak_cvxif` (every `R`,
+      CV-X-IF scenarios incl. out-of-range index, illegal `rd≠x0`, save/restore) and `keccak_mmio`
+      (AXI boundary, SLVERR, busy-hold, burst absorb) — all passing, picked up by the real `sim-unit`
+      / `synth-coproc` CI jobs (change tasks 2.2, 2.4, 6.2, 2.6; graduated from stubs, now required
+      checks per task 2.7).
+- [x] `sw/tests/sha3_kat_*.c` — 40 NIST CAVP SHA-3 KAT vectors (`scripts/sha3_vectors.py`) run on the
+      Xcelium lane against both ISE back-ends, both MMIO modes (CPU and iDMA), and three vendored
+      software baselines, plus directed illegal-`rd` and IRQ-hazard tests (change tasks 3.5, 3.6, 4.2,
+      6.5, 3.7).
+- [x] SoC integration (`i_keccak_cvxif` + `i_keccak_mmio` both instantiated, `AxiExtNumSlv=1` for the
+      MMIO window), full synth-lane and P&R-lane runs with both arms present (change tasks 3.1–3.3,
+      6.3–6.4, 5.3, 8.2, 5.4), and the final evaluation report `docs/results/sha3-evaluation.md`
+      (change task 8.3) covering speedups vs. three baselines, the rounds-per-cycle sweep, block/SoC
+      PPA, activity-annotated energy, and the measured ISE-vs-MMIO crossover (cache-regime dependent;
+      change tasks 7.1–7.2).
+- [x] Clean-checkout integration check (change task 9.1, 2026-10-05): fresh clone, full CI fast lane
+      green, 11/11 Xcelium tests pass, `openspec validate --strict` passes.
+
+**Known follow-up, not part of this change's scope:** the whole-SoC default-activity power report
+with both arms present collapses to roughly half the pre-coprocessor reference, starting before any
+placement — tracked separately as Phase 17 below. It does not affect the thesis energy figures, which
+come from activity-annotated block power (change tasks 5.2, 5.5, 8.1), not SoC-level default activity.
 
 ## Phase 8 — Replace svase+sv2v with `yosys-slang`  *(exploratory, not blocking)*
 

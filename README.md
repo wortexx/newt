@@ -1,8 +1,19 @@
-# Basilisk
+# Newt
 
-Basilisk is an end-to-end open source Linux-capable SoC targeting IHP's [130nm BiCMOS Open Source PDK](https://github.com/IHP-GmbH/IHP-Open-PDK). It is based on our Linux-capable toolkit called [Cheshire](https://github.com/pulp-platform/cheshire). Basilisk is part of the [PULP (Parallel Ultra-Low-Power) platform](https://pulp-platform.org/).
+Newt is a master's thesis project that adds SHA-3 (Keccak) cryptography instructions to a Linux-capable RISC-V SoC. It carries them through a fully open-source flow (Yosys + OpenROAD) on IHP's [130nm BiCMOS Open Source PDK](https://github.com/IHP-GmbH/IHP-Open-PDK), so the power, performance and area figures come from silicon that could actually be fabricated, not from simulation estimates.
 
-Basilisk was initially developed under the name *Iguana*; hence, the top-level design is called `iguana_chip`, but the current project name (used in most scripts) is `basilisk`.
+The work has two arms:
+
+- **Instruction-set extension (ISE).** Five custom instructions (`kclr`, `kxor`, `krd`, `shatr`, `kperm`) run in a Keccak coprocessor attached to the CVA6 core through its CV-X-IF eXtension interface. The core RTL stays unmodified. See [`hw/coproc/README.md`](hw/coproc/README.md).
+- **Memory-mapped accelerator.** A Keccak block on the SoC's AXI bus, driven by the CPU or by the DMA engine. It serves as the comparison point for measuring where an ISE beats an accelerator, and where it doesn't.
+
+Both arms are verified against the NIST SHA-3 test vectors on the full SoC and compared with pinned software baselines (XKCP, riscv-crypto). They are then measured through synthesis and place-and-route. The results are in [`docs/results/sha3-evaluation.md`](docs/results/sha3-evaluation.md), the thesis plan in [`docs/custom-isa-extension.md`](docs/custom-isa-extension.md), and the CI/infrastructure plan in [`docs/infra-plan.md`](docs/infra-plan.md).
+
+## A fork of Basilisk
+
+Newt is a fork of [Basilisk](https://github.com/pulp-platform/cheshire-ihp130-o) (`pulp-platform/cheshire-ihp130-o`), an end-to-end open-source Linux-capable SoC built on the [Cheshire](https://github.com/pulp-platform/cheshire) toolkit and part of the [PULP (Parallel Ultra-Low-Power) platform](https://pulp-platform.org/). Basilisk provides the SoC, its IHP 130nm implementation and the open EDA flow. Newt adds the SHA-3 hardware, a refreshed toolchain image, open-source and Xcelium simulation lanes, and CI that runs synthesis and place-and-route. Upstream has been dormant since 2024-10, so this fork maintains its own tooling.
+
+Names inherited from upstream are kept on purpose. Basilisk was initially developed under the name *Iguana*, so the top-level design is `iguana_chip` and most make targets use an `ig-` prefix. Internally the project name is still `basilisk` (`PROJ_NAME`/`RTL_NAME`), because many scripts and paths depend on it.
 
 
 ## Disclaimer
@@ -63,15 +74,14 @@ not committed to git).
 
 ## Quick Start
 
-More documentation specifically for Iguana/Basilisk is currently not available.
-However, the [Cheshire Documentation](https://pulp-platform.github.io/cheshire/) gives a good overview of this project as well.
+Project-specific documentation lives in [`docs/`](docs/): the thesis plan, the CI/infrastructure plan, the P&R pipeline, the architecture decision records and the results. For the underlying SoC, the [Cheshire Documentation](https://pulp-platform.github.io/cheshire/) gives a good overview.
 
 ```bash
 # download RTL, generate register-files, configure units
 make ig-hw-all
 # pickle to Verilog
 make pickle-all
-# Yosys synthesis (~4-5h)
+# Yosys synthesis (~2h on yosys v0.69; needs >35 GB RAM, swap if less)
 make synth-all
 # OpenRoad backend (>24h)
 make backend-all
@@ -111,7 +121,7 @@ The CI lanes run on GitHub Actions, partly on a self-hosted Azure VM:
 
 | Lane | Workflow | Runs on |
 | --- | --- | --- |
-| Fast lane (lint, sw, sim stubs) | `.github/workflows/ci.yml` | GitHub-hosted |
+| Fast lane (lint, sw, coprocessor unit sim + block synth; SoC sim still a stub) | `.github/workflows/ci.yml` | GitHub-hosted |
 | Full synthesis | `.github/workflows/synth.yml` | Self-hosted Azure VM |
 | Place & route | `.github/workflows/pnr.yml` | Self-hosted Azure VM |
 | Idle-VM watchdog | `.github/workflows/vm-watchdog.yml` | GitHub-hosted |
