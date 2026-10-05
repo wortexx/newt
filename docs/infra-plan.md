@@ -67,7 +67,7 @@ frequency; GitHub large runners cover synth until then.
 
 ---
 
-## Phase 0 — Repository setup
+## Phase 0 — Repository setup  ✅ done (2026-10-05)
 
 - [x] Fork `pulp-platform/cheshire-ihp130-o` → `wortexx/newt`
       (<https://github.com/wortexx/newt>).
