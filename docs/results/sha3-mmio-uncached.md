@@ -43,10 +43,10 @@ Method differences from arXiv:2508.20653: RTL simulation instead of gem5; an ASI
 
 ```
 bundle MANIFEST:
-  bundle_id:        newt-xrun-6be5346-dirty
-  commit:           6be53467ba726be3e06e983eb68eb1e9ebc805b5
-  commit_date:      2026-10-03T01:52:50+03:00
-  working_tree:     DIRTY (uncommitted changes)
+  bundle_id:        newt-xrun-b1fa596
+  commit:           b1fa596389a126fee2d9b9c002181444ed14ee1c
+  commit_date:      2026-10-05T11:11:56+03:00
+  working_tree:     clean
   bender_lock_sha:  7be4d3596bfd1ba321a5edc4bfa4237a513a78052c11b0ad2e5a10dda9162144
   bender:           bender 0.32.0
   host:             Darwin arm64

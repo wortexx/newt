@@ -122,10 +122,10 @@ Shares are of dynamic instructions, not cycles: on CVA6 these are single-cycle A
 
 ```
 bundle MANIFEST:
-  bundle_id:        newt-xrun-0dee23f-dirty
-  commit:           0dee23fcf4b73a357332f8fb15e63dd6821fc55d
-  commit_date:      2026-10-02T19:16:07+03:00
-  working_tree:     DIRTY (uncommitted changes)
+  bundle_id:        newt-xrun-b1fa596
+  commit:           b1fa596389a126fee2d9b9c002181444ed14ee1c
+  commit_date:      2026-10-05T11:11:56+03:00
+  working_tree:     clean
   bender_lock_sha:  7be4d3596bfd1ba321a5edc4bfa4237a513a78052c11b0ad2e5a10dda9162144
   bender:           bender 0.32.0
   host:             Darwin arm64

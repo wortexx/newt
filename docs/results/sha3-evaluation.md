@@ -5,9 +5,9 @@ assembles results; it measures nothing new. Every number below comes from one of
 the three generated reports, which carry the full tables, fits and provenance:
 
 - [`sha3-ise.md`](sha3-ise.md): cycles, speedups, rotate share, ISE vs MMIO with
-  the message in the D-cache (`scripts/sha3_eval.py`, Xcelium runs L and M).
+  the message in the D-cache (`scripts/sha3_eval.py`, Xcelium run P).
 - [`sha3-mmio-uncached.md`](sha3-mmio-uncached.md): ISE vs MMIO with the message
-  evicted from the D-cache (`scripts/sha3_eval.py`, Xcelium run O).
+  evicted from the D-cache (`scripts/sha3_eval.py`, Xcelium run P).
 - [`sha3-ppa.md`](sha3-ppa.md): the R sweep, block power and energy, SoC
   synthesis and P&R (`scripts/sha3_ppa.py`).
 
@@ -255,7 +255,7 @@ allows and extrapolated to 10,000 blocks. The result **depends on whether the
 message is in CVA6's 16 KiB D-cache.** The ISE reads lanes with CPU loads,
 while the iDMA reads the SPM in either case.
 
-| cycles/block | cached (run L) | uncached (run O) |
+| cycles/block | cached (`sha3_bench`) | uncached (`sha3_bench_long`) |
 |---|---:|---:|
 | `kperm` | 135 | 281 |
 | `shatr` | 232 | 377 |
@@ -313,9 +313,9 @@ scoreboard), which this work rules out by design. It is listed as future work
 
 ## Limitations
 
-- **Dirty-tree provenance.** The Xcelium bundles behind the cycle figures were
-  built from dirty trees (`0dee23f-dirty`, `6be5346-dirty`). Task 9.1 re-runs
-  them from a clean checkout before any figure is quoted in the thesis.
+- **Provenance.** The cycle figures come from Xcelium run P, a bundle built
+  from a clean checkout (`newt-xrun-b1fa596`, task 9.1). The earlier
+  dirty-tree runs (`0dee23f-dirty`, `6be5346-dirty`) gave identical figures.
 - **Single runs.** Each P&R and SoC synthesis figure is one run. Placement and
   ABC mapping vary from run to run (see the area spread above).
 - **Energy coverage.** Energy is block-only, at the typical corner, with no
