@@ -26,6 +26,15 @@ package iguana_pkg;
   localparam doub_bt RegOutHypCfgSize = doub_bt'(HypNumPhys * HypNumChips * 'h800_0000);
   localparam doub_bt RegOutHypCfgEnd  = RegOutHypCfgBase + RegOutHypCfgSize;
 
+  // Keccak MMIO accelerator (hw/coproc/keccak_mmio.sv) on Cheshire's external
+  // AXI subordinate port: 4 KiB just above the hyperbus config window, inside
+  // the external non-CIE range [0x4000_0000, 0x8000_0000), so CVA6 treats it
+  // as uncached and non-idempotent (openspec change sha3-cvxif-coprocessor,
+  // design D6).
+  localparam byte_bt AxiOutKeccakIdx  = 0;
+  localparam doub_bt AxiOutKeccakBase = 'h5000_0000;
+  localparam doub_bt AxiOutKeccakEnd  = AxiOutKeccakBase + 'h1000;
+
   // Cheshire configuration: default except for added Hyperbus config port
   //                         and activated CLIC
   function automatic cheshire_cfg_t gen_cheshire_cfg();
@@ -66,6 +75,16 @@ package iguana_pkg;
     // cheshire (RegOut.num_out) in the patch at target/ihp13/picle/patch/svase/svase.sed
     ret.BusErr = 0; // too large
 
+    // CV-X-IF coprocessor port of core 0 (Keccak ISE, see hw/coproc/)
+    ret.Cva6CvxifEn = 1;
+
+    // Keccak MMIO accelerator on the external AXI subordinate port
+    ret.AxiExtNumSlv          = 1;
+    ret.AxiExtNumRules        = 1;
+    ret.AxiExtRegionIdx   [0] = AxiOutKeccakIdx;
+    ret.AxiExtRegionStart [0] = AxiOutKeccakBase;
+    ret.AxiExtRegionEnd   [0] = AxiOutKeccakEnd;
+
     // Hyberbus configuration port
     ret.RegExtNumSlv          = 1;
     ret.RegExtNumRules        = 1;
@@ -76,6 +95,12 @@ package iguana_pkg;
   endfunction
 
   localparam cheshire_cfg_t CheshireCfg = gen_cheshire_cfg();
+
+  // Keccak coprocessor: kperm rounds per cycle (1, 2, 3, 4 or 6). Selected by
+  // the sweep in openspec change sha3-cvxif-coprocessor, task 5.1: the largest
+  // R whose block critical path leaves >= 20 % slack at 11.0 ns
+  // (docs/results/sha3-ppa.md).
+  localparam int unsigned KeccakRoundsPerCycle = 6;
 
   localparam int unsigned VgaOutRedWidth   = 3;
   localparam int unsigned VgaOutGreenWidth = 3;

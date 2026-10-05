@@ -66,3 +66,16 @@ apm_modules/
 # Python bytecode (created by importing flow scripts, e.g. during analysis)
 __pycache__/
 *.pyc
+
+# Project bare-metal programs (sw/sw.mk): build outputs
+sw/**/*.o
+sw/**/*.elf
+sw/**/*.dump
+
+# Keccak coprocessor unit-test builds (hw/coproc/coproc.mk)
+hw/coproc/build/
+
+# Standalone hw/coproc block synthesis outputs (target/ihp13/yosys/block-synth.mk)
+target/ihp13/yosys/block/
+sw/**/*.a
+sw/tests/BUILD_INFO

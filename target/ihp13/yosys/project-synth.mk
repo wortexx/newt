@@ -26,6 +26,8 @@ export YOSYS_FLATTEN_HIER := 1
 # kept as a seperate hierarchical element, all others will be flattened
 # https://yosyshq.readthedocs.io/projects/yosys/en/latest/cmd/select.html
 export YOSYS_KEEP_HIER_INST :=  "*/gen_cva6_cores.__0.i_core_cva6" \
+								"*/i_keccak_cvxif" \
+								"*/i_keccak_mmio" \
 								"*/fpu_gen.fpu_i" \
 								"*/gen_asic_regfile.i_ariane_regfile" \
 								"*/float_regfile_gen*i_ariane_fp_regfile" \

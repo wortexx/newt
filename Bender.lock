@@ -69,8 +69,8 @@ packages:
     - common_cells
     - register_interface
   cheshire:
-    revision: 465e9e8aafee428642778c39e9f40b6b2452df5f
-    version: 0.3.1-newt.1
+    revision: 7b53138098ab154e856405ae7cc08e6a427326ab
+    version: 0.3.1-newt.2
     source:
       Git: https://github.com/wortexx/cheshire.git
     dependencies:

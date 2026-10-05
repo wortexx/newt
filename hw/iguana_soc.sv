@@ -74,6 +74,12 @@ module iguana_soc import iguana_pkg::*; import cheshire_pkg::*; (
   reg_req_t [CheshireCfg.RegExtNumSlv-1:0] reg_ext_slv_req;
   reg_rsp_t [CheshireCfg.RegExtNumSlv-1:0] reg_ext_slv_rsp;
 
+  cvxif_pkg::cvxif_req_t  cvxif_req;
+  cvxif_pkg::cvxif_resp_t cvxif_rsp;
+
+  axi_slv_req_t [CheshireCfg.AxiExtNumSlv-1:0] axi_ext_slv_req;
+  axi_slv_rsp_t [CheshireCfg.AxiExtNumSlv-1:0] axi_ext_slv_rsp;
+
   logic [CheshireCfg.VgaRedWidth-1  :0] vga_red;
   logic [CheshireCfg.VgaGreenWidth-1:0] vga_green;
   logic [CheshireCfg.VgaBlueWidth-1 :0] vga_blue;
@@ -145,7 +151,7 @@ module iguana_soc import iguana_pkg::*; import cheshire_pkg::*; (
       gpio_en_o[6] = usb_dm_oe_o[3];
       gpio_en_o[7] = usb_dp_oe_o[3];
      end
-     
+
   end
 
   // Global reset synchronizer
@@ -183,8 +189,8 @@ module iguana_soc import iguana_pkg::*; import cheshire_pkg::*; (
     // External AXI crossbar ports
     .axi_ext_mst_req_i  ( '0 ),
     .axi_ext_mst_rsp_o  ( ),
-    .axi_ext_slv_req_o  ( ),
-    .axi_ext_slv_rsp_i  ( '0 ),
+    .axi_ext_slv_req_o  ( axi_ext_slv_req ),
+    .axi_ext_slv_rsp_i  ( axi_ext_slv_rsp ),
     // External reg demux slaves
     .reg_ext_slv_req_o  ( reg_ext_slv_req ),
     .reg_ext_slv_rsp_i  ( reg_ext_slv_rsp ),
@@ -254,7 +260,37 @@ module iguana_soc import iguana_pkg::*; import cheshire_pkg::*; (
     .usb_dm_oe_o,
     .usb_dp_i,
     .usb_dp_o,
-    .usb_dp_oe_o
+    .usb_dp_oe_o,
+    // CV-X-IF coprocessor port of core 0
+    .cvxif_req_o        ( cvxif_req ),
+    .cvxif_resp_i       ( cvxif_rsp )
+  );
+
+  // Keccak-f[1600] coprocessor on core 0's CV-X-IF port (hw/coproc/).
+  keccak_cvxif #(
+    .RoundsPerCycle ( iguana_pkg::KeccakRoundsPerCycle )
+  ) i_keccak_cvxif (
+    .clk_i        ( clk_i        ),
+    .rst_ni       ( synced_rst_n ),
+    .cvxif_req_i  ( cvxif_req    ),
+    .cvxif_resp_o ( cvxif_rsp    )
+  );
+
+  // Keccak-f[1600] MMIO accelerator on the external AXI subordinate port, the
+  // ISE's comparison arm (hw/coproc/keccak_mmio.sv). Same rounds per cycle.
+  keccak_mmio #(
+    .RoundsPerCycle ( iguana_pkg::KeccakRoundsPerCycle ),
+    .AddrWidth      ( int'(CheshireCfg.AddrWidth)      ),
+    .DataWidth      ( int'(CheshireCfg.AxiDataWidth)   ),
+    .IdWidth        ( $bits(axi_slv_id_t)              ),
+    .UserWidth      ( int'(CheshireCfg.AxiUserWidth)   ),
+    .axi_req_t      ( axi_slv_req_t                    ),
+    .axi_rsp_t      ( axi_slv_rsp_t                    )
+  ) i_keccak_mmio (
+    .clk_i     ( clk_i                               ),
+    .rst_ni    ( synced_rst_n                        ),
+    .axi_req_i ( axi_ext_slv_req[AxiOutKeccakIdx]    ),
+    .axi_rsp_o ( axi_ext_slv_rsp[AxiOutKeccakIdx]    )
   );
 
   `ifndef NO_HYPERBUS

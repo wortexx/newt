@@ -1,0 +1,11 @@
+upstream: https://github.com/XKCP/XKCP
+commit:   4affab454735d54e78156880b3b44e38dcbf765c
+files:    lib/low/KeccakP-1600/ref-64bits/KeccakP-1600-reference.{c,h}
+          lib/low/KeccakP-1600/ref-64bits/KeccakP-1600-SnP.h
+          lib/common/SnP-common.h, lib/common/brg_endian.h
+license:  KeccakP-1600 files CC0 1.0 (see headers); brg_endian.h is Brian
+          Gladman's BSD-style license (see its header and LICENSE). Files are
+          unmodified; built without KeccakReference/DEBUG.
+role:     baseline "XKCP ref-64bits", the Keccak Team reference implementation
+          (paper arXiv:2508.20653's Keccak-team baseline), driven through its
+          SnP API (sw/lib/sha3_sw_xkcp_ref64.c).

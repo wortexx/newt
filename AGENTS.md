@@ -15,11 +15,13 @@ developed under the name *Iguana*, so the top-level design is `iguana_chip`
 and most scripts/Makefiles use `ig-`/`iguana` prefixes, while the project name
 in docs and most other places is `basilisk`.
 
-The thesis goal is to add SHA cryptography instructions to CVA6 — either via
-a CV-X-IF coprocessor or the RISC-V `Zknh` standard extension (decision
-pending) — and carry them end-to-end through the real synthesis/P&R flow to
-get silicon-realistic PPA (power/performance/area) numbers on real, fabricable
-IHP silicon. See [`docs/custom-isa-extension.md`](docs/custom-isa-extension.md)
+The thesis goal is to add SHA cryptography instructions to CVA6 and carry
+them end-to-end through the real synthesis/P&R flow to get silicon-realistic
+PPA (power/performance/area) numbers on real, fabricable IHP silicon. Decided
+2026-10-01: SHA-3 (Keccak) instructions in a CV-X-IF coprocessor, with a
+memory-mapped Keccak accelerator as the comparison arm. `Zknh` was rejected.
+The work was tracked in
+[`openspec/changes/archive/2026-10-05-sha3-cvxif-coprocessor/`](openspec/changes/archive/2026-10-05-sha3-cvxif-coprocessor/). See [`docs/custom-isa-extension.md`](docs/custom-isa-extension.md)
 for the full thesis plan and [`docs/infra-plan.md`](docs/infra-plan.md) for
 the CI/infrastructure plan (a living document — check it for current phase
 status before assuming something described there is finished).
@@ -173,5 +175,8 @@ rotate credentials, and check for drift. Planning and rationale live in
   existing file's license family when editing, and add one to new
   hardware/script files (see any existing `.sv`/Makefile header for the
   format).
-- **CVA6 config** is `cv64a6_imafdcsclic_sv39`; CV-X-IF exists on the core
-  but is disabled/tied off (`CvxifEn = 0`) until the thesis work enables it.
+- **CVA6 config** is `cv64a6_imafdcsclic_sv39`. Struct-level `cva6_cfg_t`
+  fields (`CvxifEn`, `RVB`, `RVH`, …) come from Cheshire's `gen_cva6_cfg()`
+  and **not** from `IG_CVA6_PKG_PARAMS`, which only reaches package-level
+  constants (see `docs/infra-plan.md` Phase 15). CV-X-IF is enabled through
+  the Cheshire fork's `Cva6CvxifEn` config field in `hw/iguana_pkg.sv`.

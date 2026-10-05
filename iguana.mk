@@ -64,7 +64,9 @@ FMA_CONF        	:= OPT
 
 IG_CVA6_CONFIG := cv64a6_imafdcsclic_sv39
 IG_CVA6_PKG_FILE := $(shell $(BENDER) path cva6)/core/include/$(IG_CVA6_CONFIG)_config_pkg.sv
-# deactivate hypervisor extension (large and not needed), cut D-cache in half, switch to WT cache
+# cut D-cache in half, switch to WT cache. CVA6ConfigHExtEn=0 only changes the
+# package constant; the core's RVH comes from Cheshire's gen_cva6_cfg(), so the
+# hypervisor extension stays ON (docs/adr/adr-0004-keep-cva6-hypervisor-extension.md)
 IG_CVA6_PKG_PARAMS := \
 	CVA6ConfigHExtEn=0 \
 	CVA6ConfigDcacheByteSize=16384 \
@@ -249,6 +251,9 @@ IG_SIM_ALL += $(IG_SIM_DIR)/vsim/compile.ihp13.gate.tcl
 ######################################
 
 include $(IG_ROOT)/target/verilator/verilator.mk
+include $(IG_ROOT)/sw/sw.mk
+include $(IG_ROOT)/hw/coproc/coproc.mk
+include $(IG_ROOT)/target/ihp13/yosys/block-synth.mk
 include $(IG_ROOT)/target/xcelium/xcelium.mk
 
 
