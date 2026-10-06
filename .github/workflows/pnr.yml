@@ -50,6 +50,10 @@ on:
         description: 'Core width/height scale relative to the taped-out die (empty = the default in scripts/pnr/common.tcl; 1.0 = the taped-out 6230 x 5478 um die)'
         required: false
         default: ''
+      skip_grt_repair:
+        description: 'Skip post-route timing repair (empty = skip, as on scheduled runs; 0 = run grt_repair.tcl''s bounded repair, best-effort, 16h timeout)'
+        required: false
+        default: ''
   push:
     tags: ['**']
 
@@ -515,6 +519,15 @@ jobs:
         # first; come back to tuning grt_repair's timeout/convergence once
         # drt and final are themselves real-run-verified.
         #
+        # The skip is now the skip_grt_repair dispatch input's default
+        # (bounded-grt-repair-measurement), not a hardcoded value: empty keeps
+        # PNR_SKIP_GRT_REPAIR=1, so scheduled, tag and input-less runs are
+        # unchanged, and 0 runs the bounded repair on demand. The default
+        # stays 1 because the 16h ceiling above was hit at 101% routing
+        # demand; whether the repair fits since raise-gpl-density-target
+        # (77-84% demand, grt ~3h) is what that change measures, from resumed
+        # grt checkpoints, not on every scheduled run.
+        #
         # PNR_SKIP_ANTENNA_REPAIR: run 34389061373 (pnr-bringup-7, the
         # first fully green start->pnr->upload->stop run) still produced
         # no DEF: drt's 16h budget was eaten entirely by repair_antennas,
@@ -564,7 +577,7 @@ jobs:
         # gpl_density, gpl_keep_resize and die_scale dispatch inputs, empty by
         # default (the scripts then use common.tcl's values), so trying another
         # value costs a dispatch, not a commit (raise-gpl-density-target D1, D5).
-        run: PNR_GPL_DENSITY=${{ github.event.inputs.gpl_density || '' }} PNR_GPL_KEEP_RESIZE=${{ github.event.inputs.gpl_keep_resize || '' }} PNR_DIE_SCALE=${{ github.event.inputs.die_scale || '' }} PNR_TIMEOUT_GRT=57600 PNR_TIMEOUT_GRT_REPAIR=57600 PNR_SKIP_GRT_REPAIR=1 PNR_SKIP_ANTENNA_REPAIR=1 PNR_DRT_END_ITER=8 PNR_STOP_AFTER=${{ github.event.inputs.stop_after || '' }} make -C target/ihp13/openroad -f openroad.mk run-pnr PROJ_NAME=basilisk
+        run: PNR_GPL_DENSITY=${{ github.event.inputs.gpl_density || '' }} PNR_GPL_KEEP_RESIZE=${{ github.event.inputs.gpl_keep_resize || '' }} PNR_DIE_SCALE=${{ github.event.inputs.die_scale || '' }} PNR_TIMEOUT_GRT=57600 PNR_TIMEOUT_GRT_REPAIR=57600 PNR_SKIP_GRT_REPAIR=${{ github.event.inputs.skip_grt_repair || '1' }} PNR_SKIP_ANTENNA_REPAIR=1 PNR_DRT_END_ITER=8 PNR_STOP_AFTER=${{ github.event.inputs.stop_after || '' }} make -C target/ihp13/openroad -f openroad.mk run-pnr PROJ_NAME=basilisk
 
       # Move the checkpoints out of the shared workspace before this job
       # releases the runner. This is the whole fix for the collision that
