@@ -43,7 +43,8 @@ Tags:
   (what it does, that it is best-effort, the 16 h timeout). Verify: the documented
   `gh workflow run pnr.yml ... -f skip_grt_repair=0` line matches the input's name.
 - [ ] 2.3 **[gh]** Land 2.1–2.2 on `main` through a PR (fast lane green). Verify:
-  `gh workflow view pnr.yml --yaml` on `main` shows the input.
+  `gh workflow view pnr.yml --yaml` on `main` shows the input. — PR #63 open
+  (`bounded-grt-repair-measurement`), not yet merged.
 
 ## 3. Report generator (D5, D6)
 
@@ -64,16 +65,23 @@ Tags:
 
 ## 4. Measurement branches (D2, D3)
 
-- [ ] 4.1 **[gh]** Cut `measure/grt-repair-ref` at `dff4df0` and `measure/grt-repair-arms` at
+- [x] 4.1 **[gh]** Cut `measure/grt-repair-ref` at `dff4df0` and `measure/grt-repair-arms` at
   `4c25003`, cherry-pick the 2.1 commit onto each, and push. Verify:
   `git diff --stat <base>..<branch>` touches only `.github/workflows/pnr.yml`.
-- [ ] 4.2 **[edit]** On each branch, recompute the key inputs (`git rev-parse HEAD:<path>` for
+  — done 2026-10-06. `measure/grt-repair-arms` = `4c25003` + `616031a` (clean cherry-pick of
+  `4cebb06`). `measure/grt-repair-ref` = `dff4df0` + `1cf6754`. That pick conflicted: `pnr.yml` at
+  `dff4df0` predates the `die_scale` input, so the resolution keeps that commit's own lines and
+  adds only `skip_grt_repair` (input and `run:` value). `die_scale` is not added to the branch.
+  On both, `git diff --stat` shows only `pnr.yml` (14+/1−), and `actionlint` is clean.
+- [x] 4.2 **[edit]** On each branch, recompute the key inputs (`git rev-parse HEAD:<path>` for
   each of the 10 paths, plus `yosys -V` from the current `newt-eda:dev`) and compare them with
   task 1.3. Verify: every line matches. If only `yosys` differs, stop and ask the user (D3).
   Pre-checked 2026-10-06, before the branches exist (a `.github/`-only cherry-pick cannot move
   these): all 10 path hashes at `dff4df0` and `4c25003` match runs `37108127061` and
   `37162759719`. The `yosys -V` of `ghcr.io/wortexx/newt-eda:dev` (digest `f5bdfc78…`, last
-  published 2026-09-27, before both runs) matches both. Re-run on the pushed branches to tick.
+  published 2026-09-27, before both runs) matches both. Re-run on the pushed branches: all 10
+  paths match on each. Not checkable from here: whether the VM-local synth cache still holds
+  both entries. A miss costs ~2.5 h of re-synthesis first (D3).
 
 ## 5. Reference run (D4)
 
