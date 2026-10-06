@@ -36,6 +36,10 @@ Requires the `newt-eda` container (or an environment with the same tools:
 Verilator ≥5, a native C++ compiler, `bender`, `riscv64-unknown-elf-gcc`).
 
 ```bash
+# apply the SoC's CVA6 configuration to the CVA6 checkout (once per fresh
+# dependency checkout; ig-hw-all also does it)
+make ig-hw-cva6
+
 # build the model (verilate + compile; the long step, several minutes)
 make ig-verilator-model
 
@@ -51,7 +55,23 @@ make ig-sim-verilator BINARY=sw/tests/other.spm.elf TIMEOUT_CYCLES=5000000
 
 `ig-sim-verilator` depends on `ig-verilator-model`, so a single invocation
 builds the model (if needed) and runs it. Changing the test binary alone
-does **not** trigger a rebuild of the model.
+does **not** trigger a rebuild of the model; re-running `ig-hw-cva6` does.
+
+`ig-hw-cva6` rewrites CVA6's config package in the dependency checkout
+(scoreboard depth, caches, …; the scoreboard depth also sets the CV-X-IF id
+width). Without it the model would silently simulate stock CVA6 parameters,
+so the model build refuses to start and fails with:
+
+```text
+error: CVA6 config not applied - run 'make ig-hw-cva6' (or ig-hw-all) first
+```
+
+### In CI
+
+The fast lane's `sim-soc` job (`.github/workflows/ci.yml`) runs this flow on
+every PR from a fresh checkout: `ig-hw-cva6`, the two ELFs, the model, then
+`helloworld.spm.elf` and `sha3_smoke.spm.elf` as separate steps, each with
+its own `TIMEOUT_CYCLES`. It is a required status check on `main`.
 
 ### Plusargs (for invoking the built binary directly)
 

@@ -133,7 +133,7 @@ drifts from it.
 
 | Lane | Workflow | Runs on |
 | --- | --- | --- |
-| Fast lane (lint, sw, sim stubs) | `.github/workflows/ci.yml` | GitHub-hosted |
+| Fast lane (lint, sw, unit + SoC sim, coprocessor synth) | `.github/workflows/ci.yml` | GitHub-hosted |
 | Full synthesis | `.github/workflows/synth.yml` | Self-hosted Azure VM |
 | Place & route | `.github/workflows/pnr.yml` | Self-hosted Azure VM |
 | Idle-VM watchdog | `.github/workflows/vm-watchdog.yml` | GitHub-hosted |
