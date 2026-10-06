@@ -305,9 +305,10 @@ jobs:
   #
   # Each run's TIMEOUT_CYCLES is ~5x that program's measured cycle count,
   # so a hang fails the run step in minutes instead of reaching the job
-  # timeout. Measured on ubuntu-latest (run <TBD>): model build <TBD>,
-  # helloworld <TBD> cycles / <TBD>, sha3_smoke <TBD> cycles / <TBD>,
-  # job <TBD>.
+  # timeout. Measured on ubuntu-latest (run 37451916162, 2026-10-06):
+  # model build 191 s (Verilator walltime 190 s, 1 thread), helloworld
+  # 216,760 cycles / 7 s, sha3_smoke 617,664 cycles / 20 s, job 8 min
+  # (2 min of it container start, 2 min dependency checkout).
   sim-soc:
     runs-on: ubuntu-latest
     container: ghcr.io/wortexx/newt-eda:dev
