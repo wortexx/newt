@@ -49,13 +49,15 @@ Tags: **[edit]** plain editing · **[eda]** needs the `newt-eda` container (Veri
 - [x] 2.2 **[ci]** Push the branch and open the PR. Verify on the PR's own run that `sim-soc` passes, with both programs' PASS lines in their own step logs. Record here: the model-build wall time, each program's cycle count and wall time on `ubuntu-latest`, and the total job time. Write the same numbers into the workflow comment from 2.1. If a program's hosted-runner cycle count differs from 1.3, re-derive its `TIMEOUT_CYCLES` from the hosted value.
 
   **Done 2026-10-06**, PR #61, run `37451916162`: all five jobs green. `sim-soc` took 8 min 2 s (10:45:48 to 10:53:50 UTC): container start 2 min 4 s, `ig-hw-cva6` with dependency checkout 2 min 2 s (no retry), ELFs 11 s, model build 3 min 11 s (Verilator walltime 190.2 s, bld 166.4 s, 1 thread), helloworld 7 s (`Hello World!`, `Test PASSED (exit code 0, 216760 sys-clock cycles)`), sha3_smoke 20 s (`sha3_smoke: PASS (0 failures)`, `Test PASSED (exit code 0, 617664 sys-clock cycles)`). helloworld matches 1.3 exactly. sha3_smoke differs from 1.3 (616,928) by 736 cycles; re-derived from the hosted value, 5x 617,664 = 3.09 M, so it stays 3,200,000. The numbers are in the workflow comment.
-- [ ] 2.3 **[ci]** Show that the job gates on real failures (spec `ci-pipeline` "Missing test program is a failure, not a retry" and "SoC boot regression fails sim-soc"). On a throwaway commit on the PR branch, point one run step's `BINARY` at a non-existent path. Verify:
+- [x] 2.3 **[ci]** Show that the job gates on real failures (spec `ci-pipeline` "Missing test program is a failure, not a retry" and "SoC boot regression fails sim-soc"). On a throwaway commit on the PR branch, point one run step's `BINARY` at a non-existent path. Verify:
   - `sim-soc` fails on that step on the first attempt;
   - the model is not rebuilt;
   - the other program's step still runs;
   - the log contains no mention of the JTAG-DM blocker.
 
   Then revert the commit and confirm the job is green again.
+
+  **Done 2026-10-06**: throwaway `7acacb8`, run `37452960388`. `sim-soc` failed on `Run helloworld.spm` (`[ELF] ERROR: cannot open .../helloworld.spm.elf.does-not-exist`) on the first attempt, with no `Attempt N/3` line. The model was verilated once, in its own step; the run step did not rebuild it. `Run sha3_smoke.spm` still ran and passed. The log does not mention the retired blocker; its only "JTAG" hits are Verilator warnings naming `dmi_jtag` RTL modules. Reverted in `411520a`. **Green-again confirmation is pending:** the revert's run `37453997280` failed in all five jobs, on both attempts, because `git://git.buildroot.net/buildroot` reset every clone from the GitHub runners (30 of 30). That is an external outage, unrelated to this change. Re-run as attempt 3 at 13:04 UTC: all five jobs green (`sim-soc` 8 min 41 s).
 
 ## 3. Graduate to a required check and update the plan
 
