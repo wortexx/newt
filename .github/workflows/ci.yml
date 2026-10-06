@@ -356,7 +356,7 @@ jobs:
 
       - name: Run helloworld.spm
         if: ${{ !cancelled() && steps.model.outcome == 'success' }}
-        run: make ig-sim-verilator BINARY="$HELLO_ELF" TIMEOUT_CYCLES=1200000
+        run: make ig-sim-verilator BINARY="$HELLO_ELF.does-not-exist" TIMEOUT_CYCLES=1200000
 
       - name: Run sha3_smoke.spm
         if: ${{ !cancelled() && steps.model.outcome == 'success' }}
