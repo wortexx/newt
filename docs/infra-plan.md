@@ -97,8 +97,9 @@ frequency; GitHub large runners cover synth until then.
     needs no CVA6 RTL change ([ADR-0003](adr/adr-0003-sha3-via-cvxif.md)), and `Zknh` was
     rejected. CVA6 still comes in through Cheshire at `pulp-v1.0.0`.
   - **Still open:** the inherited `target/ihp13/pickle/patches/` predate ADR-0002 and remain.
-    `wt_axi_adapter2.patch` (CVA6) is about to get a second consumer, the Verilator lane
-    (`verilator-sim-flow` task 3.0). A fix shared by two lanes is the case ADR-0002 says belongs
+    `wt_axi_adapter2.patch` (CVA6) has a second consumer, the Verilator lane
+    (`verilator-sim-flow` task 3.0), which since `graduate-sim-soc` runs in CI on every PR
+    (`sim-soc`). A fix shared by two lanes is the case ADR-0002 says belongs
     in a fork. That would mean a direct `cva6` override in `Bender.yml`, so it waits until the
     patch actually causes trouble. Phase 16's odd-exit-code fix is already planned as a
     Cheshire fork patch, which would be the next tag (`newt.3`).
@@ -197,12 +198,15 @@ Questa stays as a local-only waveform-debug target. Full record:
       Every real `DMSTATUS` on this DM has low byte `0x82`, so the frozen `0x00000011` read here
       cannot come from the RTL. The bug is in this lane's C++ DMI read path. The Xcelium VCD is the
       reference trace for fixing it.
-- [ ] Coprocessor **unit testbench** (Verilator or cocotb) driving the CV-X-IF / instruction
+- [x] Coprocessor **unit testbench** (Verilator or cocotb) driving the CV-X-IF / instruction
       interface directly with NIST KAT vectors. **Descoped from this phase** — moved to
       Phase 7 (depends on the still-open CV-X-IF-vs-`Zknh` decision and coprocessor RTL that
       doesn't exist yet); this phase delivers the simulator infrastructure it will run on.
-- [ ] Fallback if full-SoC Verilator stalls (hyperbus / DRAM models are the usual snag):
+      **Delivered in Phase 7** (`sha3-cvxif-coprocessor`): Verilator unit TBs for every
+      `hw/coproc/` block, run by the gating `sim-unit` job.
+- [x] Fallback if full-SoC Verilator stalls (hyperbus / DRAM models are the usual snag):
       ship the unit TB first; do full-SoC sim in the synth lane later.
+      **Moot:** the full-SoC simulation passes (green light above) and runs in CI as `sim-soc`.
       Turned out unnecessary for verilation itself (full SoC verilates fine without
       hyperbus/DRAM, which this DUT ties off via `NO_HYPERBUS`); the *simulation* still
       stalls, but on the DM protocol issue above, not on verilating the SoC. (That issue is fixed

@@ -107,7 +107,19 @@ VERILATOR_MODEL   := $(VERILATOR_OBJ)/V$(VERILATOR_TOP)
 # way the gawk/unzip gap was in Phase 1: the tool the flow silently depends
 # on, not one the smoke test or Verilator's own presence check caught) -
 # this overrides it rather than adding a build-only tool to the image.
-$(VERILATOR_MODEL): $(VERILATOR_FLIST) $(VERILATOR_TB_SRCS)
+#
+# The guard refuses to verilate stock CVA6 package parameters: `ig-hw-cva6`
+# rewrites $(IG_CVA6_PKG_FILE) in the CVA6 checkout in place (saving the
+# pristine copy as `.orig`), and nothing else applies it, so a fresh checkout
+# would otherwise build a model with e.g. a different scoreboard depth (which
+# also sets the CV-X-IF id width). It is a prerequisite, not a dependency on
+# the phony `ig-hw-cva6`, so re-applying the config rebuilds the model but
+# changing BINARY does not.
+$(VERILATOR_MODEL): $(VERILATOR_FLIST) $(VERILATOR_TB_SRCS) $(IG_CVA6_PKG_FILE)
+	@if [ ! -f $(IG_CVA6_PKG_FILE).orig ] || cmp -s $(IG_CVA6_PKG_FILE).orig $(IG_CVA6_PKG_FILE); then \
+		echo "error: CVA6 config not applied - run 'make ig-hw-cva6' (or ig-hw-all) first" >&2; \
+		exit 1; \
+	fi
 	$(VERILATOR) --cc --exe --build --timing -Wno-fatal \
 		-f $(VERILATOR_FLIST) --top-module $(VERILATOR_TOP) \
 		--Mdir $(VERILATOR_OBJ) -o V$(VERILATOR_TOP) \
