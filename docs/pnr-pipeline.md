@@ -32,10 +32,10 @@ independent of this workflow — the backstop for a `stop` job that never ran.
 
 ### Manual dispatch inputs
 
-`workflow_dispatch` accepts six optional inputs, all empty by default
+`workflow_dispatch` accepts seven optional inputs, all empty by default
 (`resume_from_run`, `resume_exclude`, `stop_after`, `gpl_density`,
-`gpl_keep_resize`, `die_scale` — matching `pnr.yml`'s `inputs:` keys
-exactly). With all six empty, a dispatched run
+`gpl_keep_resize`, `die_scale`, `skip_grt_repair` — matching `pnr.yml`'s
+`inputs:` keys exactly). With all seven empty, a dispatched run
 behaves exactly like a scheduled run:
 
 - `resume_from_run` — a previous run's ID whose checkpoints to restore
@@ -66,6 +66,14 @@ behaves exactly like a scheduled run:
   stops legalizing in time. Changing it invalidates every checkpoint
   from `floorplan` on, so do not combine it with `resume_from_run`.
 
+- `skip_grt_repair` — whether to skip post-route timing repair. Feeds
+  `PNR_SKIP_GRT_REPAIR`. Empty means `1`, the default on every scheduled and
+  tag run: `grt_repair` only re-saves the `grt` checkpoint as
+  `grt_repaired`. `0` runs `grt_repair.tcl`'s bounded repair (see the stage
+  table). It stays best-effort either way: a failure or a timeout
+  (`PNR_TIMEOUT_GRT_REPAIR`, 16h in `pnr.yml`) is logged in
+  `pnr_status.log` and never changes the run's exit status.
+
   The `gpl_*` inputs let a placement experiment run without a commit.
   Combined with `resume_from_run`, exclude `gpl` and every later checkpoint,
   or the restored placement is reused and the value has no effect.
@@ -83,7 +91,19 @@ $ gh workflow run pnr.yml \
 This restores run `<A>`'s checkpoints, skips every stage through `grt`
 (all restored), excludes `grt_repaired` from the restore so `grt_repair`
 itself runs again, and stops there — exercising one slice of the flow
-against real data in minutes instead of the full ~26h run.
+against real data in minutes instead of the full ~26h run. With the
+default `skip_grt_repair`, that slice only re-saves the checkpoint. To
+measure the repair itself (change `bounded-grt-repair-measurement`), add
+`-f skip_grt_repair=0`. The stage then takes hours, not minutes, up to its
+16h timeout:
+
+```console
+$ gh workflow run pnr.yml --ref <branch whose netlist matches run A> \
+    -f resume_from_run=<A> \
+    -f resume_exclude=grt_repaired \
+    -f stop_after=grt_repair \
+    -f skip_grt_repair=0
+```
 
 ## OpenROAD stage level (`target/ihp13/openroad/scripts/pnr/*.tcl`)
 
@@ -106,7 +126,7 @@ doing anything else.
 | 4 | `dpl` | `dpl` | **Gate** | Detailed (legalized) placement + mirror optimization. Single-threaded. Afterwards `run_pnr.sh` reports how `gpl` ended (below). |
 | 5 | `cts` | `cts` | **Gate** | Clock tree synthesis. Lifts clock dont-touch (only stage that does — clock nets are protected everywhere else), repairs clock inverters and post-CTS wire length, legalizes, then `repair_timing -setup -repair_tns 90` to fix the setup violations CTS itself introduces. `check_placement` is caught/non-fatal here (thousands of buffer-overlap warnings after repair are diagnostic-only, don't block progress). |
 | 6 | `grt` | `grt` | **Gate — the actual gate** (`PNR_GATE` default) | Global route: `global_route -congestion_iterations 14 -allow_congestion -verbose`. This is the stage the whole flow is judged on — `run_pnr.sh` exits non-zero if this fails, regardless of the best-effort stages after it. The long pole by far: single-threaded, congestion-bound at ~63–65% utilization. `-congestion_iterations` was cut from `chip.tcl`'s original 80, to 20, to 14 across three real timeout failures — the last cut wasn't about average per-iteration cost but a specific finding: iterations 1–14 complete trivially, then iteration 15 itself triggers a clock-net NDR-relaxation cascade with no observed sign of ever terminating (10+ hours, no completion). See Notes. |
-| 7 | `grt_repair` | `grt_repaired` | Best-effort | Post-route timing repair using global-route-based parasitics: buffer insertion, incremental global route, `repair_timing -repair_tns 20 -max_buffer_percent 15` (bounded down from chip.tcl's original 100 — that looped effectively forever on this design). `PNR_SKIP_GRT_REPAIR=1` skips the work but still re-saves the checkpoint under the uniform name `drt.tcl` expects. **Currently skipped in `pnr.yml`** — even with its `global_route` calls bounded the same way `grt.tcl`'s are, real data (`pnr-bringup-6`) shows it still doesn't converge within 16h (see Notes); skipping lets `drt`/`final` actually run and produce a DEF while grt_repair's own timeout/tuning is revisited separately. |
+| 7 | `grt_repair` | `grt_repaired` | Best-effort | Post-route timing repair using global-route-based parasitics: buffer insertion, incremental global route, `repair_timing -repair_tns 20 -max_buffer_percent 15` (bounded down from chip.tcl's original 100 — that looped effectively forever on this design). `PNR_SKIP_GRT_REPAIR=1` skips the work but still re-saves the checkpoint under the uniform name `drt.tcl` expects. **Skipped by default in `pnr.yml`** (the `skip_grt_repair` input, empty = skip; `0` runs it) — even with its `global_route` calls bounded the same way `grt.tcl`'s are, real data (`pnr-bringup-6`) shows it still doesn't converge within 16h (see Notes); skipping lets `drt`/`final` actually run and produce a DEF while grt_repair's own timeout/tuning is revisited separately. |
 | 8 | `drt` | `drt` | Best-effort | Antenna repair, then detailed routing (`detailed_route`, multi-threaded like `gpl`). `-droute_end_iter` (default 40, override via `PNR_DRT_END_ITER`) bounds the iteration budget — a manual run needed stopping after 700k→516k DRC violations over 2 iterations without converging, so this is deliberately capped rather than left open-ended. |
 | 9 | `final` | `final` | Best-effort | Filler cell placement, a non-fatal `check_placement`, then writes `out/<proj>.final.def` — the artifact the workflow uploads. |
 

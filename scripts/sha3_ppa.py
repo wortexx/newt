@@ -40,6 +40,14 @@ With --pnr RUN_DIR --pnr-ref REF_DIR (task 5.4) it adds the SoC P&R
 section from two P&R lane runs' `pnr-reports` artifacts (`gh run download
 <id> -n pnr-reports -D <dir>`): stages reached, WNS/TNS per stage, grt
 congestion and placement figures, against the pre-coprocessor reference.
+`grt` figures are labelled as taken before post-route repair.
+
+With --pnr-repair DIR --pnr-ref-repair DIR (change
+bounded-grt-repair-measurement), each the `pnr-reports` artifact of a run
+that resumed one side's `grt` checkpoint with skip_grt_repair=0, it adds
+WNS/TNS and design area after `grt_repair` and takes the achieved period
+from there, but only when both sides' repair completed. Otherwise it names
+each attempt's outcome and keeps the `grt` figures.
 
 Usage: scripts/sha3_ppa.py [--out docs/results/sha3-ppa.md]
                            [--soc RUN_DIR --soc-ref REF_DIR]
@@ -47,6 +55,8 @@ Usage: scripts/sha3_ppa.py [--out docs/results/sha3-ppa.md]
                            [--soc-both RUN_DIR --soc-both-run-id N]
                            [--pnr RUN_DIR --pnr-ref REF_DIR]
                            [--pnr-run-id N --pnr-ref-run-id N]
+                           [--pnr-repair DIR --pnr-ref-repair DIR]
+                           [--pnr-repair-run-id N --pnr-ref-repair-run-id N]
                            [--achieved-period-ns T --achieved-period-source TEXT]
 """
 
@@ -430,10 +440,63 @@ def pnr_metrics(d):
         "dpl_util_pct": float(util.group(1)) if util else None,
         "hpwl_dpl_um": float(hpwl_dpl.group(1)) if hpwl_dpl else None,
         "hpwl_cts_um": float(hpwl_cts[-1]) if hpwl_cts else None,
+        "grt_area_um2": pnr_design_area(rep / "pnr_grt.log", "grt"),
     }
 
 
-PNR_GATED = ["floorplan", "pre_place", "gpl", "dpl", "cts", "grt"]
+def pnr_design_area(log, when):
+    """Design area (um^2) that report_metrics printed for checkpoint `when`
+    into a stage log, or None."""
+    if not log.exists():
+        return None
+    m = re.search(rf"^basilisk\.{when} report_design_area\n-+\nDesign area (\d+) um\^2",
+                  log.read_text(errors="replace"), re.M)
+    return int(m.group(1)) if m else None
+
+
+def pnr_repair_metrics(d):
+    """grt_repair outcome, WNS/TNS and design area after it, from the
+    `pnr-reports` artifact of a P&R run that resumed from a `grt` checkpoint
+    with skip_grt_repair=0 (change bounded-grt-repair-measurement). Outcome is
+    "completed", "skipped" (the repair did not run), "timed out", "failed" or
+    "not run"; timing and area are None unless it completed."""
+    d = Path(d)
+    rep = d / "reports"
+    lines = [line.split(maxsplit=2) for line in
+             (d / "save" / "pnr_status.log").read_text().splitlines()]
+    lines = [f + [""] * (3 - len(f)) for f in lines if f and f[0] == "grt_repair"]
+    if any(f[1] == "ok" and "skipped" in f[2] for f in lines):
+        outcome = "skipped"
+    elif any(f[1] == "ok" for f in lines):
+        outcome = "completed"
+    elif any(f[1] == "failed" and "exit=124" in f[2] for f in lines):
+        outcome = "timed out"
+    elif any(f[1] == "failed" for f in lines):
+        outcome = "failed"
+    else:
+        outcome = "not run"
+    timing = area = None
+    f = rep / "basilisk.grt_repaired.rpt"
+    if outcome == "completed" and f.exists():
+        t = f.read_text(errors="replace")
+        wns = re.search(r"^wns max (\S+)", t, re.M)
+        tns = re.search(r"^tns max (\S+)", t, re.M)
+        if wns and tns:
+            timing = (float(wns.group(1)), float(tns.group(1)))
+        area = pnr_design_area(rep / "pnr_grt_repair.log", "grt_repaired")
+    if outcome == "completed" and timing is None:
+        outcome = "failed"  # no report to quote: treat as not completed (design D6)
+    return {"outcome": outcome, "timing": timing, "area_um2": area}
+
+
+def pnr_repair_done(repair, ref_repair):
+    """True when both sides' post-route repair completed, the only case in
+    which figures after it are quoted (sha3-evaluation spec: both sides of a
+    comparison share one repair status)."""
+    return bool(repair and ref_repair and repair["outcome"] == ref_repair["outcome"] == "completed")
+
+
+PNR_GATED =["floorplan", "pre_place", "gpl", "dpl", "cts", "grt"]
 
 
 def pnr_latest(m):
@@ -442,24 +505,74 @@ def pnr_latest(m):
     return reached[-1] if reached else None
 
 
-def pnr_achieved_period(m, period):
-    """(period, source) achieved by a P&R run: the constraint minus the WNS
-    after its latest stage, or None when that stage has no timing report."""
+def pnr_achieved_period(m, period, repair=None):
+    """(period, stage, wns, repaired) achieved by a P&R run: the constraint
+    minus the WNS after post-route repair when `repair` is given and
+    completed, else after its latest gated stage; None when that stage has no
+    timing report."""
+    if repair and repair["outcome"] == "completed":
+        wns = repair["timing"][0]
+        return period - wns, "grt_repair", wns, True
     latest = pnr_latest(m)
     if latest not in m["timing"]:
         return None
     wns = m["timing"][latest][0]
-    return period - wns, latest, wns
+    return period - wns, latest, wns, False
 
 
-def pnr_section(run, ref, run_id, ref_id, period):
+def pnr_stage_label(stage, repaired):
+    """How a stage is named next to a figure: a `grt` figure says that
+    post-route repair did not run before it."""
+    if repaired:
+        return f"`{stage}`"
+    if stage == "grt":
+        return "`grt`, before post-route repair"
+    return f"`{stage}`"
+
+
+def pnr_repair_text(repair, ref_repair, repair_ids):
+    """Sentence naming each side's post-route repair attempt and outcome, for
+    a report that quotes figures from before the repair."""
+    ids = repair_ids or (None, None)
+    parts = [f"{name}: run {rid or '?'}, {r['outcome']}"
+             for name, r, rid in (("reference", ref_repair, ids[1]),
+                                  ("with both arms", repair, ids[0])) if r]
+    return ("Post-route repair was attempted (" + "; ".join(parts) + ") and did not complete on "
+            "both sides, so every timing figure here is from before it.")
+
+
+def pnr_stage_text(latest, repaired, repair, ref_repair, repair_ids):
+    """The "Stage used" sentence of the P&R section, naming the repair status."""
+    if repaired:
+        stage = (f"**Stage used: grt_repair**, post-route timing repair resumed from each run's "
+                 f"`grt` checkpoint (reference: run {(repair_ids or (None, None))[1] or '?'}; "
+                 f"with both arms: run {(repair_ids or (None, None))[0] or '?'}; "
+                 "`grt_repair.tcl`'s bounded repair, `-repair_tns 20 -max_buffer_percent 15`). "
+                 "Detailed routing is best-effort and was not run.")
+    elif latest == "grt":
+        stage = ("**Stage used: grt, before post-route repair**: the lane's gate. `grt_repair` "
+                 "is skipped by default, and detailed routing is best-effort and was not run.")
+    else:
+        stage = (f"**Stage used: {latest or 'none'}**, the latest stage the run reached "
+                 "(detailed routing is best-effort and was not run).")
+    if (repair or ref_repair) and not repaired:
+        stage += " " + pnr_repair_text(repair, ref_repair, repair_ids)
+    return stage
+
+
+def pnr_section(run, ref, run_id, ref_id, period, repair=None, ref_repair=None,
+                repair_ids=None):
     """Task 5.4: SoC P&R with the SHA-3 arms against the pre-coprocessor
-    reference, at the latest stage the run reached."""
+    reference, at the latest stage the run reached. With both sides'
+    post-route repair runs (change bounded-grt-repair-measurement), figures
+    after the repair are added when both completed."""
     latest = pnr_latest(run)
+    repaired = pnr_repair_done(repair, ref_repair)
 
     def num(x, fmt):
         return format(x, fmt) if x is not None else "—"
 
+    stage = pnr_stage_text(latest, repaired, repair, ref_repair, repair_ids)
     out = [
         "## SoC place and route (task 5.4)",
         "",
@@ -467,9 +580,7 @@ def pnr_section(run, ref, run_id, ref_id, period):
         f"`keccak_mmio`, R = {soc_rounds_per_cycle()}) against run {ref_id or '?'} (the "
         "pre-coprocessor tree, the clean reference; `docs/infra-plan.md` Phase 11). Same flow and "
         "settings: taped-out die, `gpl` pass 2 timing-driven repair virtual, `stop_after=grt`. "
-        f"**Stage used: {latest or 'none'}**, the latest stage the run reached (the lane's gate; "
-        "detailed routing is best-effort and was not run). Corner: `tt` "
-        f"(`typ_1p20V_25C`). Constraint: {period:.1f} ns.",
+        f"{stage} Corner: `tt` (`typ_1p20V_25C`). Constraint: {period:.1f} ns.",
         "",
         "| | reference | with both arms |",
         "|---|---:|---:|",
@@ -477,8 +588,16 @@ def pnr_section(run, ref, run_id, ref_id, period):
     for s in PNR_STAGES:
         if s in run["timing"] and s in ref["timing"]:
             (rw, rt), (fw, ft) = run["timing"][s], ref["timing"][s]
-            out.append(f"| WNS / TNS after `{s}` (ns) | {fw:.2f} / {ft:,.0f} | "
+            label = "`grt`, before post-route repair" if s == "grt" else f"`{s}`"
+            out.append(f"| WNS / TNS after {label} (ns) | {fw:.2f} / {ft:,.0f} | "
                        f"{rw:.2f} / {rt:,.0f} |")
+    if repaired:
+        (rw, rt), (fw, ft) = repair["timing"], ref_repair["timing"]
+        out.append(f"| WNS / TNS after `grt_repair` (ns) | {fw:.2f} / {ft:,.0f} | "
+                   f"{rw:.2f} / {rt:,.0f} |")
+        out.append(f"| design area after `grt` / after `grt_repair` (µm²) | "
+                   f"{num(ref['grt_area_um2'], ',')} / {num(ref_repair['area_um2'], ',')} | "
+                   f"{num(run['grt_area_um2'], ',')} / {num(repair['area_um2'], ',')} |")
     out += [
         f"| `grt` total demand | {num(ref['grt_demand_pct'], '.2f')} % | "
         f"{num(run['grt_demand_pct'], '.2f')} % |",
@@ -495,11 +614,15 @@ def pnr_section(run, ref, run_id, ref_id, period):
         f"{num(run['hpwl_cts_um'] and run['hpwl_cts_um'] / 1e6, '.1f')} |",
         "",
     ]
-    ach = pnr_achieved_period(run, period)
+    ach = pnr_achieved_period(run, period, repair if repaired else None)
     if ach:
+        caveat = ("" if ach[3] else " It is a figure from before post-route repair, not the "
+                  "SoC's maximum frequency: post-route repair may close part of the gap from "
+                  "`cts` to `grt`.")
         out += [f"Achieved period: {ach[0]:.2f} ns ({period:.1f} ns minus WNS {ach[2]:.2f} ns "
-                f"after `{ach[1]}`), used by the energy section. The critical path is outside the "
-                "SHA-3 blocks: WNS barely moves against the reference.", ""]
+                f"after {pnr_stage_label(ach[1], ach[3])}), used by the energy section."
+                f"{caveat} The critical path is outside the SHA-3 blocks: WNS barely moves "
+                "against the reference.", ""]
     out += [
         "**SoC power: not reported.** The lane's `report_power` uses default activity (no "
         "workload SAIF), which the evaluation spec rejects as workload power. In this netlist it "
@@ -615,6 +738,14 @@ def main(argv=None):
     ap.add_argument("--pnr-ref", help="pnr-reports artifact dir of the reference P&R run")
     ap.add_argument("--pnr-run-id", help="P&R lane run id of --pnr, for the report")
     ap.add_argument("--pnr-ref-run-id", help="P&R lane run id of --pnr-ref, for the report")
+    ap.add_argument("--pnr-repair", help="pnr-reports artifact dir of the post-route repair "
+                    "run that resumed --pnr's grt checkpoint (change "
+                    "bounded-grt-repair-measurement); needs --pnr-ref-repair")
+    ap.add_argument("--pnr-ref-repair", help="pnr-reports artifact dir of the post-route repair "
+                    "run that resumed --pnr-ref's grt checkpoint; needs --pnr-repair")
+    ap.add_argument("--pnr-repair-run-id", help="P&R lane run id of --pnr-repair, for the report")
+    ap.add_argument("--pnr-ref-repair-run-id", help="P&R lane run id of --pnr-ref-repair, for "
+                    "the report")
     ap.add_argument("--achieved-period-source", default="",
                     help="where --achieved-period-ns comes from (run, stage, corner), for the report")
     a = ap.parse_args(argv)
@@ -684,21 +815,30 @@ def main(argv=None):
         out += power_section(json.loads(power.read_text()))
     if bool(a.pnr) != bool(a.pnr_ref):
         sys.exit("sha3_ppa: --pnr and --pnr-ref go together")
+    if bool(a.pnr_repair) != bool(a.pnr_ref_repair):
+        sys.exit("sha3_ppa: --pnr-repair and --pnr-ref-repair go together")
+    if a.pnr_repair and not a.pnr:
+        sys.exit("sha3_ppa: --pnr-repair and --pnr-ref-repair need --pnr and --pnr-ref")
     pnr_run = pnr_metrics(a.pnr) if a.pnr else None
+    repair = pnr_repair_metrics(a.pnr_repair) if a.pnr_repair else None
+    ref_repair = pnr_repair_metrics(a.pnr_ref_repair) if a.pnr_ref_repair else None
+    repaired = pnr_repair_done(repair, ref_repair)
     achieved, achieved_src = a.achieved_period_ns, a.achieved_period_source
     if achieved is None and pnr_run:
-        ach = pnr_achieved_period(pnr_run, period)
+        ach = pnr_achieved_period(pnr_run, period, repair if repaired else None)
         if ach:
             achieved = ach[0]
+            src_run = a.pnr_repair_run_id if ach[3] else a.pnr_run_id
             achieved_src = (f"{period:.1f} ns constraint minus WNS {ach[2]:.2f} ns after "
-                            f"`{ach[1]}`, tt, SoC P&R run {a.pnr_run_id or '?'}; see the P&R "
-                            "section")
+                            f"{pnr_stage_label(ach[1], ach[3])}, tt, SoC P&R run "
+                            f"{src_run or '?'}; see the P&R section")
     out += energy_section(power.parent, achieved, achieved_src)
     out += mmio_section(selected, next(m for m in rows if m["rounds_per_cycle"] == selected),
                         achieved)
     if pnr_run:
         out += pnr_section(pnr_run, pnr_metrics(a.pnr_ref), a.pnr_run_id, a.pnr_ref_run_id,
-                           period)
+                           period, repair, ref_repair,
+                           (a.pnr_repair_run_id, a.pnr_ref_repair_run_id))
     if a.soc:
         out += soc_section(soc_metrics(a.soc), soc_metrics(a.soc_ref), a.soc_run_id,
                            a.soc_ref_run_id)
