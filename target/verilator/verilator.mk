@@ -5,9 +5,10 @@
 # Description:
 # Open-source (Questa-free) simulation lane: builds a Verilator model of the
 # digital SoC (iguana_soc, compiled with -D NO_HYPERBUS) and runs it against
-# prebuilt riscv test binaries. See openspec/changes/verilator-sim-flow/ for
-# the design rationale, in particular why the Bender target set here differs
-# from the Questa flow's BENDER_SIM_TARGETS.
+# prebuilt riscv test binaries. See
+# openspec/changes/archive/2026-10-06-verilator-sim-flow/
+# for the design rationale, in particular why the Bender target set here
+# differs from the Questa flow's BENDER_SIM_TARGETS.
 
 VERILATOR      ?= verilator
 VERILATOR_DIR  := $(realpath $(dir $(realpath $(lastword $(MAKEFILE_LIST)))))
@@ -52,6 +53,19 @@ VERILATOR_FLIST := $(VERILATOR_BUILD)/flist.verilator.f
 # is confirmed unreferenced anywhere in this design's hierarchy.
 VERILATOR_EXCLUDE_PATTERN := tech_cells_generic-[^/]*/src/deprecated/pad_functional\.sv$$
 
+# CVA6's `wt_axi_adapter.sv` zero-extends physical addresses with
+# `{{AxiAddrWidth-PLEN{1'b0}}, paddr}`. With this config the replication count
+# is negative, and that crashes Verilator 5.050 (`Internal Error:
+# ../V3Number.h:242`). The flist swaps in a copy with the pickle's existing
+# `wt_axi_adapter2.patch` applied (plain assignment, same truncation the
+# synthesis netlist gets). The copy lives under build/ only, so the CVA6
+# checkout, the Questa compile script and the pickle input are untouched.
+# `patch` exits non-zero if a hunk stops matching after a CVA6 bump, and the
+# grep below fails the rule if the flist no longer names the original file.
+VERILATOR_WT_AXI_PATCH   := $(IG_ROOT)/target/ihp13/pickle/patches/morty/wt_axi_adapter2.patch
+VERILATOR_WT_AXI_PATCHED := $(VERILATOR_BUILD)/patched/wt_axi_adapter.sv
+VERILATOR_WT_AXI_ORIG    := cva6-[^/]*/core/cache_subsystem/wt_axi_adapter\.sv
+
 # `FUNCTIONAL` matches the guard the IHP13 SRAM/pad behavioral models use to
 # enable their simulation-only bodies (mirrors the `all(ihp13, simulation)`
 # Bender.yml block); `NO_HYPERBUS` takes iguana_soc's own escape hatch to tie
@@ -61,14 +75,19 @@ VERILATOR_EXCLUDE_PATTERN := tech_cells_generic-[^/]*/src/deprecated/pad_functio
 # only produces a harmless-but-noisy REDEFMACRO warning. Deliberately no
 # `SYNTHESIS` define either: several common_cells files gate simulation-only
 # checks on `` `ifndef SYNTHESIS `` and must stay active for a functional sim.
-$(VERILATOR_FLIST): Bender.yml Bender.lock $(VERILATOR_DIR)/src/$(VERILATOR_TOP).sv $(VERILATOR_DIR)/verilator.vlt
-	@mkdir -p $(@D)
-	@echo '$(VERILATOR_DIR)/verilator.vlt' > $@
+$(VERILATOR_FLIST): Bender.yml Bender.lock $(VERILATOR_DIR)/src/$(VERILATOR_TOP).sv $(VERILATOR_DIR)/verilator.vlt $(VERILATOR_WT_AXI_PATCH)
+	@mkdir -p $(@D) $(dir $(VERILATOR_WT_AXI_PATCHED))
+	@echo '$(VERILATOR_DIR)/verilator.vlt' > $@.tmp
 	$(BENDER) script verilator --no-default-target -D FUNCTIONAL -D NO_HYPERBUS \
 		$(foreach t,$(VERILATOR_BENDER_TARGETS),-t $(t)) \
-		| grep -Ev '$(VERILATOR_EXCLUDE_PATTERN)' >> $@
-	@for f in $(VERILATOR_IHP13_SIM_MODELS); do echo "$$f" >> $@; done
-	@echo '$(VERILATOR_DIR)/src/$(VERILATOR_TOP).sv' >> $@
+		| grep -Ev '$(VERILATOR_EXCLUDE_PATTERN)' >> $@.tmp
+	@orig=$$(grep -E '$(VERILATOR_WT_AXI_ORIG)$$' $@.tmp) || \
+		{ echo "error: wt_axi_adapter.sv not found in the Verilator file list" >&2; exit 1; }; \
+	patch -s -o $(VERILATOR_WT_AXI_PATCHED) "$$orig" < $(VERILATOR_WT_AXI_PATCH) && \
+	sed -i.bak "s|^$$orig\$$|$(VERILATOR_WT_AXI_PATCHED)|" $@.tmp && rm -f $@.tmp.bak
+	@for f in $(VERILATOR_IHP13_SIM_MODELS); do echo "$$f" >> $@.tmp; done
+	@echo '$(VERILATOR_DIR)/src/$(VERILATOR_TOP).sv' >> $@.tmp
+	@mv $@.tmp $@
 
 .PHONY: ig-verilator-flist
 ig-verilator-flist: $(VERILATOR_FLIST)

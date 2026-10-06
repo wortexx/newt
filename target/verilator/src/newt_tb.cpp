@@ -18,9 +18,9 @@
 // ROM to configure the LLC as SPM, halt, preload over SBA, set dpc via an
 // abstract register-access command, resume, poll for end-of-computation) is
 // ported from Cheshire's target/sim/src/vip_cheshire_soc.sv JTAG tasks -
-// see openspec/changes/verilator-sim-flow/design.md (D3-D5) for the design
-// rationale and openspec/changes/verilator-sim-flow/tasks.md for exact
-// constant provenance.
+// see openspec/changes/archive/2026-10-06-verilator-sim-flow/design.md
+// (D3-D5) for the design rationale and tasks.md in the same directory for
+// exact constant provenance.
 //
 // The ELF64 program-header parser is adapted from Cheshire's
 // target/sim/src/elfloader.cpp (Copyright 2022 ETH Zurich and University of
@@ -204,6 +204,8 @@ constexpr uint32_t kDmcontrolDmactive = 1u << 0;
 
 // dmstatus_t
 constexpr uint32_t kDmstatusAllhalted = 1u << 9;
+constexpr uint32_t kDmstatusVersionMask = 0xFu;
+constexpr uint32_t kDmstatusVersion013 = 2;  // debug spec 0.13
 
 // abstractcs_t
 constexpr uint32_t kAbstractcsBusy = 1u << 12;
@@ -381,15 +383,16 @@ class Tb {
   }
 
   // Must already be positioned in Shift-IR/Shift-DR. Shifts `nbits` of
-  // `value_in` MSB-first (matching this design's right-shift, insert-at-MSB
-  // shift register - see dmi_jtag.sv/dmi_jtag_tap.sv), captures the
-  // previous register content LSB-first, and exits through
+  // `value_in` LSB-first: this design's shift registers shift right and
+  // insert TDI at the MSB (`{tdi, q[N-1:1]}` in dmi_jtag.sv/
+  // dmi_jtag_tap.sv), so after N shifts the first bit sent sits in bit 0.
+  // The canonical riscv-dbg `jtag_test.sv` driver sends LSB-first too.
+  // Captures the previous register content LSB-first, and exits through
   // Exit1 -> Update -> Run-Test/Idle.
   uint64_t ShiftValue(uint64_t value_in, int nbits) {
     uint64_t captured = 0;
     for (int k = 0; k < nbits; ++k) {
-      int send_idx = nbits - 1 - k;
-      bool tdi = (value_in >> send_idx) & 1;
+      bool tdi = (value_in >> k) & 1;
       bool last = (k == nbits - 1);
       uint8_t tdo = JtagPulse(last, tdi);
       captured |= (uint64_t(tdo) << k);
@@ -547,6 +550,16 @@ class Tb {
 
   void JtagInit() {
     SelectIr(dm::kIrDmiAccess);  // stays latched for every subsequent DMI shift
+    // Every DMSTATUS this DM can return has version = 2. Anything else means
+    // the DMI path itself is broken (e.g. bit-reversed shifts), so stop here
+    // instead of failing later with a misleading halt/SBA error.
+    uint32_t dmstatus = DmiRead(dm::kDmStatus);
+    printf("[JTAG] DMSTATUS=0x%08x\n", dmstatus);
+    if ((dmstatus & dm::kDmstatusVersionMask) != dm::kDmstatusVersion013) {
+      fprintf(stderr, "[JTAG] ERROR: DMSTATUS.version=%u, expected %u - DMI access is broken\n",
+              dmstatus & dm::kDmstatusVersionMask, dm::kDmstatusVersion013);
+      exit(1);
+    }
     DmiWrite(dm::kDmControl, dm::kDmcontrolDmactive);
     for (int i = 0; i < 64; ++i) {
       if (DmiRead(dm::kDmControl) & dm::kDmcontrolDmactive) break;

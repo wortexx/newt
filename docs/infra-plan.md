@@ -152,10 +152,10 @@ Full planning + implementation record: `openspec/changes/newt-eda-tooling-image/
       for. Fixed in `docker/all/packages.txt`; smoke test extended so a missing flow-support
       utility like this gets caught by CI next time.
 
-## Phase 2 — Verilator simulation flow  *(critical path)*  🟡 in progress
+## Phase 2 — Verilator simulation flow  *(critical path)*  ✅ done (2026-10-06)
 
 Questa stays as a local-only waveform-debug target. Full record:
-`openspec/changes/verilator-sim-flow/` (not yet archived — green light not reached).
+`openspec/changes/archive/2026-10-06-verilator-sim-flow/` (archived 2026-10-06).
 
 - [x] Add `bender script verilator` + a Verilator build to `iguana.mk`
       (mirror `ig-sim-rtl`; reuse `BENDER_SYNTH_TARGETS`, not `BENDER_SIM_TARGETS` — see the
@@ -169,7 +169,17 @@ Questa stays as a local-only waveform-debug target. Full record:
       (`+BINARY=`, `+BOOTMODE=`, `+PRELMODE=`, `+TIMEOUT_CYCLES=`); this lane only supports
       `BOOTMODE=0`/`PRELMODE=0` (SPM boot, JTAG preload) — other values are rejected with a
       clear error rather than silently ignored.
-- [ ] **Green light:** `sw/tests/helloworld.spm.elf` boots and prints under Verilator, exit 0.
+- [x] **Green light:** `sw/tests/helloworld.spm.elf` boots and prints under Verilator, exit 0.
+      **Reached 2026-10-06.** Root cause: `newt_tb.cpp` shifted JTAG data MSB-first, but the
+      DTM's shift registers expect LSB-first. Every DMI word arrived bit-reversed, so the frozen
+      `0x00000011` was `DMSTATUS`'s own address echoed back. With that fixed, `DMSTATUS` reads
+      `0xc0c82` (matching Xcelium), and `helloworld.spm` passes in about 2 min (216,760 cycles).
+      `sha3_smoke.spm` passes too, so the CV-X-IF coprocessor runs on the same model. Even non-zero
+      exit codes and timeouts give a non-zero process exit (odd codes: Phase 16). The model build needed one more fix first:
+      Verilator 5.050 crashes (`V3Number.h:242`) on CVA6 `wt_axi_adapter.sv`'s negative-width
+      replication. The flist now swaps in a `build/`-only copy with the pickle's
+      `wt_axi_adapter2.patch` applied (`verilator.mk`), so that patch now has two consumers
+      (see Phase 0's "Still open" note). History below.
       **Blocked, deferred (2026-09-01).** A from-scratch JTAG-DTM + RISC-V Debug Module driver
       was built (bit-banged TAP, DMI, SBA — no fesvr/DPI dependency) and validated at the TAP
       level (IDCODE readback correct). The DMI protocol reports success throughout ELF preload
@@ -195,7 +205,8 @@ Questa stays as a local-only waveform-debug target. Full record:
       ship the unit TB first; do full-SoC sim in the synth lane later.
       Turned out unnecessary for verilation itself (full SoC verilates fine without
       hyperbus/DRAM, which this DUT ties off via `NO_HYPERBUS`); the *simulation* still
-      stalls, but on the DM protocol issue above, not on verilating the SoC.
+      stalls, but on the DM protocol issue above, not on verilating the SoC. (That issue is fixed
+      as of 2026-10-06, see the green-light item.)
 
 ## Phase 3 — CI fast lane (GitHub-hosted, every PR + push)
 
@@ -222,9 +233,10 @@ Container `newt-eda`; runner `ubuntu-latest` (or an 8-core larger runner if sim 
       Verilator C++ DMI read path — not an RTL bug, per the 2026-09-28 Xcelium cross-check), not
       on missing RTL. It runs its real precondition check every time and reports that blocker,
       but always exits 0 and is not required until a dedicated follow-up graduates it — never
-      automatically just because the blocker clears. No work has landed on the Verilator side of
-      that bug since the cross-check; `openspec/changes/verilator-sim-flow/` is still 10/14
-      tasks, all four open ones (2.5, 3.1–3.3) downstream of this same fix.
+      automatically just because the blocker clears. **The blocker cleared 2026-10-06** (Phase 2
+      green light; `verilator-sim-flow` all tasks done), so graduating `sim-soc` is now unblocked
+      and is the next follow-up. Budget for it: about 25 min of single-threaded model build plus
+      about 2 min per boot test locally (amd64 image under emulation), so the job will want a cached model.
 
 ## Phase 4 — CI synth lane  ✅ done (2026-09-02)
 

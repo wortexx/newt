@@ -154,7 +154,7 @@ RTL or `CheshireCfg`.** Next step for whoever resumes this: diff this harness's
 DMI read bit-stream against the Xcelium trace (`dmi_jtag.state_q` transitions and
 the DR shifts around one `DMSTATUS` read) — the Xcelium VCD is the reference.
 
-**Root cause identified (2026-10-05, by code reading; not yet confirmed by a run):
+**Root cause identified (2026-10-05, by code reading; confirmed by a run 2026-10-06):
 the driver shifts TDI MSB-first, but the DTM expects LSB-first.** Both shift
 registers are right-shift, insert-at-MSB: `dr_d = {tdi, dr_q[40:1]}`
 (`dmi_jtag.sv`) and `jtag_ir_shift_d = {td_i, jtag_ir_shift_q[IrLength-1:1]}`
@@ -183,3 +183,8 @@ Fix: send `send_idx = k` in `ShiftValue` and correct its comment. The
 `ResetDmi`/`dmireset` and issue-to-retrieve idle-gap changes are correct
 protocol handling, and they stay. The model has to build again first (see
 tasks.md 3.0).
+
+**Confirmed (2026-10-06).** After the `ShiftValue` fix and the `wt_axi_adapter`
+build fix (tasks.md 3.0/3.0a), the first `DMSTATUS` read returns `0x000c0c82`,
+the Xcelium reference value. `helloworld.spm.elf` then halts, preloads, resumes,
+prints `Hello World!` and exits 0 (tasks.md 3.1).

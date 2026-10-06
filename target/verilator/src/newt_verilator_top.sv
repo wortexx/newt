@@ -10,10 +10,10 @@
 // GPIO, VGA, USB, serial link, hyperbus) is tied to its idle value here -
 // this DUT does not exercise those interfaces.
 //
-// See openspec/changes/verilator-sim-flow/design.md (D1) for why this wraps
-// `iguana_soc` directly instead of duplicating `cheshire_soc`'s port list,
-// and why `NO_HYPERBUS` is used instead of dragging in the hyperbus PHY for
-// a test that never touches it.
+// See openspec/changes/archive/2026-10-06-verilator-sim-flow/design.md
+// (D1) for why this wraps `iguana_soc` directly instead of duplicating
+// `cheshire_soc`'s port list, and why `NO_HYPERBUS` is used instead of
+// dragging in the hyperbus PHY for a test that never touches it.
 
 module newt_verilator_top
   import iguana_pkg::*;
