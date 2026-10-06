@@ -61,13 +61,19 @@ Tags: **[edit]** plain editing · **[eda]** needs the `newt-eda` container (Veri
 
 ## 3. Graduate to a required check and update the plan
 
-- [ ] 3.1 **[admin]** After 2.2/2.3 are green and with the user's confirmation, set `main`'s required status checks to exactly `lint`, `sw`, `sim-unit`, `synth-coproc`, `sim-soc`, keeping `enforcement_level` `non_admins` (design D6; the PATCH replaces the whole list). Verify that `gh api repos/wortexx/newt/branches/main --jq '.protection.required_status_checks.contexts'` returns those five names (spec `ci-pipeline` "Required list matches the gating jobs").
-- [ ] 3.2 **[edit]** Update `docs/infra-plan.md`:
+- [x] 3.1 **[admin]** After 2.2/2.3 are green and with the user's confirmation, set `main`'s required status checks to exactly `lint`, `sw`, `sim-unit`, `synth-coproc`, `sim-soc`, keeping `enforcement_level` `non_admins` (design D6; the PATCH replaces the whole list). Verify that `gh api repos/wortexx/newt/branches/main --jq '.protection.required_status_checks.contexts'` returns those five names (spec `ci-pipeline` "Required list matches the gating jobs").
+
+  **Done 2026-10-06**, with the user's confirmation, using the `wortexx` token, which can read and write the protection endpoint. PATCH `required_status_checks` with `strict: true` and all five checks bound to `app_id` 15368 (GitHub Actions), as the existing four were. `gh api repos/wortexx/newt/branches/main --jq '.protection.required_status_checks'` shows contexts `["lint","sw","sim-unit","synth-coproc","sim-soc"]`, `enforcement_level: "non_admins"`.
+
+- [x] 3.2 **[edit]** Update `docs/infra-plan.md`:
   - Phase 3: check off the `sim-soc` item with the date, the PR, and the measured job time from 2.2. Replace the "~25 min model build" budget with the measured hosted figure, noting that 25 min was local emulation.
   - Phase 2: close the two stray unchecked items (unit TB delivered in Phase 7; the hyperbus fallback is moot).
   - Phase 0's "Still open" note: record that `wt_axi_adapter2.patch`'s Verilator consumer now runs in CI on every PR.
 
   Verify by re-reading Phase 3 that no sentence still calls `sim-soc` a stub or blocked.
+
+  **Done 2026-10-06.** In Phase 3, the `sim-soc` item is checked off with the date, PR #61 and the measured job (8 min, model 3 min 11 s). The table row's 15–40 min is now ~8 min measured. The 25 min budget is noted as local emulation. Phase 2's two stray items are closed, and the Phase 0 note records the CI consumer of `wt_axi_adapter2.patch`. Re-read: no Phase 3 sentence still calls `sim-soc` a stub or blocked. The remaining "stub" wording there is history about `sim-unit` and `synth-coproc`, plus one note that the old stub built with stock CVA6 parameters.
+
 - [x] 3.3 **[edit]** Verify that `openspec validate graduate-sim-soc --strict` passes, and that `AGENTS.md`'s CI-lanes table still describes the fast lane correctly. It names jobs only generically, so no edit is expected; confirm and note it here.
 
   **Done 2026-10-06.** `openspec validate graduate-sim-soc --strict` passes. **Contrary to the expectation above, `AGENTS.md` did need an edit:** its fast-lane row read "Fast lane (lint, sw, sim stubs)", which is wrong now that no job is stubbed. Changed to "Fast lane (lint, sw, unit + SoC sim, coprocessor synth)". The rest of the table is still accurate.

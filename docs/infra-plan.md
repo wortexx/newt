@@ -221,7 +221,7 @@ Container `newt-eda`; runner `ubuntu-latest` (or an 8-core larger runner if sim 
 | `lint` | `bender sources` (was listed as `bender check` here originally — that command doesn't exist in any bender version, found via a real CI failure, see `ci-fast-lane` tasks.md 2.1); `verible-verilog-lint` + `verilator --lint-only` on changed RTL | ~2 min |
 | `sw` | build test binaries incl. SHA KAT programs (riscv64 gcc) | ~3 min |
 | `sim-unit` | coprocessor TB — full NIST KAT set | 5–15 min |
-| `sim-soc` | Verilator: Cheshire boot + one KAT through the new instructions | 15–40 min |
+| `sim-soc` | Verilator: Cheshire boot + one KAT through the new instructions | ~8 min (measured) |
 | `synth-coproc` | yosys synth of the coprocessor module only → area + Fmax; fail on regression vs a checked-in budget file | 5–10 min |
 
 - [x] `.github/workflows/ci.yml`: all five jobs above exist and run on every push/PR.
@@ -232,15 +232,17 @@ Container `newt-eda`; runner `ubuntu-latest` (or an 8-core larger runner if sim 
       Phase 7). Both are required status checks on `main` (`contexts: ['lint', 'sw',
       'sim-unit', 'synth-coproc']`). This corrects the line above, which until now still said
       both were stubs blocked on "no Phase 7 coprocessor RTL yet" — stale once Phase 7 closed.
-- [ ] `sim-soc` (Verilator full-SoC boot) is **still an intentionally scaffolded stub**, and
-      correctly so: it is blocked on Phase 2's JTAG-DM bug (frozen `DMSTATUS`/SBA reads in the
-      Verilator C++ DMI read path — not an RTL bug, per the 2026-09-28 Xcelium cross-check), not
-      on missing RTL. It runs its real precondition check every time and reports that blocker,
-      but always exits 0 and is not required until a dedicated follow-up graduates it — never
-      automatically just because the blocker clears. **The blocker cleared 2026-10-06** (Phase 2
-      green light; `verilator-sim-flow` all tasks done), so graduating `sim-soc` is now unblocked
-      and is the next follow-up. Budget for it: about 25 min of single-threaded model build plus
-      about 2 min per boot test locally (amd64 image under emulation), so the job will want a cached model.
+- [x] `sim-soc` (Verilator full-SoC boot) **graduated to a real, gating job** (2026-10-06,
+      PR #61, `graduate-sim-soc`). From the PR's own sources it applies the CVA6 config
+      (`ig-hw-cva6`), builds `helloworld.spm` and `sha3_smoke.spm` and the model, then runs both
+      programs in separate steps with measured `TIMEOUT_CYCLES`. Only the dependency checkout is
+      retried. Measured on `ubuntu-latest`: the job takes **8 min**: container start 2 min,
+      dependency checkout 2 min, model build **3 min 11 s** (1 thread), helloworld 7 s, sha3_smoke
+      20 s. That replaces the earlier "~25 min model build" budget, which was local amd64
+      emulation on an M3 Max (21 min there), not a hosted runner, so no model cache is needed.
+      The stub's model build on `main` had also simulated stock CVA6 parameters. `verilator.mk`
+      now refuses to build without `ig-hw-cva6`. Required status checks on `main` are now
+      `lint`, `sw`, `sim-unit`, `synth-coproc`, `sim-soc`.
 
 ## Phase 4 — CI synth lane  ✅ done (2026-09-02)
 
