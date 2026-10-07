@@ -20,7 +20,7 @@ instructions for a cryptographic (SHA) coprocessor on CVA6 / Cheshire, targeting
 | Simulation is **Questa-only** (`iguana.mk` → `questa-2022.3 vsim`); no Verilator flow | **Critical-path blocker for RTL CI.** Must add Verilator. |
 | Dev machine has 31 GB RAM; synth peaks ~35 GB | Basilisk synth needs a >64 GB box or a swap file. |
 | Stock `chip.tcl` does not complete unattended | Still true, but **the specific failure modes did not reproduce**: across 10 real P&R runs `remove_buffers` **never crashed once** (the "~1/3 runs" figure is unsubstantiated in this environment — the retry was ultimately verified by deliberate fault injection, not by a real crash). `repair_timing` looping forever did reproduce, and post-route repair is now skipped entirely. The real unattended blockers turned out to be elsewhere: `repair_antennas` hanging ~14h single-threaded, and global route's congestion iterations. |
-| Basilisk WNS ≈ −2.5 ns vs 6 ns target | Design does not close timing in the open flow (known / accepted). **Caveat for any PPA number quoted from the CI lane**: with `grt_repair` skipped (Phase 5), measured WNS at `grt` is **−14.76**, not −2.5 — post-route repair is exactly what closes that gap. Restore a bounded `grt_repair`, or requote the baseline, before using lane output as thesis PPA data. |
+| Basilisk WNS ≈ −2.5 ns vs 6 ns target | Design does not close timing in the open flow (known / accepted). **Caveat for any PPA number quoted from the CI lane**: with `grt_repair` skipped (Phase 5), measured WNS at `grt` is **−14.76**, not −2.5 — post-route repair is exactly what closes that gap. Restore a bounded `grt_repair`, or requote the baseline, before using lane output as thesis PPA data. **Resolved 2026-10-07 (`bounded-grt-repair-measurement`):** since the 10-03 placement fix, WNS at `grt` is −8.36 ns (reference) and −8.23 ns (both SHA-3 arms). A bounded `grt_repair`, resumed from the reference's `grt` checkpoint (run `37512872714`), timed out at 16 h in its incremental re-route (Phase 11). So the thesis quotes `grt` figures, labelled "before post-route repair", on both sides of the comparison. |
 | CVA6 CV-X-IF present but disabled: `CVA6ConfigCvxifEn = 0`; Cheshire ties off `cvxif_req_o` / `cvxif_resp_i`, `cheshire_pkg CvxifEn : 0` | The integration seam already exists; needs enabling + un-tying. |
 
 ### ISA integration — decided 2026-10-01: SHA-3 via CV-X-IF (+ MMIO comparison arm)
@@ -249,7 +249,7 @@ Container `newt-eda`; runner `ubuntu-latest` (or an 8-core larger runner if sim 
 ## Phase 4 — CI synth lane  ✅ done (2026-09-02)
 
 Triggers: nightly + `workflow_dispatch` + label `full-synth`. Full planning + implementation
-record: `openspec/changes/ci-synth-lane/` (not yet archived).
+record: `openspec/changes/archive/2026-09-02-ci-synth-lane/`.
 
 - [x] `make ig-hw-all && make pickle-all && make synth-all` → upload netlist + reports.
       `.github/workflows/synth.yml`. Verified end-to-end across four real runs (~2.5h each);
@@ -341,6 +341,9 @@ and fails loudly instead of quietly when a successful flow leaves it nothing.
 three route/repair phases and still hit a 16h ceiling — so it is currently **skipped
 outright**. Consequence worth carrying into any PPA work: with post-route repair off, reported
 WNS is far worse than this document's ≈ −2.5 ns assumption (−14.76 at `grt` in bringup-7).
+Repair is now a dispatch input (`skip_grt_repair`, default skip; `0` runs it). It was re-tried
+once on the post-10-03 placement, in run `37512872714`, and timed out again, though not in the
+repair itself: see Phase 11's 2026-10-07 finding.
 
 **Measured cost**: 10 bring-up runs, 158.84 VM-hours, ≈ $193 at $1.216/h. The last two runs
 cost ~$15 each versus $30–38 before the threading, antenna-skip, cache and resume work landed.
@@ -614,7 +617,7 @@ Actual approach diverged from the plan above, deliberately:
   synthesis, exactly how the `-f openroad.mk`, `PROJ_NAME` and `PNR_TIMEOUT_GRT` bugs were
   each found.
 
-## Phase 11 — Backend routability  *(design work, not infra — the real P&R blocker)*
+## Phase 11 — Backend routability  *(future work — settled 2026-10-07: not a thesis blocker)*
 
 The P&R lane now runs end to end unattended, but **the design as placed and globally routed
 cannot be detail-routed**. `pnr-bringup-10` got `detailed_route` to completion for the first
@@ -707,7 +710,8 @@ density makes the jump bigger.
       **This run is the clean pre-coprocessor P&R reference** (the user's call, 2026-10-04: same
       netlist and same settings as `main` after the merge, so no re-run on `main`). P&R figures
       from before this change are not comparable with figures from after it.
-- [ ] **Larger die, held in reserve** (`raise-gpl-density-target` D5, 2026-10-03). Input
+- [ ] *(not needed — the run with both arms, `37162759719`, also reached `grt` on the taped-out die)*
+      **Larger die, held in reserve** (`raise-gpl-density-target` D5, 2026-10-03). Input
       `die_scale` / `PNR_DIE_SCALE` (`pnr_die_scale`, default 1.0 = the taped-out die). 1.10
       gives a 6777 × 5950 µm die, core 31.2 mm² (+21 %), utilization entering `dpl` ~55 %.
       Not needed for the reference: run `37108127061` reached `grt` on the taped-out die with
@@ -716,27 +720,54 @@ density makes the jump bigger.
 - [x] ~~**Raise the `gpl` density target above real utilization**~~ — tried at 0.72 (run
       `37037836332`), made legalization worse; see the correction above.
 
-Candidate levers, roughly cheapest first — none yet tried:
+Candidate levers, roughly cheapest first — none yet tried. **Future work**: since the framing
+question below is settled, none of these is needed for the thesis. They matter only for a
+detail-routed DEF, or for making post-route repair fit (2026-10-07 finding below).
 
-- [ ] **Relax our own layer adjustments.** `pnr_apply_routing_layers` removes 30% of M2/M3
+- [ ] *(future work)* **Relax our own layer adjustments.** `pnr_apply_routing_layers` removes 30% of M2/M3
       capacity (`set_global_routing_layer_adjustment Metal2-Metal3 0.30`) and 20% of
       TopMetal1 — and Metal3 is the worst-congested layer. This looks self-inflicted and is a
       one-line experiment.
-- [ ] **Restore `grt` congestion iterations.** Stock `chip.tcl` uses 80; we cut to 14 purely
+- [ ] *(future work)* **Restore `grt` congestion iterations.** Stock `chip.tcl` uses 80; we cut to 14 purely
       to fit a timeout, with a comment explicitly accepting "a more-congested result for drt
       to deal with". Not a straight revert: iterations cost ~25 min each (80 ≈ 20–33h) and
       iteration 15 was separately observed entering an NDR-relaxation cascade that never
       terminated.
-- [ ] **Lower `gpl` density** from `-density 0.65`, trading area for routability. *(Only the
+- [ ] *(future work)* **Lower `gpl` density** from `-density 0.65`, trading area for routability. *(Only the
       starting target; see the 2026-10-03 correction above for what actually sets the
       density `dpl` inherits.)*
-- [ ] **Floorplan changes** — largest lift, last resort.
-- [ ] **First, settle the framing question**: does the thesis's PPA comparison for the SHA
+- [ ] *(future work)* **Floorplan changes** — largest lift, last resort.
+- [x] **First, settle the framing question**: does the thesis's PPA comparison for the SHA
       extension actually need a *detail-routed* DEF, or do area/timing/power after CTS and
       global route suffice? The lane already produces the latter. If they do, this entire
       phase is optional measurement-quality work rather than a blocker, which matches the P&R
       lane's own design non-goal ("timing closure and DRC convergence are not goals — the
       lane measures, it doesn't fix").
+      **Settled 2026-10-07 (`bounded-grt-repair-measurement`): global route suffices.** The
+      `sha3-evaluation` spec's quotable stages end at post-global-route, the `pnr-flow` spec
+      makes detailed routing best-effort, and `docs/results/sha3-ppa.md` already quotes `grt`.
+      The rest of this phase is future work.
+
+**2026-10-07 finding: post-route repair does not fit either.** The weak figure left was WNS at
+`grt` (−8.23 ns with both arms, against −2.70 ns after `cts`), measured with `grt_repair`
+skipped. It sets the thesis's 19.23 ns "achieved period". The repair was re-tried once, resumed
+from reference run `37108127061`'s `grt` checkpoint with `skip_grt_repair=0` (run
+`37512872714`), and timed out at its 16 h stage limit:
+
+| step | time | result |
+|---|---|---|
+| `repair_design` | 3 min | 63 buffers, 94 resized |
+| `detailed_placement` | 1 h 27 m | did not converge: 21,010 violations left (`DPL-0701`) |
+| `global_route -end_incremental` | 14.5 h, unfinished | rerouted 309,629 nets, then the `GRT-0273` NDR-relaxation cascade (from 00:47, bursts ever further apart) |
+| `repair_timing` | — | never started |
+
+The repair itself is cheap. What does not fit is what follows it: legalizing 63 buffers leaves
+the placement unconverged, and the "incremental" route turns into a re-route of a third of the
+nets. It then falls into the same cascade that made `grt.tcl` stop at 14 iterations, so a longer
+timeout would not help. The run with both arms was not dispatched, since the two sides must share a
+repair status. The thesis therefore quotes `grt` figures labelled "before post-route repair" on
+both sides. If repair is wanted later, the levers above come first, plus cutting
+`grt_repair.tcl`'s incremental route out or bounding it separately.
 
 Iteration here is now cheap: `PNR_RESUME_EXCLUDE` + `PNR_STOP_AFTER` plus the checkpoint
 restore let a single stage re-run against real data in minutes rather than a full flow, and

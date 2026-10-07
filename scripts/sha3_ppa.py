@@ -47,7 +47,9 @@ bounded-grt-repair-measurement), each the `pnr-reports` artifact of a run
 that resumed one side's `grt` checkpoint with skip_grt_repair=0, it adds
 WNS/TNS and design area after `grt_repair` and takes the achieved period
 from there, but only when both sides' repair completed. Otherwise it names
-each attempt's outcome and keeps the `grt` figures.
+each attempt's outcome and keeps the `grt` figures. Either may be given
+alone: the second side is not attempted once the first did not complete
+(design D4).
 
 Usage: scripts/sha3_ppa.py [--out docs/results/sha3-ppa.md]
                            [--soc RUN_DIR --soc-ref REF_DIR]
@@ -55,7 +57,7 @@ Usage: scripts/sha3_ppa.py [--out docs/results/sha3-ppa.md]
                            [--soc-both RUN_DIR --soc-both-run-id N]
                            [--pnr RUN_DIR --pnr-ref REF_DIR]
                            [--pnr-run-id N --pnr-ref-run-id N]
-                           [--pnr-repair DIR --pnr-ref-repair DIR]
+                           [--pnr-repair DIR] [--pnr-ref-repair DIR]
                            [--pnr-repair-run-id N --pnr-ref-repair-run-id N]
                            [--achieved-period-ns T --achieved-period-source TEXT]
 """
@@ -534,11 +536,14 @@ def pnr_repair_text(repair, ref_repair, repair_ids):
     """Sentence naming each side's post-route repair attempt and outcome, for
     a report that quotes figures from before the repair."""
     ids = repair_ids or (None, None)
-    parts = [f"{name}: run {rid or '?'}, {r['outcome']}"
-             for name, r, rid in (("reference", ref_repair, ids[1]),
-                                  ("with both arms", repair, ids[0])) if r]
-    return ("Post-route repair was attempted (" + "; ".join(parts) + ") and did not complete on "
-            "both sides, so every timing figure here is from before it.")
+    sides = (("the reference", ref_repair, ids[1]), ("the run with both arms", repair, ids[0]))
+    tried = [f"{name} (run {rid or '?'}, {r['outcome']})" for name, r, rid in sides if r]
+    untried = [name for name, r, _ in sides if not r]
+    text = "Post-route repair was attempted on " + " and ".join(tried)
+    if untried:
+        text += f" and therefore not on {untried[0]}"
+    return text + (", so every timing figure here is from before it (why: `docs/infra-plan.md` "
+                   "Phase 11).")
 
 
 def pnr_stage_text(latest, repaired, repair, ref_repair, repair_ids):
@@ -740,9 +745,10 @@ def main(argv=None):
     ap.add_argument("--pnr-ref-run-id", help="P&R lane run id of --pnr-ref, for the report")
     ap.add_argument("--pnr-repair", help="pnr-reports artifact dir of the post-route repair "
                     "run that resumed --pnr's grt checkpoint (change "
-                    "bounded-grt-repair-measurement); needs --pnr-ref-repair")
+                    "bounded-grt-repair-measurement)")
     ap.add_argument("--pnr-ref-repair", help="pnr-reports artifact dir of the post-route repair "
-                    "run that resumed --pnr-ref's grt checkpoint; needs --pnr-repair")
+                    "run that resumed --pnr-ref's grt checkpoint; may be given alone when the "
+                    "other side's repair was not attempted")
     ap.add_argument("--pnr-repair-run-id", help="P&R lane run id of --pnr-repair, for the report")
     ap.add_argument("--pnr-ref-repair-run-id", help="P&R lane run id of --pnr-ref-repair, for "
                     "the report")
@@ -815,9 +821,7 @@ def main(argv=None):
         out += power_section(json.loads(power.read_text()))
     if bool(a.pnr) != bool(a.pnr_ref):
         sys.exit("sha3_ppa: --pnr and --pnr-ref go together")
-    if bool(a.pnr_repair) != bool(a.pnr_ref_repair):
-        sys.exit("sha3_ppa: --pnr-repair and --pnr-ref-repair go together")
-    if a.pnr_repair and not a.pnr:
+    if (a.pnr_repair or a.pnr_ref_repair) and not a.pnr:
         sys.exit("sha3_ppa: --pnr-repair and --pnr-ref-repair need --pnr and --pnr-ref")
     pnr_run = pnr_metrics(a.pnr) if a.pnr else None
     repair = pnr_repair_metrics(a.pnr_repair) if a.pnr_repair else None
