@@ -29,6 +29,19 @@ on:
 # zero changed `.sv` files, so the one step that actually hit this
 # (verilator --lint-only) was always skipped - only surfaced on the first
 # push that changed real RTL.
+# Redirect buildroot's legacy git:// server to buildroot's own GitLab over
+# HTTPS (change redirect-buildroot-to-https). Every dependency checkout clones
+# Cheshire recursively, and its unused sw/deps/cva6-sdk pulls `buildroot` from
+# git://git.buildroot.net. That server had full outages on 2026-10-06 and
+# 2026-10-07 that failed every job. Git reads GIT_CONFIG_COUNT/KEY_n/VALUE_n as
+# configuration, and bender shells out to git, so the rewrite reaches the nested
+# submodule clone inside the job container. Same commit, different host. The
+# durable fix (stop cloning cva6-sdk) is docs/infra-plan.md Phase 18.
+env:
+  GIT_CONFIG_COUNT: '1'
+  GIT_CONFIG_KEY_0: url.https://gitlab.com/buildroot.org/buildroot.git.insteadOf
+  GIT_CONFIG_VALUE_0: git://git.buildroot.net/buildroot
+
 defaults:
   run:
     shell: bash
@@ -49,6 +62,17 @@ jobs:
       - name: Allow git to operate on the checked-out tree
         run: git config --global --add safe.directory '*'
 
+      # Fail before any dependency checkout if the buildroot redirect in this
+      # workflow's top-level env: is missing (redirect-buildroot-to-https D3).
+      - name: Check the buildroot git URL redirect
+        run: |
+          url="$(git ls-remote --get-url git://git.buildroot.net/buildroot)"
+          if [ "$url" != "https://gitlab.com/buildroot.org/buildroot.git" ]; then
+            echo "::error::buildroot is not redirected to HTTPS (got $url) - see the GIT_CONFIG_* env block at the top of this workflow (change redirect-buildroot-to-https)"
+            exit 1
+          fi
+          echo "buildroot redirected to $url"
+
       # bender has no `check` subcommand in any version (verified against
       # both the image's pinned 0.27.4 and a newer 0.32.0 - `bender check`
       # was a stale claim already sitting in docs/infra-plan.md's Phase 3
@@ -58,12 +82,13 @@ jobs:
       #
       # Wrapped in a retry: a fresh `bender sources`/`bender checkout`
       # clones `cheshire`, which recursively clones ITS submodules,
-      # including `sw/deps/cva6-sdk`'s own submodules - one of which
-      # (buildroot, at the legacy `git://git.buildroot.net`) intermittently
-      # drops the connection. Confirmed genuinely transient (a later
-      # attempt against the same commit succeeded outright) rather than a
-      # workflow bug, so retry with a clean `.bender/` rather than trying
-      # to special-case that one remote.
+      # including `sw/deps/cva6-sdk`'s own submodules. One of them
+      # (buildroot, at the legacy `git://git.buildroot.net`) used to drop the
+      # connection now and then, and on 2026-10-06/07 went down for hours,
+      # which no retry survives. It is now redirected to HTTPS by the
+      # GIT_CONFIG_* env block at the top of this file (change
+      # redirect-buildroot-to-https). The retry stays, with a clean
+      # `.bender/`, for transient faults on the remaining remotes.
       - name: bender sources (dependency graph resolves and is consistent)
         run: |
           retry() {
@@ -235,9 +260,21 @@ jobs:
       - name: Allow git to operate on the checked-out tree
         run: git config --global --add safe.directory '*'
 
+      # Fail before any dependency checkout if the buildroot redirect in this
+      # workflow's top-level env: is missing (redirect-buildroot-to-https D3).
+      - name: Check the buildroot git URL redirect
+        run: |
+          url="$(git ls-remote --get-url git://git.buildroot.net/buildroot)"
+          if [ "$url" != "https://gitlab.com/buildroot.org/buildroot.git" ]; then
+            echo "::error::buildroot is not redirected to HTTPS (got $url) - see the GIT_CONFIG_* env block at the top of this workflow (change redirect-buildroot-to-https)"
+            exit 1
+          fi
+          echo "buildroot redirected to $url"
+
       # Same retry rationale as lint's bender-sources step: `make
-      # ig-sw-all` triggers the same fresh, flaky-at-buildroot.net
-      # dependency checkout as a side effect of Makefile parsing.
+      # ig-sw-all` triggers the same fresh dependency checkout as a side
+      # effect of Makefile parsing (buildroot is redirected; the retry is for
+      # the other remotes).
       - name: Build test binaries (make ig-sw-all)
         run: |
           retry() {
@@ -264,6 +301,17 @@ jobs:
 
       - name: Allow git to operate on the checked-out tree
         run: git config --global --add safe.directory '*'
+
+      # Fail before any dependency checkout if the buildroot redirect in this
+      # workflow's top-level env: is missing (redirect-buildroot-to-https D3).
+      - name: Check the buildroot git URL redirect
+        run: |
+          url="$(git ls-remote --get-url git://git.buildroot.net/buildroot)"
+          if [ "$url" != "https://gitlab.com/buildroot.org/buildroot.git" ]; then
+            echo "::error::buildroot is not redirected to HTTPS (got $url) - see the GIT_CONFIG_* env block at the top of this workflow (change redirect-buildroot-to-https)"
+            exit 1
+          fi
+          echo "buildroot redirected to $url"
 
       - name: Coprocessor unit testbenches (make ig-coproc-unit)
         run: |
@@ -319,6 +367,17 @@ jobs:
       - name: Allow git to operate on the checked-out tree
         run: git config --global --add safe.directory '*'
 
+      # Fail before any dependency checkout if the buildroot redirect in this
+      # workflow's top-level env: is missing (redirect-buildroot-to-https D3).
+      - name: Check the buildroot git URL redirect
+        run: |
+          url="$(git ls-remote --get-url git://git.buildroot.net/buildroot)"
+          if [ "$url" != "https://gitlab.com/buildroot.org/buildroot.git" ]; then
+            echo "::error::buildroot is not redirected to HTTPS (got $url) - see the GIT_CONFIG_* env block at the top of this workflow (change redirect-buildroot-to-https)"
+            exit 1
+          fi
+          echo "buildroot redirected to $url"
+
       # ig-hw-cva6 first: the model must simulate the SoC's CVA6
       # configuration, and verilator.mk refuses to build without it. Same
       # retry rationale as lint's bender-sources step: the first make in a
@@ -370,6 +429,17 @@ jobs:
 
       - name: Allow git to operate on the checked-out tree
         run: git config --global --add safe.directory '*'
+
+      # Fail before any dependency checkout if the buildroot redirect in this
+      # workflow's top-level env: is missing (redirect-buildroot-to-https D3).
+      - name: Check the buildroot git URL redirect
+        run: |
+          url="$(git ls-remote --get-url git://git.buildroot.net/buildroot)"
+          if [ "$url" != "https://gitlab.com/buildroot.org/buildroot.git" ]; then
+            echo "::error::buildroot is not redirected to HTTPS (got $url) - see the GIT_CONFIG_* env block at the top of this workflow (change redirect-buildroot-to-https)"
+            exit 1
+          fi
+          echo "buildroot redirected to $url"
 
       - name: Fetch the SG13G2 liberty files (sparse, pinned PDK submodule commit)
         run: |

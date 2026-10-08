@@ -58,6 +58,22 @@ Python packages: `pip3 install hjson Mako PyYAML setuptools tabulate` (required
 by `register_interface`), plus optionally `pip3 install procpath` for memory/CPU
 profiling.
 
+### Buildroot clone (Docker and local)
+
+Bender's first checkout clones Cheshire recursively, including the unused
+`sw/deps/cva6-sdk` and its `buildroot` submodule at the legacy
+`git://git.buildroot.net`, which is often unreachable. Redirect it to
+buildroot's own GitLab once, wherever `bender` runs (on the host, or inside the
+`use-docker.sh` shell, where it lasts only as long as the container's home
+directory):
+
+```bash
+git config --global url.https://gitlab.com/buildroot.org/buildroot.git.insteadOf git://git.buildroot.net/buildroot
+```
+
+CI sets the same rewrite through `GIT_CONFIG_*` variables in each workflow
+(change `redirect-buildroot-to-https`).
+
 ### Claude Code agents/skills (optional)
 
 Run `make apm` after cloning to install the Claude Code agents, skills, and
