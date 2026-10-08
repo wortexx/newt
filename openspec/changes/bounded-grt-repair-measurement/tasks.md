@@ -42,9 +42,10 @@ Tags:
 - [x] 2.2 **[edit]** Document the input next to the other dispatch inputs in `docs/pnr-pipeline.md`
   (what it does, that it is best-effort, the 16 h timeout). Verify: the documented
   `gh workflow run pnr.yml ... -f skip_grt_repair=0` line matches the input's name.
-- [ ] 2.3 **[gh]** Land 2.1–2.2 on `main` through a PR (fast lane green). Verify:
-  `gh workflow view pnr.yml --yaml` on `main` shows the input. — PR #63 open
-  (`bounded-grt-repair-measurement`), not yet merged.
+- [x] 2.3 **[gh]** Land 2.1–2.2 on `main` through a PR (fast lane green). Verify:
+  `gh workflow view pnr.yml --yaml` on `main` shows the input. — done: PR #63 merged
+  2026-10-06 (`ac630a9`) after the fast lane passed on re-run (the first run hit the buildroot
+  outage, see 5.1). `main`'s `pnr.yml` shows `skip_grt_repair`.
 
 ## 3. Report generator (D5, D6)
 
@@ -85,41 +86,63 @@ Tags:
 
 ## 5. Reference run (D4)
 
-- [ ] 5.1 **[long-run]** With the user's approval, dispatch on `measure/grt-repair-ref`:
+- [x] 5.1 **[long-run]** With the user's approval, dispatch on `measure/grt-repair-ref`:
   `resume_from_run=37108127061 resume_exclude=grt_repaired stop_after=grt_repair
   skip_grt_repair=0`. Verify: the log shows "Netlist identity matches", all stages through `grt`
   restored, and `grt_repair` running (not "skipping post-route timing repair").
-- [ ] 5.2 **[gh]** Record the outcome: run id, whether synthesis ran (cache miss), `grt_repair`
+  — dispatched 2026-10-06 as run `37512872714` (user approved). Attempt 1 failed in
+  `make ig-hw-all` before any synthesis or P&R: `git://git.buildroot.net` (a `cva6-sdk` submodule
+  of Cheshire) reset every connection, through all 3 retries. It was an outage, not a flake: PR
+  #63's fast lane failed the same way, and the HTTPS mirror `gitlab.com/buildroot.org` stayed up
+  and holds the pinned `aa433d1c…`. About 10 min of VM time. Attempt 2, re-run at 21:10 UTC once
+  buildroot answered again: synth cache hit (`Synthesize` skipped), checkpoint restore passed the
+  netlist-identity guard, and `Place and route` started at 21:16 UTC.
+- [x] 5.2 **[gh]** Record the outcome: run id, whether synthesis ran (cache miss), `grt_repair`
   status and runtime, and on `ok` the WNS/TNS and area after repair against `grt`. Download its
   `pnr-reports`. Verify: the numbers come from `basilisk.grt_repaired.rpt` and `pnr_status.log`.
   If the stage did not complete, skip group 6 and go to 7.
+  — done 2026-10-07. Run `37512872714` attempt 2: **`grt_repair failed exit=124 attempts=1`**,
+  the 16 h stage timeout (21:16 → 13:16 UTC). `drt`/`final` were skipped as predecessor-failed,
+  as expected with `stop_after=grt_repair`. Synthesis did not run (cache hit). There are no
+  figures after repair: the stage never reached its first `report_metrics`
+  (`grt_repaired_initial`), so the artifact (`pnr-artifacts/37512872714/`) holds only
+  `pnr_grt_repair.log` and its timestamped copy. Where the time went, from the timestamped log:
+  1. `repair_design`: 21:19–21:22, 63 buffers inserted, 94 instances resized.
+  2. `detailed_placement` to legalize them: 21:22–22:49 (5,199 s). The negotiation legalizer
+     did not converge (`DPL-0701`, 21,010 violations remain; HPWL +2 %).
+  3. `global_route -end_incremental` rerouted **309,629 nets**, not a handful. From 00:47 it
+     entered the same `GRT-0273` NDR-relaxation cascade that `grt.tcl`'s iteration 15 hit
+     during bring-up: 69 clock nets at 00:47, then bursts at 02:01, 04:24, 07:08 and 10:43, ever
+     further apart. It was still there at the timeout, about 14.5 h into this one route call.
+  VM CPU stayed at one fully busy core of 16 throughout (Azure Monitor), so it was working, not
+  hung. The repair's own `repair_timing` never started.
 
 ## 6. Run with both arms (only if 5.2 completed)
 
-- [ ] 6.1 **[long-run]** With the user's approval, dispatch the same inputs on
+- [ ] 6.1 **[long-run]** *(not dispatched: 5.2 did not complete, design D4)* With the user's approval, dispatch the same inputs on
   `measure/grt-repair-arms` with `resume_from_run=37162759719`. Verify as in 5.1.
 - [ ] 6.2 **[gh]** Record the outcome as in 5.2 and download its `pnr-reports`.
 
 ## 7. Results and docs
 
-- [ ] 7.1 **[edit]** Regenerate `docs/results/sha3-ppa.md` with the repair artifacts (both, if
+- [x] 7.1 **[edit]** Regenerate `docs/results/sha3-ppa.md` with the repair artifacts (both, if
   group 6 ran). If both completed, rerun the script's energy tables at the new achieved period.
   Verify: the P&R section states the repair status of every `grt` figure; the achieved period
-  names its stage, run and repair status; the energy tables use that period.
-- [ ] 7.2 **[edit]** Update `docs/results/sha3-evaluation.md` wherever it quotes 19.23 ns or WNS
+  names its stage, run and repair status; the energy tables use that period. — done 2026-10-07: regenerated with `--pnr-ref-repair` (run `37512872714`) only. The script now accepts one side alone (design D5, changed). The P&R section names the reference's timed-out attempt and that the run with both arms was not attempted. The `grt` figures, the achieved period and the energy tables are unchanged, labelled "before post-route repair".
+- [x] 7.2 **[edit]** Update `docs/results/sha3-evaluation.md` wherever it quotes 19.23 ns or WNS
   at `grt` with the same stage and repair status. Verify: `git grep -n '19\.23'` either finds
-  nothing or finds only figures labelled before repair.
-- [ ] 7.3 **[edit]** `docs/infra-plan.md`:
+  nothing or finds only figures labelled before repair. — done: the timing table row, the achieved-period paragraph (with the attempt and why) and the energy line are labelled. `git grep '19\.23'` finds only figures labelled before repair.
+- [x] 7.3 **[edit]** `docs/infra-plan.md`:
   - Phase 11: the framing question is settled (detailed route not needed, per the
     `sha3-evaluation` stages), and the four routability levers and the larger die move to
     future work;
   - section 0's WNS caveat and Phase 5's "Repair bounding, as built": the measured outcome;
   - Phase 4's stale "not yet archived" note on `ci-synth-lane`.
-  Verify: no Phase 11 item is left unticked without a "future work" or "not needed" label.
+  Verify: no Phase 11 item is left unticked without a "future work" or "not needed" label. — done: Phase 11 is retitled future work, the framing question is ticked as settled, the larger die is marked not needed, the four levers are marked future work, and the 2026-10-07 finding is added with its step table. Section 0's caveat and Phase 5's repair note record the outcome. Phase 4 points at the archive. `docs/pnr-pipeline.md`'s `grt_repair` row cites the run.
 - [ ] 7.4 **[gh]** Delete both measurement branches once 7.1–7.3 are merged. Verify:
   `git ls-remote --heads origin 'measure/*'` is empty.
 
 ## 8. Integration check
 
-- [ ] 8.1 **[edit]** `openspec validate bounded-grt-repair-measurement --strict` passes, and every
-  run id quoted in the results and the infra plan matches a run recorded in 5.2 / 6.2.
+- [x] 8.1 **[edit]** `openspec validate bounded-grt-repair-measurement --strict` passes, and every
+  run id quoted in the results and the infra plan matches a run recorded in 5.2 / 6.2. — done: `--strict` passes. The one new run id in the results and the plan, `37512872714`, is the run recorded in 5.2. The others are the original runs from 1.1–1.3.

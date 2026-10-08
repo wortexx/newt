@@ -82,7 +82,7 @@ Power: block synthesis netlist, gate-level simulation (Verilator) + OpenSTA, `ty
 
 ## SoC place and route (task 5.4)
 
-P&R lane run 37162759719 (the SoC with both SHA-3 arms, `keccak_cvxif` and `keccak_mmio`, R = 6) against run 37108127061 (the pre-coprocessor tree, the clean reference; `docs/infra-plan.md` Phase 11). Same flow and settings: taped-out die, `gpl` pass 2 timing-driven repair virtual, `stop_after=grt`. **Stage used: grt, before post-route repair**: the lane's gate. `grt_repair` is skipped by default, and detailed routing is best-effort and was not run. Corner: `tt` (`typ_1p20V_25C`). Constraint: 11.0 ns.
+P&R lane run 37162759719 (the SoC with both SHA-3 arms, `keccak_cvxif` and `keccak_mmio`, R = 6) against run 37108127061 (the pre-coprocessor tree, the clean reference; `docs/infra-plan.md` Phase 11). Same flow and settings: taped-out die, `gpl` pass 2 timing-driven repair virtual, `stop_after=grt`. **Stage used: grt, before post-route repair**: the lane's gate. `grt_repair` is skipped by default, and detailed routing is best-effort and was not run. Post-route repair was attempted on the reference (run 37512872714, timed out) and therefore not on the run with both arms, so every timing figure here is from before it (why: `docs/infra-plan.md` Phase 11). Corner: `tt` (`typ_1p20V_25C`). Constraint: 11.0 ns.
 
 | | reference | with both arms |
 |---|---:|---:|

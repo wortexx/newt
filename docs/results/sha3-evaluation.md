@@ -188,13 +188,21 @@ The block-synthesis figures come from one consistent flow.
 | stage | corner | figure |
 |---|---|---|
 | block synthesis | `typ_1p20V_25C` | `keccak_cvxif` 7.67 ns, `keccak_mmio` 7.46 ns critical path (11.0 ns constraint) |
-| SoC P&R, post-global-route (`grt`) | `tt` | WNS −8.23 ns with both arms, against −8.36 ns for the reference (run 37162759719 vs 37108127061) |
+| SoC P&R, post-global-route (`grt`), before post-route repair | `tt` | WNS −8.23 ns with both arms, against −8.36 ns for the reference (run 37162759719 vs 37108127061) |
 
 The P&R lane stops at `grt` by design, since detailed routing is best-effort.
 So `grt` is the latest stage available, and the figures are quoted from it.
+These figures are from before post-route timing repair, which the lane skips
+by default. A bounded repair was attempted on the reference (run
+37512872714). It timed out at its 16 h limit: the incremental re-route after
+the repair fell into a congestion cascade and never finished
+(`docs/infra-plan.md` Phase 11). So no figure after repair exists for either
+side, and the comparison stays at `grt` on both.
 WNS barely moves with both arms added, so the SoC critical path is outside the
 SHA-3 blocks. The open flow does not close timing on this SoC either way. The
-achieved period, 11.0 + 8.23 = **19.23 ns**, is used for energy below.
+achieved period, 11.0 + 8.23 = **19.23 ns**, is used for energy below. It is a
+figure from before repair, not the SoC's maximum frequency: after `cts` the
+same run is at −2.70 ns.
 
 ## Power and energy
 
@@ -204,9 +212,9 @@ switching activity annotated into OpenSTA from SAIF. Every run annotates
 an ideal clock and no clock tree. Each workload is SHA3-256 absorb, paced at
 the cycles per block measured on the SoC for that implementation and cache
 regime. Only the block is counted: **the CPU, caches, iDMA and interconnect
-are excluded from every figure.** Energy per byte is at the achieved 19.23 ns.
-Only leakage scales with the period, so the figures at 11.0 ns differ by
-< 0.2 %.
+are excluded from every figure.** Energy per byte is at the achieved 19.23 ns
+(from `grt`, before post-route repair). Only leakage scales with the period,
+so the figures at 11.0 ns differ by < 0.2 %.
 
 | implementation | regime | cycles/block | block power (mW) | energy/byte (pJ/B) |
 |---|---|---:|---:|---:|

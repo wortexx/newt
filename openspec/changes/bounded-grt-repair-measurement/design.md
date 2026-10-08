@@ -107,7 +107,9 @@ lane's concurrency group serializes the two dispatches anyway.
 ### D5. Reports from two artifacts per side
 
 `sha3_ppa.py` gains `--pnr-repair` and `--pnr-ref-repair`: each repair run's `pnr-reports` dir,
-optional, and given together or not at all. From each it reads `save/pnr_status.log` for the
+optional. Each can be given alone, because under D4 the second side is not
+dispatched once the first did not complete. (The first draft required them together; changed
+2026-10-07, when the reference's repair timed out.) From each it reads `save/pnr_status.log` for the
 `grt_repair` outcome and `reports/basilisk.grt_repaired.rpt` for WNS/TNS. The P&R table gains a
 `WNS / TNS after grt_repair` row when both completed.
 
