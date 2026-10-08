@@ -59,6 +59,7 @@ Phase 12 (yosys fork retired -> upstream v0.69)  ✅  — unblocks Phase 8
 Phase 11 (backend routability)      — design work; gates a detail-routed DEF, nothing else
 Phase 13 (Cheshire 4a270af -> v0.3.1)  ✅  — dependency maintenance; synth drift ≤0.32%
 Phase 17 (SoC default-activity power collapse) — finding; gates any SoC-level power delta
+Phase 18 (stop cloning cva6-sdk, Cheshire newt.3) — optional; pairs with Phase 16's fork fix
 ```
 
 **Do Phase 2 first among the technical work** — it is the long pole; everything meaningful
@@ -102,7 +103,8 @@ frequency; GitHub large runners cover synth until then.
     (`sim-soc`). A fix shared by two lanes is the case ADR-0002 says belongs
     in a fork. That would mean a direct `cva6` override in `Bender.yml`, so it waits until the
     patch actually causes trouble. Phase 16's odd-exit-code fix is already planned as a
-    Cheshire fork patch, which would be the next tag (`newt.3`).
+    Cheshire fork patch, which would be the next tag (`newt.3`). Phase 18 (dropping the unused
+    `cva6-sdk` submodule) is aimed at the same tag.
 
 ## Phase 1 — `newt-eda` tooling image  ✅ done (2026-08-30)
 
@@ -919,6 +921,38 @@ internet. Change: `openspec/changes/xcelium-sim-lane`. How to use it: `target/xc
 
 ---
 
+## Phase 18 — Stop cloning `cva6-sdk` (Cheshire fork `newt.3`) *(optional, planned 2026-10-07)*
+
+Every lane's first dependency checkout clones Cheshire recursively. That includes
+`sw/deps/cva6-sdk` and its six submodules (buildroot, opensbi, u-boot, riscv-isa-sim,
+riscv-tests, vitetris), although no newt target uses any of them: Cheshire's `sw.mk` needs
+`cva6-sdk` only for the Linux boot images (`linux.*.gpt.bin`). Its `buildroot` submodule sits at
+the legacy `git://git.buildroot.net`, which went down on 2026-10-06 and 2026-10-07. Each outage
+failed every job, the retry helpers included.
+
+`redirect-buildroot-to-https` (workaround A) redirects that one URL to buildroot's GitLab in CI
+through `GIT_CONFIG_*`. It fixes CI from the ref that carries it, but still clones the unused tree
+from a different host, and it does nothing for refs that predate it or for local checkouts where
+the redirect isn't set (`AGENTS.md` documents it). This phase is the durable fix (workaround B),
+and it is optional while A holds.
+
+- [ ] In the Cheshire fork, either remove the `sw/deps/cva6-sdk` submodule, or point it at a
+      `cva6-sdk` fork whose `buildroot` URL is HTTPS. Removing it is simpler, and no newt target
+      breaks. Check first that nothing under `ig-sw-all`, `ig-hw-all` or the sim targets reads it.
+      Leave the Linux-image path to whoever needs it later.
+- [ ] Cut it as `v0.3.1-newt.3`, together with Phase 16's crt0/bootrom fix, which is aimed at the
+      same tag, and move `Bender.yml`'s pin. Re-check the pickle patches and
+      `YOSYS_KEEP_HIER_INST` selectors (see `AGENTS.md`'s dependency-change constraint).
+- [ ] Cost to accept up front. `Bender.lock` is a synth cache key input, so the first synth and
+      P&R runs afterwards re-synthesize (~2.5 h), and no earlier checkpoint can be resumed from
+      the new tree. The netlist should be unchanged, since only software submodules move, and the
+      synth lane's metrics against `synth-baseline.json` confirm it.
+- [ ] Gain: a much smaller, faster first checkout (no buildroot or u-boot history), and no
+      dependency on either buildroot host. The A redirect can then stay as a harmless backstop or
+      be removed.
+
+---
+
 ## Phase 17 — SoC default-activity power collapses with the SHA-3 arms *(finding, 2026-10-04, not investigated)*
 
 Found in P&R run `37162759719` (`sha3-cvxif-coprocessor` at `4c25003`, both `keccak_cvxif` and
@@ -995,7 +1029,7 @@ codes; even codes are fine.
 - [ ] Proper fix through the Cheshire fork (ADR-0002): either have crt0 not return into the
       bootrom after reporting, or have `boot_passive` use a flag bit that cannot collide with
       the EOC encoding. Upstream Cheshire tests all `return 0` on success, which is why this
-      never showed there.
+      never showed there. Cut it as `newt.3` together with Phase 18 (drop `cva6-sdk`).
 
 ---
 

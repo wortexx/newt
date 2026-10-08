@@ -69,7 +69,18 @@ defaults:
   run:
     shell: bash
 
+# Redirect buildroot's legacy git:// server to buildroot's own GitLab over
+# HTTPS (change redirect-buildroot-to-https). Every dependency checkout clones
+# Cheshire recursively, and its unused sw/deps/cva6-sdk pulls `buildroot` from
+# git://git.buildroot.net. That server had full outages on 2026-10-06 and
+# 2026-10-07 that failed every job. Git reads GIT_CONFIG_COUNT/KEY_n/VALUE_n as
+# configuration, and bender shells out to git, so the rewrite reaches the nested
+# submodule clone inside the job container. Same commit, different host. The
+# durable fix (stop cloning cva6-sdk) is docs/infra-plan.md Phase 18.
 env:
+  GIT_CONFIG_COUNT: '1'
+  GIT_CONFIG_KEY_0: url.https://gitlab.com/buildroot.org/buildroot.git.insteadOf
+  GIT_CONFIG_VALUE_0: git://git.buildroot.net/buildroot
   # Populated by task 1.1's manual Azure setup (openspec/changes/archive/2026-09-13-ci-pnr-lane
   # runbook) as repository/environment variables - not secrets, these are
   # just identifiers; the actual authentication is OIDC (no client secret
@@ -259,6 +270,17 @@ jobs:
       - name: Allow git to operate on the checked-out tree
         run: git config --global --add safe.directory '*'
 
+      # Fail before any dependency checkout if the buildroot redirect in this
+      # workflow's top-level env: is missing (redirect-buildroot-to-https D3).
+      - name: Check the buildroot git URL redirect
+        run: |
+          url="$(git ls-remote --get-url git://git.buildroot.net/buildroot)"
+          if [ "$url" != "https://gitlab.com/buildroot.org/buildroot.git" ]; then
+            echo "::error::buildroot is not redirected to HTTPS (got $url) - see the GIT_CONFIG_* env block at the top of this workflow (change redirect-buildroot-to-https)"
+            exit 1
+          fi
+          echo "buildroot redirected to $url"
+
       # Previous weekly run's checkpoints are already in Blob storage by
       # the time this one starts (upload-checkpoints job, below) - clear
       # local save/reports so a stale run's ~20GB of checkpoints doesn't
@@ -268,7 +290,8 @@ jobs:
         run: rm -rf target/ihp13/openroad/save target/ihp13/openroad/reports
 
       # Same retry rationale as ci.yml/synth.yml: a fresh dependency
-      # checkout intermittently drops the buildroot.net submodule clone.
+      # checkout can drop a submodule clone. Buildroot, the usual culprit, is
+      # redirected to HTTPS by this file's GIT_CONFIG_* env block.
       - name: Generate hardware config (make ig-hw-all)
         run: |
           retry() {
