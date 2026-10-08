@@ -50,5 +50,5 @@ No task needs synthesis, P&R or the Azure VM.
 - [x] 3.1 **[gh]** Open a PR. Verify: all five fast-lane jobs pass, and each job's log shows the
   check step passing before the dependency checkout. If `git.buildroot.net` happens to be down
   at the time, a green run also proves the scenario "Legacy buildroot server unreachable". — done 2026-10-08: PR #65. Fast lane run `37763991344`: all five jobs pass, and each one logs `buildroot redirected to https://gitlab.com/buildroot.org/buildroot.git` from the check step. `git.buildroot.net` was answering again by then, so this run does not prove the outage scenario. That was shown by hand during the 2026-10-07 outage (proposal, design Context).
-- [ ] 3.2 **[gh]** After merge, rebase PR #64 (`grt-repair-results`) onto `main` so its fast lane
-  runs with the redirect. Verify: #64's fast lane is green.
+- [x] 3.2 **[gh]** After merge, rebase PR #64 (`grt-repair-results`) onto `main` so its fast lane
+  runs with the redirect. Verify: #64's fast lane is green. — done 2026-10-08: #65 merged (`5826893`), and `grt-repair-results` was rebased cleanly onto it (`3b6aa76`). #64's fast lane run `37766257106` is green: all five jobs pass.
