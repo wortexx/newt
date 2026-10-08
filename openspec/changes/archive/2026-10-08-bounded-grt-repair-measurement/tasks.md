@@ -139,8 +139,8 @@ Tags:
   - section 0's WNS caveat and Phase 5's "Repair bounding, as built": the measured outcome;
   - Phase 4's stale "not yet archived" note on `ci-synth-lane`.
   Verify: no Phase 11 item is left unticked without a "future work" or "not needed" label. — done: Phase 11 is retitled future work, the framing question is ticked as settled, the larger die is marked not needed, the four levers are marked future work, and the 2026-10-07 finding is added with its step table. Section 0's caveat and Phase 5's repair note record the outcome. Phase 4 points at the archive. `docs/pnr-pipeline.md`'s `grt_repair` row cites the run.
-- [ ] 7.4 **[gh]** Delete both measurement branches once 7.1–7.3 are merged. Verify:
-  `git ls-remote --heads origin 'measure/*'` is empty.
+- [x] 7.4 **[gh]** Delete both measurement branches once 7.1–7.3 are merged. Verify:
+  `git ls-remote --heads origin 'measure/*'` is empty. — done 2026-10-08, after #64 merged (`5973084`): both deleted, and `git ls-remote --heads origin 'measure/*'` is empty. Their commits `1cf6754` and `616031a` were only on these branches. Run `37512872714` and its artifacts remain the record.
 
 ## 8. Integration check
 

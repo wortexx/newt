@@ -237,7 +237,15 @@ The synth lane SHALL exit non-zero when any flow stage fails or when the yosys `
 
 The system SHALL provide a P&R CI lane, in a workflow separate from the fast and synth lanes, that runs on: a weekly schedule against `main`, a manual `workflow_dispatch`, and pushed tags/releases. It SHALL NOT run on pushes or pull requests (labeled or otherwise), so no fork-sourced code can ever reach it via a PR event.
 
-The manual dispatch SHALL accept three optional inputs, all empty by default: a previous run whose checkpoints to restore before the flow starts, a list of checkpoints to leave out of that restore so their stages run again, and a stage after which the run stops. With all three empty, a dispatched run SHALL behave exactly like a scheduled run. These inputs SHALL NOT change the flow's success gate: a run that stops before the gate stage is reached SHALL still exit non-zero.
+The manual dispatch SHALL accept these optional inputs, all empty by default:
+
+- a previous run whose checkpoints to restore before the flow starts;
+- a list of checkpoints to leave out of that restore, so their stages run again;
+- a stage after which the run stops;
+- the global-placement starting density, the global-placement resize threshold, and the die scale;
+- whether to skip post-route timing repair.
+
+An empty input SHALL keep the flow's default for that setting. Post-route timing repair SHALL be skipped by default and SHALL run only when the dispatch explicitly asks for it. With all inputs empty, a dispatched run SHALL behave exactly like a scheduled run. These inputs SHALL NOT change the flow's success gate: a run that stops before the gate stage is reached SHALL still exit non-zero, and post-route repair SHALL stay best-effort whether it is skipped, completes, fails or times out.
 
 #### Scenario: Weekly run
 
@@ -256,13 +264,18 @@ The manual dispatch SHALL accept three optional inputs, all empty by default: a 
 
 #### Scenario: Manual dispatch with no inputs
 
-- **WHEN** a user dispatches the P&R lane without naming a run to resume from, checkpoints to exclude, or a stage to stop after
-- **THEN** the lane runs the full flow from synthesis through detailed route exactly as a scheduled run would
+- **WHEN** a user dispatches the P&R lane without setting any input
+- **THEN** the lane runs the full flow from synthesis through detailed route exactly as a scheduled run would, with post-route timing repair skipped
 
 #### Scenario: Manual dispatch re-runs one slice of the flow
 
 - **WHEN** a user dispatches the P&R lane naming a previous run to resume from, a checkpoint to exclude, and a stage to stop after
 - **THEN** the lane restores that run's checkpoints (refusing if they were built from a different netlist than the dispatched ref produces), skips every stage whose checkpoint was restored, runs the excluded stage again, stops once the named stage completes, publishes reports and checkpoints as usual, and exits 0 if and only if every stage through the gate was completed or restored
+
+#### Scenario: Manual dispatch runs post-route repair
+
+- **WHEN** a user dispatches the P&R lane asking for post-route timing repair not to be skipped
+- **THEN** the post-route repair stage runs its bounded repair instead of re-saving the global-route checkpoint, its reports are published like any other stage's, and its failure or timeout is recorded in the run's status without changing the run's exit status
 
 ### Requirement: P&R lane starts the VM before the job and deallocates it after
 
@@ -455,3 +468,17 @@ This exists because the self-hosted runner's lifecycle is independent of this re
 
 - **WHEN** the synth or P&R lane next executes following an action version change
 - **THEN** its steps start and run to their normal outcome rather than failing on an unsupported action runtime
+
+### Requirement: Dependency checkout does not depend on the legacy buildroot git server
+
+Every CI lane that checks out the project's dependencies SHALL fetch the buildroot repository, reached as a nested submodule of Cheshire's `cva6-sdk`, over HTTPS from buildroot's GitLab project, `https://gitlab.com/buildroot.org/buildroot.git`, and SHALL NOT contact `git://git.buildroot.net`. The redirect SHALL apply to every git invocation in the lane, including those made by the dependency manager inside the job container, and SHALL resolve to the same commit the pinned `cva6-sdk` revision records. Transient-fault retries around the dependency checkout SHALL remain in place for the lane's other remotes.
+
+#### Scenario: Legacy buildroot server unreachable
+
+- **WHEN** `git://git.buildroot.net` resets or refuses every connection while a CI lane checks out its dependencies
+- **THEN** the checkout still succeeds, with buildroot at the commit pinned by `cva6-sdk`, and the lane proceeds to its own steps
+
+#### Scenario: The redirect reaches nested submodules
+
+- **WHEN** a CI job that checks out dependencies resolves the legacy buildroot URL (`git ls-remote --get-url git://git.buildroot.net/buildroot`), inside its job container where it has one
+- **THEN** it resolves to `https://gitlab.com/buildroot.org/buildroot.git`, and the job fails before its dependency checkout if it does not
