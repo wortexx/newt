@@ -629,12 +629,14 @@ def pnr_section(run, ref, run_id, ref_id, period, repair=None, ref_repair=None,
                 f"{caveat} The critical path is outside the SHA-3 blocks: WNS barely moves "
                 "against the reference.", ""]
     out += [
-        "**SoC power: not reported.** The lane's `report_power` uses default activity (no "
-        "workload SAIF), which the evaluation spec rejects as workload power. In this netlist it "
-        "is also broken: from `pre_place` on, the combinational share collapses against the "
-        "reference (0.006 vs 0.237 W), because OpenSTA's default activity stops propagating "
-        "(`docs/infra-plan.md` Phase 17, not investigated). The SHA-3 blocks' power is the "
-        "activity-annotated block power in the sections above.",
+        "**SoC power: not reported.** There is no workload SAIF for the whole SoC, and "
+        "OpenSTA's default activity, which these runs' `report_power` used, does not converge "
+        "on this SoC: it stops at its 50-pass cap and gives 0.997 / 9.18 / 0.610 W for the "
+        "synthesized reference / coprocessor-only / both-arms netlists (`docs/infra-plan.md` "
+        "Phase 17). Under one uniform activity on every net, comparative only and not workload "
+        "power, adding both arms costs +14.6 % (+6.1 % for the coprocessor alone); the lane "
+        "reports power that way from `pin-soc-power-activity` on. The SHA-3 blocks' power is "
+        "the activity-annotated block power in the sections above.",
         "",
         "Caveats: one run each, and placement varies from run to run: congestion fell although "
         "the netlist grew. Area, power and energy of the SHA-3 blocks themselves come from "

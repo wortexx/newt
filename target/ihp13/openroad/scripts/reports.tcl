@@ -175,11 +175,28 @@ proc report_metrics { when {include_erc true} {include_clock_skew false} } {
     report_puts "[format "%4f" [expr $path_slack / $path_delay * 100]]"
   }
 
+  # Power under one uniform activity on every net, never OpenSTA's propagated
+  # default: on this SoC that propagation stops at its 50-pass cap without
+  # converging, and near-identical netlists then report 0.6 W to 9.2 W
+  # (docs/infra-plan.md Phase 17; openspec change pin-soc-power-activity).
+  # -activity is per period of the fastest defined clock. Unset afterwards so
+  # later commands of the same stage (grt_repair's repair_timing
+  # -recover_power) see the activity state they saw before this report.
+  set pwr_activity 0.1
+  set pwr_duty     0.5
+  set pwr_min_period [expr {1e30}]
+  foreach clk [all_clocks] {
+    set pwr_min_period [expr {min($pwr_min_period, [get_property $clk period])}]
+  }
   report_puts "\n=========================================================================="
   report_puts "$when report_power tt"
   report_puts "--------------------------------------------------------------------------"
+  report_puts [format "activity: uniform %.2f per %.3f ns (fastest clock), duty %.2f;\
+comparative only, not workload power" $pwr_activity $pwr_min_period $pwr_duty]
+  set_power_activity -global -activity $pwr_activity -duty $pwr_duty
   report_power -corner tt >> $filename
   report_power_metric -corner tt >> $filename
+  unset_power_activity -global
 
   # TODO these only work to stdout, whereas we want to append to the $filename
   puts "\n=========================================================================="

@@ -108,4 +108,28 @@ run-pnr:
 	PDK="$(TARGET_DIR)/pdk" \
 	./run_pnr.sh
 
-PHONY: run-openroad backend-all or-run-snapshot run-pnr
+# SoC power probe on a synthesized netlist (docs/infra-plan.md Phase 17;
+# openspec/changes/pin-soc-power-activity design D2). No placement and no
+# VM: any synth-lane netlist works, e.g.
+#   gh run download <synth run> -n basilisk-netlist -D /tmp/nl/<label>
+#   make soc-power-probe NETLIST=/tmp/nl/<label>/basilisk.yosys.v
+# Output in $(OPENROAD_DIR)/out/power-probe/<label>/ (git-ignored): probe.log,
+# soc_power_probe.rpt (the lane's report_metrics, uniform activity) and
+# inst.txt (~100 MB, per-instance power), then a per-module table from
+# scripts/soc_power_agg.py. About 25 min per netlist under amd64 emulation
+# on an M3 Max. The default-activity power it prints first is a diagnostic,
+# not a power figure: on this SoC OpenSTA's propagation stops at its 50-pass
+# cap without converging (see the `power_activity: Pass` lines).
+SOC_POWER_OUT ?= $(OPENROAD_DIR)/out/power-probe/$(notdir $(patsubst %/,%,$(dir $(NETLIST))))
+
+soc-power-probe:
+	mkdir -p $(SOC_POWER_OUT)
+	cd $(OPENROAD_DIR) && \
+	NETLIST="$(NETLIST)" \
+	OUT="$(SOC_POWER_OUT)" \
+	PDK="$(TARGET_DIR)/pdk" \
+	$(OPENROAD) -no_init -no_splash -exit -log $(SOC_POWER_OUT)/probe.log \
+		scripts/soc_power_probe.tcl
+	python3 $(IG_ROOT)/scripts/soc_power_agg.py $(SOC_POWER_OUT)/inst.txt
+
+PHONY: run-openroad backend-all or-run-snapshot run-pnr soc-power-probe

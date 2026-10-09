@@ -58,7 +58,7 @@ Phase 10 (Actions version upgrade)  — independent maintenance, any time
 Phase 12 (yosys fork retired -> upstream v0.69)  ✅  — unblocks Phase 8
 Phase 11 (backend routability)      — design work; gates a detail-routed DEF, nothing else
 Phase 13 (Cheshire 4a270af -> v0.3.1)  ✅  — dependency maintenance; synth drift ≤0.32%
-Phase 17 (SoC default-activity power collapse) — finding; gates any SoC-level power delta
+Phase 17 (SoC default-activity power is an OpenSTA artefact)  ✅  — lane power now uniform-activity
 Phase 18 (stop cloning cva6-sdk, Cheshire newt.3) — optional; pairs with Phase 16's fork fix
 ```
 
@@ -458,8 +458,8 @@ MMIO comparison accelerator) are built, tested, measured for PPA, and written up
 
 **Known follow-up, not part of this change's scope:** the whole-SoC default-activity power report
 with both arms present collapses to roughly half the pre-coprocessor reference, starting before any
-placement — tracked separately as Phase 17 below. It does not affect the thesis energy figures, which
-come from activity-annotated block power (change tasks 5.2, 5.5, 8.1), not SoC-level default activity.
+placement — Phase 17 below, since resolved as an OpenSTA propagation artefact. It does not affect
+the thesis energy figures, which come from activity-annotated block power (change tasks 5.2, 5.5, 8.1), not SoC-level default activity.
 
 ## Phase 8 — Replace svase+sv2v with `yosys-slang`  *(exploratory, not blocking)*
 
@@ -984,13 +984,13 @@ and it is optional while A holds.
 
 ---
 
-## Phase 17 — SoC default-activity power collapses with the SHA-3 arms *(finding, 2026-10-04, not investigated)*
+## Phase 17 — SoC default-activity power is an OpenSTA artefact  ✅ done (2026-10-09, `pin-soc-power-activity`)
 
 Found in P&R run `37162759719` (`sha3-cvxif-coprocessor` at `4c25003`, both `keccak_cvxif` and
-`keccak_mmio` at R = 6, task 5.4). It is compared with the pre-coprocessor reference run
-`37108127061` (Phase 11). Both runs used the same OpenROAD build (26Q3-1740-g2c56926971), the same
-flow settings and the same SDC, and gave identical `check_setup` warnings. The SoC's
-`report_power -corner tt` (default activity: the flow reads no SAIF or VCD) roughly halves:
+`keccak_mmio` at R = 6, task 5.4), against the pre-coprocessor reference run `37108127061`
+(Phase 11): same OpenROAD build (26Q3-1740-g2c56926971), flow settings and SDC. The SoC's
+`report_power -corner tt` (default activity: the flow reads no SAIF or VCD) roughly halved, already
+at `pre_place`, before any placement:
 
 | stage | reference: total / combinational | both arms: total / combinational |
 |---|---:|---:|
@@ -998,40 +998,55 @@ flow settings and the same SDC, and gave identical `check_setup` warnings. The S
 | `gpl2` | 1.08 W / 0.411 W | 0.49 W / 0.013 W |
 | `grt` | 1.82 W / 0.470 W | 0.98 W / 0.019 W |
 
-At `grt`, sequential switching drops from 34 mW to 1.6 mW, and macro power from 0.113 W to
-0.029 W. The gap is already there at `pre_place`, right after the netlist is read and before
-any placement. So it comes from the synthesized netlist as OpenSTA sees it, not from P&R.
-Something in that netlist stops OpenSTA's default activity from propagating past the
-flip-flops. Candidates, none checked:
+**Diagnosis (2026-10-09): OpenSTA's default activity does not converge on this SoC.** It seeds only
+the non-clock primary inputs and carries activity across flip-flops in at most 50 passes (a
+compile-time constant); flip-flops it never reaches stay at zero. Measured with
+`make soc-power-probe` (`target/ihp13/openroad/openroad.mk`) on the synth lane's `basilisk-netlist`
+artifacts, on a laptop, with the flow's own `init_tech.tcl` and SDC. The both-arms netlist
+reproduces CI's `pre_place` 0.610 W exactly.
 
-- a reset or test net that becomes constant;
-- a large combinational loop that OpenSTA breaks so that activity stops there;
-- an interaction with CV-X-IF being enabled in CVA6.
+| netlist (synth run) | default activity | passes / largest change at the last pass | uniform activity (`-global 0.1/0.5`) |
+|---|---:|---|---:|
+| reference (`36447894410`) | 0.997 W | 50 (cap) / ~1,900× | 1.750 W |
+| `keccak_cvxif` only (`37005575294`) | **9.18 W** | 50 (cap) / ~70,000× | 1.856 W (+6.1 %) |
+| both arms (`37218328058`) | **0.610 W** | 50 (cap) / 2× | 2.006 W (+14.6 %) |
 
-Impact: SoC default-activity power is not a workload figure, and the `sha3-evaluation` spec
-already rejects it. The thesis energy figures come from activity-annotated block power
-(`docs/results/sha3-ppa.md`, tasks 5.2 and 5.5) and are not affected. But no SoC-level power
-delta can be quoted from these runs, and the lane's power reports cannot be trusted until this
-is understood. Timing and routing results are unaffected: WNS at `grt` is −8.23 ns, against
-−8.36 ns on the reference.
+None of the three converges (tolerance 1 %), so each figure is a snapshot of an iteration still in
+motion, and near-identical netlists land 15× apart. Per module (mW, total / switching, default
+activity): `i_keccak_cvxif` 8,100 / 3,692 with the coprocessor only (its XOR datapath sums input
+activities under the independence assumption) but 14.5 / 0.00 with both arms; CVA6 446 / 84.5
+(reference), 518 / 136, 154 / 0.19. Blocks fed straight from input pins (SPI, I2C, UART) are
+identical in all three. Changing the reference's default input activity from 0.05 to 0.2 moves it
+only from 0.987 to 1.014 W: the netlist's structure decides, not the input setting.
 
-- [ ] **Diagnose in the lane.** Add a diagnostics step (or a `stop_after=pre_place` dispatch
-      with an extra report) that runs on the `pre_place` checkpoint of both netlists:
-      `report_activity_annotation`; `report_power -instances` for the top contributors;
-      `get_property` activity on `rst_ni`, the test-mode and boot-mode inputs, and a sample of
-      flip-flop Q pins in CVA6, the LLC and the coprocessor; and a `report_power` per
-      hierarchy (`i_keccak_cvxif`, `i_keccak_mmio`, `gen_cva6_cores`). The netlist exists
-      only in the self-hosted VM's synth cache, so this is the cheap path. A local synthesis
-      needs > 35 GB RAM and ~2.5 h.
-- [ ] **Isolate the trigger.** If the diagnostics do not name it, compare a netlist with only
-      `keccak_cvxif` (synth run `37005575294`'s tree, task 5.3) and one with only
-      `keccak_mmio`, to see which change sets it off.
-- [ ] **Fix or document.** Fix it in the RTL or flow if it is a real defect (e.g. a stuck
-      net). If it is an OpenSTA propagation artefact, record it, and set an explicit
-      `set_power_activity` default in `scripts/reports.tcl` so the lane's power reports are
-      comparable across netlists.
-- [ ] **Re-measure.** Re-run the SoC power figures for the reference and the both-arms
-      netlist on the same settings, and update `sha3-cvxif-coprocessor` task 5.4.
+Ruled out: a combinational loop (`check_setup`'s default checks include `-loops`, and neither
+netlist reports one) and a stuck reset or test net (the synced reset fans out to every flip-flop in
+both, and input-fed blocks agree to the microwatt). The CV-X-IF stall hypothesis was wrong: the
+coprocessor-only netlist does not collapse, it explodes.
+
+Impact: none on the thesis. SoC default-activity power is not a workload figure, the
+`sha3-evaluation` spec already rejects it, and the energy figures come from activity-annotated
+block power (`docs/results/sha3-ppa.md`, tasks 5.2 and 5.5). Timing and routing are unaffected.
+
+- [x] **Diagnose.** Done on the synthesized netlists instead of the VM's `pre_place`
+      checkpoints: the gap is there before placement, and the netlists are downloadable
+      artifacts, so neither the VM nor a local synthesis was needed. `soc_power_probe.tcl`
+      prints one `power_activity: Pass` line per propagation pass, and
+      `scripts/soc_power_agg.py` sums its per-instance dump by module (OpenROAD links flat,
+      so per-hierarchy `report_power` returns nothing).
+- [x] **Isolate the trigger.** No single trigger: the coprocessor-only netlist (synth run
+      `37005575294`) swings the other way (9.18 W), so the cause is the non-converged
+      propagation, not one block.
+- [x] **Fix or document.** `report_metrics` (`scripts/reports.tcl`) now reports power under
+      `set_power_activity -global -activity 0.1 -duty 0.5`, labelled "uniform activity,
+      comparative only, not workload power", and unsets it afterwards (`pnr-flow` spec,
+      "Power reports state their activity assumption"). **Lane power figures from before the
+      commit that lands `pin-soc-power-activity` are default-activity and not comparable with
+      later ones.**
+- [x] **Re-measure.** Under uniform activity on the synthesized netlists: +6.1 % (coprocessor
+      only) and +14.6 % (both arms) against the reference, tracking the added logic
+      (flip-flops +2.35 % / +5.47 %, cells +8.9 % / +18.7 %). Comparative only; no SoC power is
+      quoted in the thesis. No P&R run was re-dispatched for it.
 
 ---
 
