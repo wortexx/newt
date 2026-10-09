@@ -250,10 +250,12 @@ follow from what is measured:
 floor in both blocks, which is most of every active figure, and it would make
 the always-on cost of carrying the ISE close to zero. It is future work.
 
-**SoC power is not reported.** The P&R lane's `report_power` uses default
-activity, which the evaluation spec excludes. In the both-arms netlist it is
-also broken: default activity stops propagating from `pre_place` on,
-infra-plan Phase 17, not investigated.
+**SoC power is not reported.** There is no workload activity for the whole
+SoC, and OpenSTA's default activity, which the evaluation spec excludes anyway,
+does not converge on this SoC: it stops at its 50-pass cap and gives 0.997 /
+9.18 / 0.610 W for the reference / coprocessor-only / both-arms netlists
+(infra-plan Phase 17). Under one uniform activity on every net, comparative
+only, adding both arms costs +14.6 %.
 
 ## ISE vs MMIO crossover (SHA3-256)
 
@@ -327,7 +329,8 @@ scoreboard), which this work rules out by design. It is listed as future work
 - **Single runs.** Each P&R and SoC synthesis figure is one run. Placement and
   ABC mapping vary from run to run (see the area spread above).
 - **Energy coverage.** Energy is block-only, at the typical corner, with no
-  clock tree. The CPU and SoC power are not measured (Phase 17).
+  clock tree. The CPU and SoC power are not measured (no SoC workload
+  activity; default activity does not converge, infra-plan Phase 17).
 - **SLVERR.** The accelerator answers undefined accesses with `SLVERR`, but
   CVA6 drops AXI error responses and Cheshire is built with `BusErr = 0`. The
   error is verified only at the block's AXI boundary (task 6.2). On the SoC,
