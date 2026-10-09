@@ -85,6 +85,9 @@ make pickle-all
 make synth-all
 # OpenRoad backend (>24h)
 make backend-all
+# SoC power of a synthesized netlist, no P&R needed (~25 min; see the target's
+# comment in target/ihp13/openroad/openroad.mk and docs/infra-plan.md Phase 17)
+make soc-power-probe NETLIST=<path>/basilisk.yosys.v
 
 # build Cheshire test software
 make ig-sw-all
