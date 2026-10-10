@@ -90,12 +90,29 @@ Tags:
 
 ## 5. Validate on real data (Migration Plan steps 2–3)
 
-- [ ] 5.1 **[long-run]** With the user's approval, dispatch `pnr.yml` from the change's branch
+- [x] 5.1 **[long-run]** With the user's approval, dispatch `pnr.yml` from the change's branch
   with `resume_from_run=37996272102`, `resume_exclude="dpl cts grt grt_repaired"`, and all other
   inputs empty. Verify, from the run's summary and its `pnr-reports`:
   - the restore step reports a netlist-identity match;
   - `pnr_dpl.log` and `pnr_cts.log` contain `Legalizer: diamond`;
   - `pnr_status.log` shows `dpl ok` and `cts ok`, or a gated failure with violation counts.
+  — **done: run `38071835792` (2026-10-10, branch at `91074b7`), gated failure in `cts`.**
+  - Restore: `Netlist identity matches (synth-1590905eba2aab74fbdab686e617a2e2)`; `dpl`, `cts`,
+    `grt` and `grt_repaired` excluded and re-run; `floorplan`/`pre_place`/`gpl` resumed.
+  - `dpl`: `Legalizer: diamond`, `Placement legal after dpl`, **4 min** (17:34–17:38) against
+    1 h 31 m for the negotiation legalizer on the same `gpl2` checkpoint (run `37996272102`).
+    Utilization 68.1 %, legalized HPWL 82.3 M µm (+4 %) against 86.6 M µm (+9 %), WNS/TNS
+    −0.87 / −171 ns, unchanged.
+  - `cts`: CTS and `repair_clock_nets` (+554 buffers) took utilization to 71.3 %. The first
+    legalization (`Legalizer: diamond`) ran 45 min and failed: `DPL-0034` on 3,719 instances,
+    `DPL-0036 Detailed placement failed inside DPL`. Of the 1,000 it listed, 790 are CTS buffers
+    (767 `clkbuf_leaf_*`), 72 are LLC flops (`gen_llc.i_llc`, hit-miss unit), and the rest are
+    `repair_clock_nets` wire buffers. The diamond search window is ±500 sites, ±100 rows. Status:
+    `cts failed DPL-0036`; the run exited non-zero without starting `grt`, as designed.
+  - Found while reading the run: in a resumed run `report_placement_state` prints only
+    "Placement: not reported (no pnr_gpl.log ...)", so the legalizer and legality fields added in
+    3.1 are lost whenever `gpl` comes from a checkpoint. To fix before merge: report the `dpl`
+    fields even without a `gpl` log.
 - [ ] 5.2 Record in this file, under 5.1:
   - `dpl` and the two `cts` legalization runtimes, against 1 h 31 m / 2 h 40 m / 1 h 25 m for
     the negotiation legalizer in run `37996272102`;
@@ -130,6 +147,36 @@ Tags:
   committed input (synth 36447894410 / 37005575294 / 37218328058, P&R 37162759719 / 37108127061,
   repair 37512872714): before the edit the output was byte-identical to the committed file, and
   after it the diff is the two-line note only.
+
+## 8. Search window, after run 38071835792 (design D7)
+
+- [x] 8.1 **[edit]** In `common.tcl`, add `pnr_dpl_max_displacement` from
+  `PNR_DPL_MAX_DISPLACEMENT`:
+  - empty means no flag;
+  - one or two non-negative integers (microns) are accepted, and anything else is a Tcl `error`;
+  - `pnr_detailed_placement` appends `-max_displacement {x y}` when it is set and logs the value
+    on its `Legalizer:` line.
+
+  Document the setting in `run_pnr.sh`'s header. Verify: in `newt-eda`, `openroad -no_init`
+  with values empty, `1000`, `1000 2000` and `abc` gives no flag, `{1000 1000}`, `{1000 2000}`
+  and an error.
+- [x] 8.2 **[edit]** Add the `dpl_max_displacement` dispatch input to `pnr.yml`, wired to
+  `PNR_DPL_MAX_DISPLACEMENT`, and list it in `docs/pnr-pipeline.md`'s inputs. Verify:
+  `actionlint` passes, and the workflow has 9 inputs (GitHub's limit is 10).
+- [x] 8.3 **[edit]** Fix the gap found in 5.1: `report_placement_state` prints the `dpl` fields
+  (utilization, legalizer, legality, illegal cells) even when `pnr_gpl.log` is missing, saying
+  only that the `gpl` fields are unavailable. Verify: `shellcheck`, and the function run against
+  run `38071835792`'s reports (no `gpl` log) prints `legalizer diamond, legality check passed`.
+- [ ] 8.4 **[long-run]** Dispatch from the branch with `resume_from_run=38071835792`,
+  `resume_exclude="cts grt grt_repaired"` and `dpl_max_displacement="1000 1000"`. This resumes
+  from that run's legal `dpl` checkpoint. Verify: `cts`'s `DPL-0005` shows the wider window, and
+  `pnr_status.log` shows `cts ok` or a gated failure.
+- [ ] 8.5 Record the 8.4 outcome here, with the 5.2 measurements if it gets past `cts`: `cts`
+  legalization runtimes, clock skew and WNS after `cts` against run `37996272102`, then `grt` and
+  `drt`. If `cts` still fails, stop and bring the user the `die_scale` option (design D7).
+- [ ] 8.6 **[edit]** If 8.4 legalizes `cts`, make its window `pnr_dpl_max_displacement`'s default
+  in `common.tcl`, so scheduled runs use it, and update `docs/pnr-pipeline.md`. Verify: the
+  8.1 check with an empty value now gives the new default.
 
 ## 7. Integration
 

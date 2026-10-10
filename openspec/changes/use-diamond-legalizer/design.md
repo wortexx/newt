@@ -73,8 +73,26 @@ The illegal-cell figure keeps its current awk, which reads the negotiation legal
 
 `STAGE_RETRIES` stays `0` for `dpl` and `cts`. Legalization is deterministic for a given checkpoint and setting, so a retry would repeat the same failure at the same cost.
 
+### D7. The diamond legalizer's search window is configurable (added after run 38071835792)
+
+Validation run `38071835792` legalized `dpl` in 4 minutes, but `cts`'s first legalization failed. At 71.3 % utilization after CTS and `repair_clock_nets`, 3,719 cells (mostly CTS leaf buffers) found no free site within the default window of ±500 sites and ±100 rows (`DPL-0034`/`DPL-0036`).
+
+`common.tcl` therefore gains `pnr_dpl_max_displacement`, read from `PNR_DPL_MAX_DISPLACEMENT`, which the lane exposes as the `dpl_max_displacement` dispatch input.
+- **Value:** OpenROAD's `-max_displacement` value in microns, either one number for both directions or `x y`.
+- **Empty (the default):** no flag, so OpenROAD keeps its own window.
+- **Applies to:** `pnr_detailed_placement` adds `-max_displacement {x y}` to every legalization, whichever legalizer is selected.
+- **Rejected values:** anything that is not one or two non-negative integers is a Tcl error.
+- **Visibility:** `DPL-0005` logs the window actually used, in sites and rows, so every run records its effective window.
+
+The default stays empty until a run shows that a wider window legalizes `cts` on the taped-out die. That run's value then becomes the default here, so scheduled runs get it without a dispatch input (task 8.6).
+
+*Alternative:* `die_scale=1.10`. Deferred: it changes the floorplan away from the taped-out die and needs a full run from `floorplan`. It stays the fallback if a wider window fails, or if it legalizes only by moving clock buffers so far that clock skew degrades badly.
+
+*Alternative:* hard-code a wider window. Rejected: the right value is not known before a run, and a dispatch input lets the next try go without a commit.
+
 ## Risks / Trade-offs
 
+- **[A wider window still fails, or legalizes by moving clock buffers far]**: long moves hurt clock skew and timing after `cts`. Mitigation: compare `cts` skew and WNS against run `37996272102`; `die_scale=1.10` is the next lever (D7).
 - **[Diamond cannot place every cell at 68–71 % utilization]** → The stage fails with `DPL-0036`-class errors and the lane goes red at `dpl` or `cts`. Mitigation: the validation run finds this before merge. The next levers, in order, are a wider `-max_displacement` (via `DPL_ARGS`) and then `die_scale=1.10`. Each is a separate decision, recorded in Phase 11.
 - **[Diamond is slower than negotiation on about 977 k cells]** → `dpl` (4 h) or `cts` (8 h) times out. Mitigation: the validation run measures both. Timeouts are raised in this change only if it shows a need.
 - **[Blocked-layer violations survive any legalizer]** → If the 53–63 cells on blocked layers come from macro or PDN keep-outs that `detailed_placement` does not honour, the check would fail regardless of legalizer. Mitigation: the validation run's check report names those cells. If they persist, they're investigated before merge. Making the blocked-layer category non-fatal is the fallback, decided then and recorded here.

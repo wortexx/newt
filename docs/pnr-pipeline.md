@@ -76,6 +76,14 @@ behaves exactly like a scheduled run:
   the `dpl` checkpoint and everything after it, so with `resume_from_run`
   also exclude `dpl cts grt grt_repaired`.
 
+- `dpl_max_displacement` — the legalizer's search window, passed to every
+  `detailed_placement` call as `-max_displacement`, in microns: one value
+  for both directions or `x y`. Feeds `PNR_DPL_MAX_DISPLACEMENT`. Empty means
+  OpenROAD's own window (±500 sites, ±100 rows here), which left 3,719 cells
+  unplaced in `cts` at 71.3 % utilization (run 38071835792). Each stage
+  log's `DPL-0005` line records the window used. Like `dpl_legalizer`, it
+  invalidates the checkpoints of every stage that legalizes.
+
 - `skip_grt_repair` — whether to skip post-route timing repair. Feeds
   `PNR_SKIP_GRT_REPAIR`. Empty means `1`, the default on every scheduled and
   tag run: `grt_repair` only re-saves the `grt` checkpoint as
@@ -159,7 +167,7 @@ its violation counts, or no result when `dpl` did not finish); and, for the
 negotiation legalizer, the illegal cells it starts from (its iteration-0 row;
 the diamond legalizer logs no such count). `dpl` prints utilization,
 legalizer and iteration-0 row before it legalizes, so they are there even
-when the stage times out. A pass-2 revert emits a `::warning::`.
+when the stage times out. When `gpl` was restored from a checkpoint, the `gpl` fields are left out and the `dpl` fields are still reported. A pass-2 revert emits a `::warning::`.
 The report never changes the exit status (`specs/pnr-flow`). Why it exists:
 in every run on record, pass 2 reverted at overflow ≈ 0.19–0.22, and `dpl`
 started from 83 k to 223 k illegal cells, which timed it out at its old 2 h

@@ -57,6 +57,9 @@
 #                           `negotiation`. Empty or unset: pnr_dpl_legalizer's
 #                           default in common.tcl (diamond). Either way dpl
 #                           and cts end with a gated legality check.
+#   PNR_DPL_MAX_DISPLACEMENT Passed through to every detailed_placement
+#                           call as -max_displacement, in microns: one value
+#                           or "x y". Empty or unset: OpenROAD's own window.
 #   PNR_DRY_RUN            If "1", print the planned per-stage commands
 #                           (in order, honoring resume-skip) and exit 0
 #                           without invoking OpenROAD at all - the cheap
@@ -206,10 +209,6 @@ run_stage_once() {
 report_placement_state() {
     local gpl="${REPORTS}/pnr_gpl.log" dpl="${REPORTS}/pnr_dpl.log"
     local revert area util illegal legalizer dpl_status legality
-    if [ ! -f "$gpl" ]; then
-        echo "Placement: not reported (no ${gpl}; gpl restored from a checkpoint?)."
-        return 0
-    fi
     revert="$(sed -n 's/.*GPL-0999\] Revert to iter: *\([0-9]*\) overflow: *\([0-9.]*\).*/iter \1, overflow \2/p' \
         "$gpl" 2>/dev/null | tail -1)"
     area="$(sed -n 's/.*GPL-1014\] Final placement area: .*(\([-+0-9.]*%\)).*/\1/p' \
@@ -234,6 +233,12 @@ report_placement_state() {
         legality="legality check FAILED (${detail#illegal placement after dpl: })"
     else
         legality="dpl failed before its legality check (${detail})"
+    fi
+    if [ ! -f "$gpl" ]; then
+        # gpl came from a restored checkpoint: no gpl figures, but dpl's own
+        # fields still matter (use-diamond-legalizer task 8.3).
+        echo "Placement: gpl fields not reported (no ${gpl}; gpl restored from a checkpoint?); dpl utilization ${util:-?} (DPL-0009), legalizer ${legalizer:-unknown}, ${legality}, illegal cells at legalizer iteration 0: ${illegal:-none reported}."
+        return 0
     fi
     local msg="gpl final area ${area:-?}, dpl utilization ${util:-?} (DPL-0009), legalizer ${legalizer:-unknown}, ${legality}, illegal cells at legalizer iteration 0: ${illegal:-none reported}"
     # Only a revert in the last gpl pass matters to dpl: GPL-0999 after the

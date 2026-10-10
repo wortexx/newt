@@ -95,6 +95,27 @@ if { $pnr_dpl_legalizer ni {diamond negotiation} } {
     error "PNR_DPL_LEGALIZER='$pnr_dpl_legalizer' is not a legalizer: use diamond or negotiation"
 }
 
+# Search window for every legalization, as detailed_placement
+# -max_displacement in microns: one value for both directions or "x y".
+# Empty keeps OpenROAD's own window (+/- 500 sites, +/- 100 rows here),
+# which left 3,719 cells unplaced in cts's first legalization at 71.3 %
+# utilization (run 38071835792, DPL-0036). DPL-0005 logs the window used, in
+# sites and rows. PNR_DPL_MAX_DISPLACEMENT overrides it
+# (use-diamond-legalizer design D7).
+if { [info exists ::env(PNR_DPL_MAX_DISPLACEMENT)] && [string trim $::env(PNR_DPL_MAX_DISPLACEMENT)] ne "" } {
+    set pnr_dpl_max_displacement [string trim $::env(PNR_DPL_MAX_DISPLACEMENT)]
+} else {
+    set pnr_dpl_max_displacement {}
+}
+if { [llength $pnr_dpl_max_displacement] == 1 } {
+    set pnr_dpl_max_displacement [list $pnr_dpl_max_displacement $pnr_dpl_max_displacement]
+}
+if { $pnr_dpl_max_displacement ne {} &&
+     ([llength $pnr_dpl_max_displacement] != 2 ||
+      ![regexp {^[0-9]+ [0-9]+$} [join $pnr_dpl_max_displacement " "]]) } {
+    error "PNR_DPL_MAX_DISPLACEMENT='$::env(PNR_DPL_MAX_DISPLACEMENT)' is not a window: use one or two non-negative integers (microns)"
+}
+
 # OpenROAD's per-process default is 1 thread (`threads_ = 1` in
 # OpenRoad.cc), and set_thread_count is what feeds STA and the global
 # router their thread budgets. chip.tcl set this once globally (line 93)
@@ -247,8 +268,13 @@ proc pnr_status {stage status {detail ""}} {
 # run_pnr.sh's placement report reads that line from pnr_dpl.log.
 # -----------------------------------------------------------------------
 proc pnr_detailed_placement {args} {
-    global pnr_dpl_legalizer
-    utl::report "Legalizer: $pnr_dpl_legalizer"
+    global pnr_dpl_legalizer pnr_dpl_max_displacement
+    if { $pnr_dpl_max_displacement ne {} } {
+        utl::report "Legalizer: $pnr_dpl_legalizer, max displacement $pnr_dpl_max_displacement um"
+        lappend args -max_displacement $pnr_dpl_max_displacement
+    } else {
+        utl::report "Legalizer: $pnr_dpl_legalizer"
+    }
     if { $pnr_dpl_legalizer eq "diamond" } {
         lappend args -use_diamond_legalizer
     }

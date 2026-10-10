@@ -54,6 +54,10 @@ on:
         description: 'Legalizer for dpl/cts (empty = the default in scripts/pnr/common.tcl, diamond; negotiation = OpenROAD''s default)'
         required: false
         default: ''
+      dpl_max_displacement:
+        description: 'Legalizer search window, detailed_placement -max_displacement in um: one value or "x y" (empty = OpenROAD''s own window)'
+        required: false
+        default: ''
       skip_grt_repair:
         description: 'Skip post-route timing repair (empty = skip, as on scheduled runs; 0 = run grt_repair.tcl''s bounded repair, best-effort, 16h timeout)'
         required: false
@@ -610,7 +614,12 @@ jobs:
         # default, which left 10-13 k overlapping cells in every run before
         # use-diamond-legalizer. Either way dpl and cts end with a gated
         # check_placement, so no input can let an illegal placement reach grt.
-        run: PNR_GPL_DENSITY=${{ github.event.inputs.gpl_density || '' }} PNR_GPL_KEEP_RESIZE=${{ github.event.inputs.gpl_keep_resize || '' }} PNR_DIE_SCALE=${{ github.event.inputs.die_scale || '' }} PNR_DPL_LEGALIZER=${{ github.event.inputs.dpl_legalizer || '' }} PNR_TIMEOUT_GRT=57600 PNR_TIMEOUT_GRT_REPAIR=57600 PNR_SKIP_GRT_REPAIR=${{ github.event.inputs.skip_grt_repair || '1' }} PNR_SKIP_ANTENNA_REPAIR=1 PNR_DRT_END_ITER=8 PNR_STOP_AFTER=${{ github.event.inputs.stop_after || '' }} make -C target/ihp13/openroad -f openroad.mk run-pnr PROJ_NAME=basilisk
+        #
+        # PNR_DPL_MAX_DISPLACEMENT: the dpl_max_displacement dispatch input,
+        # empty by default (OpenROAD's own window, which left 3,719 cells
+        # unplaced in cts at 71.3 % utilization, run 38071835792). Quoted, as
+        # it may hold "x y".
+        run: PNR_GPL_DENSITY=${{ github.event.inputs.gpl_density || '' }} PNR_GPL_KEEP_RESIZE=${{ github.event.inputs.gpl_keep_resize || '' }} PNR_DIE_SCALE=${{ github.event.inputs.die_scale || '' }} PNR_DPL_LEGALIZER=${{ github.event.inputs.dpl_legalizer || '' }} PNR_DPL_MAX_DISPLACEMENT="${{ github.event.inputs.dpl_max_displacement || '' }}" PNR_TIMEOUT_GRT=57600 PNR_TIMEOUT_GRT_REPAIR=57600 PNR_SKIP_GRT_REPAIR=${{ github.event.inputs.skip_grt_repair || '1' }} PNR_SKIP_ANTENNA_REPAIR=1 PNR_DRT_END_ITER=8 PNR_STOP_AFTER=${{ github.event.inputs.stop_after || '' }} make -C target/ihp13/openroad -f openroad.mk run-pnr PROJ_NAME=basilisk
 
       # Move the checkpoints out of the shared workspace before this job
       # releases the runner. This is the whole fix for the collision that
