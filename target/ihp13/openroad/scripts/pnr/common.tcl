@@ -76,6 +76,25 @@ if { [info exists ::env(PNR_GPL_KEEP_RESIZE)] && $::env(PNR_GPL_KEEP_RESIZE) ne 
     set pnr_gpl_keep_resize 0
 }
 
+# Legalizer for every detailed_placement call (pnr_detailed_placement below).
+# OpenROAD 2c56926 defaults to its negotiation legalizer, which never
+# converges on this design: it returns with DPL-0701 and 15-24 k violations
+# left, in dpl and in both cts passes, and every run on record reached grt on
+# an illegal placement. drt then aborted on it with DRT-0218 (run
+# 37996272102; docs/infra-plan.md Phase 11). `diamond` selects the classic
+# legalizer (-use_diamond_legalizer), the one the 2024 tapeout used: it
+# places every cell or fails the call. `negotiation` restores OpenROAD's
+# default. PNR_DPL_LEGALIZER overrides it
+# (openspec/changes/use-diamond-legalizer design D1/D2).
+if { [info exists ::env(PNR_DPL_LEGALIZER)] && $::env(PNR_DPL_LEGALIZER) ne "" } {
+    set pnr_dpl_legalizer $::env(PNR_DPL_LEGALIZER)
+} else {
+    set pnr_dpl_legalizer diamond
+}
+if { $pnr_dpl_legalizer ni {diamond negotiation} } {
+    error "PNR_DPL_LEGALIZER='$pnr_dpl_legalizer' is not a legalizer: use diamond or negotiation"
+}
+
 # OpenROAD's per-process default is 1 thread (`threads_ = 1` in
 # OpenRoad.cc), and set_thread_count is what feeds STA and the global
 # router their thread budgets. chip.tcl set this once globally (line 93)
@@ -219,4 +238,73 @@ proc pnr_status {stage status {detail ""}} {
     set fileId [open ${save_dir}/pnr_status.log a]
     puts $fileId "$stage $status $detail"
     close $fileId
+}
+
+# -----------------------------------------------------------------------
+# pnr_detailed_placement: every legalization in the staged flow goes
+# through here, so dpl, cts and grt_repair can never disagree about the
+# legalizer (use-diamond-legalizer design D1). Logs the legalizer first;
+# run_pnr.sh's placement report reads that line from pnr_dpl.log.
+# -----------------------------------------------------------------------
+proc pnr_detailed_placement {args} {
+    global pnr_dpl_legalizer
+    utl::report "Legalizer: $pnr_dpl_legalizer"
+    if { $pnr_dpl_legalizer eq "diamond" } {
+        lappend args -use_diamond_legalizer
+    }
+    detailed_placement {*}$args
+}
+
+# -----------------------------------------------------------------------
+# pnr_check_placement: gated legality check after dpl and at the end of cts
+# (use-diamond-legalizer design D3). check_placement raises DPL-0033 on any
+# overlap, padding or blocked-layer violation; this re-raises it with the
+# per-category counts from its JSON report, so the stage's catch records
+# them in pnr_status.log and the stage fails before save_checkpoint - no
+# checkpoint is ever saved from an illegal placement. The report file stays
+# in report_dir for the lane to upload. Counts come from the report's
+# markers, which check_placement caps at its max_markers (10000) per
+# category; DPL-0005/0010/0011 in the stage log carry the uncapped totals.
+# -----------------------------------------------------------------------
+proc pnr_check_placement {stage} {
+    global report_dir proj_name
+    set rpt ${report_dir}/${proj_name}_${stage}_check_placement.rpt
+    utl::report "Check placement"
+    if { ![catch { check_placement -verbose -report_file_name $rpt } checkErr] } {
+        utl::report "Placement legal after $stage"
+        return
+    }
+    error "illegal placement after ${stage}: [pnr_placement_violations $rpt] ($checkErr; see [file tail $rpt])"
+}
+
+# Per-category marker counts in a check_placement JSON report, as
+# "Overlap_failures 9718, Padding_failures 9717, ..."; plain Tcl, since the
+# OpenROAD image carries no JSON package. Each marker has exactly one
+# "visited" key, and categories are the keys ending in _failures.
+proc pnr_placement_violations {rpt} {
+    if { ![file exists $rpt] } {
+        return "no report written"
+    }
+    set counts [dict create]
+    set category ""
+    set fh [open $rpt r]
+    while { [gets $fh line] >= 0 } {
+        if { [regexp {"([A-Za-z_]+_failures)"\s*:\s*\{} $line -> name] } {
+            set category $name
+            dict set counts $category 0
+        } elseif { $category ne "" && [string match {*"visited"*} $line] } {
+            dict incr counts $category
+        }
+    }
+    close $fh
+    set parts {}
+    dict for {name n} $counts {
+        if { $n > 0 } {
+            lappend parts "$name $n"
+        }
+    }
+    if { [llength $parts] == 0 } {
+        return "no markers in report"
+    }
+    return [join $parts ", "]
 }

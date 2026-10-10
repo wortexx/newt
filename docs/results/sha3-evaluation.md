@@ -204,6 +204,18 @@ achieved period, 11.0 + 8.23 = **19.23 ns**, is used for energy below. It is a
 figure from before repair, not the SoC's maximum frequency: after `cts` the
 same run is at −2.70 ns.
 
+**The placements were not legal.** OpenROAD's default legalizer never
+converged on this SoC, and `cts` only warned about the result. After `cts`,
+12,596 of 844,847 cells (1.5 %) overlapped in the reference and 9,718 of
+976,397 (1.0 %) with both arms, so every P&R figure above, on both sides,
+comes from a placement with overlapping cells. The comparison treats both
+sides alike, but detailed routing cannot run on such a placement: run
+37996272102 aborted with `DRT-0218` before routing anything
+(`docs/infra-plan.md` Phase 11). Change `use-diamond-legalizer` switches the
+flow to a legalizer that places every cell or fails, and makes legality a
+gated check. Requoting these figures from legal placements is a separate
+decision.
+
 ## Power and energy
 
 Stage: block-synthesis netlist, gate-level simulation (Verilator) with the

@@ -66,6 +66,16 @@ behaves exactly like a scheduled run:
   stops legalizing in time. Changing it invalidates every checkpoint
   from `floorplan` on, so do not combine it with `resume_from_run`.
 
+- `dpl_legalizer` — the legalizer every `detailed_placement` call uses
+  (`dpl`, both `cts` passes, `grt_repair`). Feeds `PNR_DPL_LEGALIZER`. Empty
+  means `pnr_dpl_legalizer`'s default in `common.tcl` (`diamond`, OpenROAD's
+  classic legalizer, which places every cell or fails); `negotiation` is
+  OpenROAD's own default, which left 10–13 k overlapping cells in every run
+  before `use-diamond-legalizer`. Any other value fails the stage. Either way
+  `dpl` and `cts` end with a gated legality check. Changing it invalidates
+  the `dpl` checkpoint and everything after it, so with `resume_from_run`
+  also exclude `dpl cts grt grt_repaired`.
+
 - `skip_grt_repair` — whether to skip post-route timing repair. Feeds
   `PNR_SKIP_GRT_REPAIR`. Empty means `1`, the default on every scheduled and
   tag run: `grt_repair` only re-saves the `grt` checkpoint as
@@ -123,8 +133,8 @@ doing anything else.
 | 1 | `floorplan` | `power_grid` | **Gate** | Reads the synthesized netlist, links the design, reads SDC, runs `check_setup`/`report_checks` sanity checks, creates the floorplan (ring layout, 2-way or 4-way L1 cache depending on `L1CACHE_WAYS`; die scaled by `pnr_die_scale`, default 1.0 = the taped-out die, see `die_scale` above), then builds the power grid (stripes/rings). Only stage that reads the netlist directly — everything after loads a checkpoint. |
 | 2 | `pre_place` | `pre_place` | **Gate** | Repairs tie-cell fanout, then `remove_buffers`. Deliberately its own tiny stage: `remove_buffers` is known to segfault roughly 1 run in 3, and isolating it means a retry only redoes this cheap step, not floorplan/power-grid. The only stage with a configured retry (1). |
 | 3 | `gpl` | `gpl2` | **Gate** | Global placement, two passes. Pass 1 (routability-driven) gives rough parasitics; `repair_design`/`repair_timing -repair_tns 70` clean up setup violations on that rough placement; pass 2 (routability + timing-driven) is the placement that actually carries forward. Both passes start from target density `pnr_gpl_density` (`scripts/pnr/common.tcl`, default 0.65; `PNR_GPL_DENSITY` / the `gpl_density` input override it). Pass 2's timing-driven iterations are virtual (`-keep_resize_below_overflow`, `pnr_gpl_keep_resize`, default 0; `PNR_GPL_KEEP_RESIZE` / the `gpl_keep_resize` input): they re-weight nets but insert no buffers. `gpl.tcl` logs both values. Only stage besides `drt` that calls `set_thread_count` (up to 32 threads, capped by the VM's core count). |
-| 4 | `dpl` | `dpl` | **Gate** | Detailed (legalized) placement + mirror optimization. Single-threaded. Afterwards `run_pnr.sh` reports how `gpl` ended (below). |
-| 5 | `cts` | `cts` | **Gate** | Clock tree synthesis. Lifts clock dont-touch (only stage that does — clock nets are protected everywhere else), repairs clock inverters and post-CTS wire length, legalizes, then `repair_timing -setup -repair_tns 90` to fix the setup violations CTS itself introduces. `check_placement` is caught/non-fatal here (thousands of buffer-overlap warnings after repair are diagnostic-only, don't block progress). |
+| 4 | `dpl` | `dpl` | **Gate** | Detailed (legalized) placement + mirror optimization. Single-threaded. Legalizes with `pnr_dpl_legalizer` (`scripts/pnr/common.tcl`, default `diamond`, OpenROAD's classic legalizer; `PNR_DPL_LEGALIZER=negotiation` selects OpenROAD's default, which leaves cells overlapping on this design). Ends with a **gated** `check_placement`: any overlap, padding or blocked-layer violation fails the stage before its checkpoint is saved, with the counts in `pnr_status.log` and the markers in `basilisk_dpl_check_placement.rpt`. Afterwards `run_pnr.sh` reports how `gpl` ended (below). |
+| 5 | `cts` | `cts` | **Gate** | Clock tree synthesis. Lifts clock dont-touch (only stage that does — clock nets are protected everywhere else), repairs clock inverters and post-CTS wire length, legalizes, then `repair_timing -setup -repair_tns 90` to fix the setup violations CTS itself introduces. Both legalizations use the same legalizer as `dpl`, and the stage ends with the same **gated** `check_placement` (`basilisk_cts_check_placement.rpt`). Until `use-diamond-legalizer` this check was caught and non-fatal, and 10–13 k overlapping cells reached `grt` in every run, until `drt` aborted on them (`DRT-0218`, run 37996272102). |
 | 6 | `grt` | `grt` | **Gate — the actual gate** (`PNR_GATE` default) | Global route: `global_route -congestion_iterations 14 -allow_congestion -verbose`. This is the stage the whole flow is judged on — `run_pnr.sh` exits non-zero if this fails, regardless of the best-effort stages after it. The long pole by far: single-threaded, congestion-bound at ~63–65% utilization. `-congestion_iterations` was cut from `chip.tcl`'s original 80, to 20, to 14 across three real timeout failures — the last cut wasn't about average per-iteration cost but a specific finding: iterations 1–14 complete trivially, then iteration 15 itself triggers a clock-net NDR-relaxation cascade with no observed sign of ever terminating (10+ hours, no completion). See Notes. |
 | 7 | `grt_repair` | `grt_repaired` | Best-effort | Post-route timing repair using global-route-based parasitics: buffer insertion, incremental global route, `repair_timing -repair_tns 20 -max_buffer_percent 15` (bounded down from chip.tcl's original 100 — that looped effectively forever on this design). `PNR_SKIP_GRT_REPAIR=1` skips the work but still re-saves the checkpoint under the uniform name `drt.tcl` expects. **Skipped by default in `pnr.yml`** (the `skip_grt_repair` input, empty = skip; `0` runs it) — even with its `global_route` calls bounded the same way `grt.tcl`'s are, real data (`pnr-bringup-6`, and again run `37512872714` on the post-2026-10-03 placement, where the incremental re-route after `repair_design` fell into the `GRT-0273` NDR-relaxation cascade; `docs/infra-plan.md` Phase 11) shows it still doesn't converge within 16h (see Notes); skipping lets `drt`/`final` actually run and produce a DEF while grt_repair's own timeout/tuning is revisited separately. |
 | 8 | `drt` | `drt` | Best-effort | Antenna repair, then detailed routing (`detailed_route`, multi-threaded like `gpl`). `-droute_end_iter` (default 40, override via `PNR_DRT_END_ITER`) bounds the iteration budget — a manual run needed stopping after 700k→516k DRC violations over 2 iterations without converging, so this is deliberately capped rather than left open-ended. |
@@ -143,9 +153,13 @@ requirement.
 not). One line with what decides `dpl`'s legalization time: whether `gpl`'s
 pass 2 reverted after a divergence (`GPL-0999`) and at what overflow; the
 final placement-area inflation (`GPL-1014`); `dpl`'s utilization
-(`DPL-0009`); and the illegal cells the negotiation legalizer starts from (its
-iteration-0 row). `dpl` prints the last two before it legalizes, so they are
-there even when the stage times out. A pass-2 revert emits a `::warning::`.
+(`DPL-0009`); the legalizer that ran (the `Legalizer:` line
+`pnr_detailed_placement` logs); `dpl`'s legality check (passed, failed with
+its violation counts, or no result when `dpl` did not finish); and, for the
+negotiation legalizer, the illegal cells it starts from (its iteration-0 row;
+the diamond legalizer logs no such count). `dpl` prints utilization,
+legalizer and iteration-0 row before it legalizes, so they are there even
+when the stage times out. A pass-2 revert emits a `::warning::`.
 The report never changes the exit status (`specs/pnr-flow`). Why it exists:
 in every run on record, pass 2 reverted at overflow ≈ 0.19–0.22, and `dpl`
 started from 83 k to 223 k illegal cells, which timed it out at its old 2 h

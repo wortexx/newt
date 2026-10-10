@@ -101,6 +101,8 @@ Achieved period: 19.23 ns (11.0 ns minus WNS -8.23 ns after `grt`, before post-r
 
 Caveats: one run each, and placement varies from run to run: congestion fell although the netlist grew. Area, power and energy of the SHA-3 blocks themselves come from synthesis (per instance) and from block-level gate-level power, not from this delta.
 
+**Placement was not legal.** `check_placement` after `cts` failed in these runs (reference 12,596 overlapping cells of 844,847 (1.5 %); with both arms 9,718 overlapping cells of 976,397 (1.0 %)). OpenROAD's negotiation legalizer did not converge and `cts` only warned, so the `grt` figures above come from placements with overlapping cells, on both sides alike. Detailed routing cannot run on such a placement (`DRT-0218`, run 37996272102). Change `use-diamond-legalizer` makes legality a gated check; requoting these figures from legal placements is a separate decision.
+
 ## SoC synthesis (task 5.3)
 
 Synth lane run 37005575294 (SoC with `keccak_cvxif`, R = 6) against run 36447894410, the same flow on the tree just before the coprocessor (Cheshire fork `v0.3.1-newt.1`, CV-X-IF off). Stage: Yosys synthesis, `typ_1p20V_25C`. CVA6 `cv64a6_imafdcsclic_sv39`, hypervisor extension on (ADR-0004). Yosys `CHECK` problems: 0 (reference: 0).
