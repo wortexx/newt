@@ -88,6 +88,8 @@ The default stays empty until a run shows that a wider window legalizes `cts` on
 
 *Alternative:* `die_scale=1.10`. Deferred: it changes the floorplan away from the taped-out die and needs a full run from `floorplan`. It stays the fallback if a wider window fails, or if it legalizes only by moving clock buffers so far that clock skew degrades badly.
 
+**Update 2026-10-11 (run `38087884024`, the user's call):** a 1000 µm window left 12 cells unplaced, all in one pocket of CVA6 next to the I-cache SRAMs, at 71.3 % utilization. Rather than widen the window again, the next run uses `die_scale=1.10`, the alternative above: about 59 % utilization after CTS, at the cost of a floorplan that is no longer the taped-out die. That run keeps the 1000 µm window, which costs little when few cells are hard to place and guards against another pocket. Its P&R figures describe the enlarged die, so the reference needs the same settings before any comparison is quoted.
+
 *Alternative:* hard-code a wider window. Rejected: the right value is not known before a run, and a dispatch input lets the next try go without a commit.
 
 ## Risks / Trade-offs

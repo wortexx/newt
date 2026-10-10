@@ -167,16 +167,36 @@ Tags:
   (utilization, legalizer, legality, illegal cells) even when `pnr_gpl.log` is missing, saying
   only that the `gpl` fields are unavailable. Verify: `shellcheck`, and the function run against
   run `38071835792`'s reports (no `gpl` log) prints `legalizer diamond, legality check passed`.
-- [ ] 8.4 **[long-run]** Dispatch from the branch with `resume_from_run=38071835792`,
+- [x] 8.4 **[long-run]** Dispatch from the branch with `resume_from_run=38071835792`,
   `resume_exclude="cts grt grt_repaired"` and `dpl_max_displacement="1000 1000"`. This resumes
   from that run's legal `dpl` checkpoint. Verify: `cts`'s `DPL-0005` shows the wider window, and
   `pnr_status.log` shows `cts ok` or a gated failure.
+  — **done: run `38087884024` (2026-10-10, `d0e0062`), gated failure in `cts` again, far
+  narrower.** The restore staged run `38071835792`'s legal `dpl` checkpoint (148,030,320 bytes).
+  `cts` logged `Legalizer: diamond, max displacement 1000 1000 um` and `DPL-0005 ... +/- 2083
+  sites horizontally, +/- 264 rows vertically`. The first legalization (utilization 71.3 %, the
+  same 554 `repair_clock_nets` buffers) ran **1 h 27 m** (45 min with the default window) and
+  placed 977,724 of 977,745 cells. 21 diamond failures, 9 recovered by rip-up and replace,
+  **12 unplaced** (`DPL-0034`), against 3,719 with the default window. All 12 are in
+  `i_core_cva6`: two `i_cut_high_*` tie cells of the I-cache data SRAM
+  (`i_cva6_icache.gen_sram.__1.data_sram`), five `fanout*` buffers, four logic cells and one
+  BTB flop (`btb_q_731__reg`). So the failure is now one local pocket in CVA6 near the I-cache
+  SRAM, not a lack of capacity across the core. Status `cts failed DPL-0036`; `cts`'s second
+  legalization (after `repair_timing -setup`) has not been reached yet.
 - [ ] 8.5 Record the 8.4 outcome here, with the 5.2 measurements if it gets past `cts`: `cts`
   legalization runtimes, clock skew and WNS after `cts` against run `37996272102`, then `grt` and
   `drt`. If `cts` still fails, stop and bring the user the `die_scale` option (design D7).
 - [ ] 8.6 **[edit]** If 8.4 legalizes `cts`, make its window `pnr_dpl_max_displacement`'s default
   in `common.tcl`, so scheduled runs use it, and update `docs/pnr-pipeline.md`. Verify: the
   8.1 check with an empty value now gives the new default.
+
+- [ ] 8.7 **[long-run]** (Decided 2026-10-11, design D7 update.) Dispatch a full run from the
+  branch, with no resume, `die_scale=1.10` and `dpl_max_displacement="1000 1000"`. Verify: the
+  floorplan logs the enlarged die (6777 × 5950 µm), `dpl` and `cts` legalize and pass their
+  checks, and `grt` passes the gate. Then record `drt`'s outcome.
+- [ ] 8.8 Record 8.7 here with the 5.2 measurements: per-stage runtimes, utilization, HPWL,
+  `cts` skew and WNS, `grt` congestion (total and Metal3), and `drt`. Note that these figures
+  are for the enlarged die and are not comparable with the taped-out-die runs.
 
 ## 7. Integration
 
