@@ -190,13 +190,38 @@ Tags:
   in `common.tcl`, so scheduled runs use it, and update `docs/pnr-pipeline.md`. Verify: the
   8.1 check with an empty value now gives the new default.
 
-- [ ] 8.7 **[long-run]** (Decided 2026-10-11, design D7 update.) Dispatch a full run from the
+- [x] 8.7 **[long-run]** (Decided 2026-10-11, design D7 update.) Dispatch a full run from the
   branch, with no resume, `die_scale=1.10` and `dpl_max_displacement="1000 1000"`. Verify: the
   floorplan logs the enlarged die (6777 × 5950 µm), `dpl` and `cts` legalize and pass their
   checks, and `grt` passes the gate. Then record `drt`'s outcome.
-- [ ] 8.8 Record 8.7 here with the 5.2 measurements: per-stage runtimes, utilization, HPWL,
+  — **done: run `38094932339` (2026-10-10/11, `0ea1fbb`), green; `drt` failed.** No resume
+  ("No resume requested"). `dpl` and `cts` legalized with the diamond legalizer and passed their
+  gated checks; `grt` passed the gate. `drt` aborted after 19 min, before routing, with
+  `DRT-0218 Guide is not connected to design` on one net, the clock leaf net
+  `clknet_12_3602__leaf_i_iguana_soc.clk_i_regs`. **So `DRT-0218` is not caused by illegal
+  placement**, which was the proposal's diagnosis; that diagnosis is withdrawn. The net's 165
+  guides (Metal1–Metal5) form one connected piece, as in run `37996272102`, and its NDR was not
+  disabled by `grt` (it is not among the 74 `GRT-0297` nets). Its guides span 2.65 mm in x
+  (3704–6357 µm), long for a CTS leaf net. Finding the uncovered pin needs the `grt` checkpoint.
+- [x] 8.8 Record 8.7 here with the 5.2 measurements: per-stage runtimes, utilization, HPWL,
   `cts` skew and WNS, `grt` congestion (total and Metal3), and `drt`. Note that these figures
   are for the enlarged die and are not comparable with the taped-out-die runs.
+  — **done (run `38094932339`, enlarged die, both arms).** Against run `37996272102` (taped-out
+  die, illegal placement):
+
+  | | 37996272102 | 38094932339 |
+  |---|---:|---:|
+  | utilization `dpl` / after `cts` | 68.1 % / 70.9 % | 56.2 % / 58.7 % |
+  | runtime `gpl` / `dpl` / `cts` / `grt` | 2 h 37 m / 1 h 36 m / 4 h 46 m / 2 h 55 m | 2 h 33 m / 5 m / 34 m / 2 h 10 m |
+  | legalized HPWL `dpl` / `cts` (M µm) | 86.6 / — | 95.9 / 117.4 |
+  | WNS `dpl` / `cts` / `grt` (ns) | −0.87 / −2.70 / −8.23 | −0.87 / −4.07 / −13.12 |
+  | `grt` demand total / Metal3 | 77.33 % / 95.27 % | 65.90 % / 78.67 % |
+  | `grt` overflowing edges (total) | 1,441,167 | 198,046 |
+  | `grt` wirelength (µm) | 160,795,498 | 165,267,389 |
+  | `drt` | `DRT-0218`, 2 nets | `DRT-0218`, 1 clock net |
+
+  Congestion falls sharply and legalization becomes fast, but timing after `cts` and `grt` is
+  worse on the bigger die (longer wires). Clock skew is not in the lane's reports.
 
 ## 7. Integration
 
