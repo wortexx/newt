@@ -63,6 +63,10 @@
 #                           or "x y". Empty or unset: pnr_dpl_max_displacement's
 #                           default in common.tcl (1000 1000); "openroad"
 #                           keeps OpenROAD's own window.
+#   PNR_BRIDGE_GUIDES      Passed through to drt.tcl: "0" skips copying
+#                           wrong-direction route guides onto the adjacent
+#                           preferred-direction layer before detailed routing
+#                           (DRT-0218 otherwise). Empty or unset: on.
 #   PNR_DRY_RUN            If "1", print the planned per-stage commands
 #                           (in order, honoring resume-skip) and exit 0
 #                           without invoking OpenROAD at all - the cheap

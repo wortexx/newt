@@ -124,6 +124,23 @@ if { $pnr_dpl_max_displacement ne {} &&
     error "PNR_DPL_MAX_DISPLACEMENT='$::env(PNR_DPL_MAX_DISPLACEMENT)' is not a window: use one or two non-negative integers (microns)"
 }
 
+# Bridge wrong-direction route guides before detailed routing
+# (pnr_bridge_wrong_way_guides below). Global routing can leave a guide that
+# spans several gcells against its layer's preferred direction; detailed
+# routing's guide graph cannot traverse it, so a pin reachable only through
+# it is an island and guide processing aborts with DRT-0218 (run 38094932339,
+# clknet_12_3602__leaf..., pin clkbuf_leaf_7247/A; docs/infra-plan.md
+# Phase 11). Default 1; PNR_BRIDGE_GUIDES=0 turns it off
+# (openspec/changes/bridge-wrong-way-route-guides design D3).
+if { [info exists ::env(PNR_BRIDGE_GUIDES)] && $::env(PNR_BRIDGE_GUIDES) ne "" } {
+    set pnr_bridge_guides $::env(PNR_BRIDGE_GUIDES)
+} else {
+    set pnr_bridge_guides 1
+}
+if { $pnr_bridge_guides ni {0 1} } {
+    error "PNR_BRIDGE_GUIDES='$pnr_bridge_guides' is not 0 or 1"
+}
+
 # OpenROAD's per-process default is 1 thread (`threads_ = 1` in
 # OpenRoad.cc), and set_thread_count is what feeds STA and the global
 # router their thread budgets. chip.tcl set this once globally (line 93)
@@ -341,4 +358,57 @@ proc pnr_placement_violations {rpt} {
         return "no markers in report"
     }
     return [join $parts ", "]
+}
+
+# -----------------------------------------------------------------------
+# pnr_bridge_wrong_way_guides: for every guide on routing levels 2-6
+# (Metal2-TopMetal1) that spans more than one gcell against its layer's
+# preferred direction, add the same rectangle on the adjacent routing level
+# whose preferred direction matches (L+1, or L-1 for the top level), with
+# the new layer as via layer, as global routing does for plain segments.
+# Nothing is removed. Collects first and creates afterwards, so no guide
+# list is mutated while it is walked (bridge-wrong-way-route-guides D1/D2).
+# -----------------------------------------------------------------------
+proc pnr_bridge_wrong_way_guides {} {
+    set block [ord::get_db_block]
+    set gxs [[$block getGCellGrid] getGridX]
+    set gstep [expr {[lindex $gxs 1] - [lindex $gxs 0]}]
+    set by_level [dict create]
+    foreach l [[$block getTech] getLayers] {
+        if { [$l getType] eq "ROUTING" } {
+            dict set by_level [$l getRoutingLevel] $l
+        }
+    }
+    set lo 2
+    set hi 6
+    set adds {}
+    set nets 0
+    foreach net [$block getNets] {
+        set touched 0
+        foreach g [$net getGuides] {
+            set l [$g getLayer]
+            set lvl [$l getRoutingLevel]
+            if { $lvl < $lo || $lvl > $hi } {
+                continue
+            }
+            set b [$g getBox]
+            if { [$l getDirection] eq "HORIZONTAL" } {
+                set wrong [expr {[$b yMax] - [$b yMin] > $gstep}]
+            } else {
+                set wrong [expr {[$b xMax] - [$b xMin] > $gstep}]
+            }
+            if { $wrong } {
+                set nl [dict get $by_level [expr {$lvl < $hi ? $lvl + 1 : $lvl - 1}]]
+                lappend adds [list $net $nl [$b xMin] [$b yMin] [$b xMax] [$b yMax]]
+                set touched 1
+            }
+        }
+        incr nets $touched
+    }
+    foreach a $adds {
+        lassign $a net nl x1 y1 x2 y2
+        odb::dbGuide_create $net $nl $nl [odb::new_Rect $x1 $y1 $x2 $y2] false
+    }
+    utl::report "Bridged [llength $adds] wrong-direction guides on $nets nets (gcell step $gstep dbu)"
+    return [llength $adds]
 }
