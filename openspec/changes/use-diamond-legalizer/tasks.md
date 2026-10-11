@@ -113,7 +113,7 @@ Tags:
     "Placement: not reported (no pnr_gpl.log ...)", so the legalizer and legality fields added in
     3.1 are lost whenever `gpl` comes from a checkpoint. To fix before merge: report the `dpl`
     fields even without a `gpl` log.
-- [ ] 5.2 Record in this file, under 5.1:
+- [x] 5.2 Record in this file, under 5.1:
   - `dpl` and the two `cts` legalization runtimes, against 1 h 31 m / 2 h 40 m / 1 h 25 m for
     the negotiation legalizer in run `37996272102`;
   - utilization (`DPL-0009`), HPWL after `dpl` and `cts`, and `grt` congestion (total and
@@ -123,13 +123,20 @@ Tags:
 
   If 5.1 fails a gated check or times out, stop: follow the Risks section of `design.md` and
   bring the user the result and the next lever before changing anything.
-- [ ] 5.3 **[edit]** Record the finding and the 5.2 outcome in `docs/infra-plan.md` Phase 11:
+  — **done, superseded.** 5.1 stopped at `cts` on the taped-out die, so these measurements
+  could not be taken there; they are recorded for the run that got through (8.8, run
+  `38094932339`).
+- [x] 5.3 **[edit]** Record the finding and the 5.2 outcome in `docs/infra-plan.md` Phase 11:
   - the illegal-placement diagnosis and the per-run table from the proposal;
   - the `DRT-0218` abort in run `37996272102`;
   - the legalizer change and what the validation run showed.
 
   Also update `cts.tcl`'s history in the Appendix B gotchas, if it is cited there. Verify:
   Phase 11's checklist has a new checked item linking this change and the run IDs.
+  — **done:** Phase 11 has the 2026-10-10 finding (table, runs `38071835792`, `38087884024`,
+  `38094932339`), two checked items (legalizer, default die), one open item (requote), and the
+  2026-10-11 `DRT-0218` finding pointing to its own change. Appendix B does not cite `cts.tcl`'s
+  check.
 
 ## 6. Results caveat
 
@@ -183,12 +190,20 @@ Tags:
   BTB flop (`btb_q_731__reg`). So the failure is now one local pocket in CVA6 near the I-cache
   SRAM, not a lack of capacity across the core. Status `cts failed DPL-0036`; `cts`'s second
   legalization (after `repair_timing -setup`) has not been reached yet.
-- [ ] 8.5 Record the 8.4 outcome here, with the 5.2 measurements if it gets past `cts`: `cts`
+- [x] 8.5 Record the 8.4 outcome here, with the 5.2 measurements if it gets past `cts`: `cts`
   legalization runtimes, clock skew and WNS after `cts` against run `37996272102`, then `grt` and
   `drt`. If `cts` still fails, stop and bring the user the `die_scale` option (design D7).
-- [ ] 8.6 **[edit]** If 8.4 legalizes `cts`, make its window `pnr_dpl_max_displacement`'s default
+  — **done:** recorded under 8.4; `cts` still failed (12 cells), and the user chose
+  `die_scale=1.10` (8.7).
+- [x] 8.6 **[edit]** If 8.4 legalizes `cts`, make its window `pnr_dpl_max_displacement`'s default
   in `common.tcl`, so scheduled runs use it, and update `docs/pnr-pipeline.md`. Verify: the
   8.1 check with an empty value now gives the new default.
+  — **done, widened (design D7 update 2026-10-12).** 8.4 did not legalize `cts`, 8.7 did
+  (window 1000, `die_scale=1.10`), and the user chose the enlarged die as the default.
+  `pnr_dpl_max_displacement` defaults to `1000 1000` (`openroad` keeps OpenROAD's window) and
+  `pnr_die_scale` to `1.10`; `run_pnr.sh`'s header, the `pnr.yml` input descriptions and
+  `docs/pnr-pipeline.md` say so. Checked in `newt-eda`: empty → `-max_displacement {1000 1000}`
+  and `die_scale=1.10`; `openroad` → no flag; `800` → `{800 800}`; `abc` → error.
 
 - [x] 8.7 **[long-run]** (Decided 2026-10-11, design D7 update.) Dispatch a full run from the
   branch, with no resume, `die_scale=1.10` and `dpl_max_displacement="1000 1000"`. Verify: the
@@ -225,7 +240,21 @@ Tags:
 
 ## 7. Integration
 
-- [ ] 7.1 Run `openspec validate use-diamond-legalizer --strict` and confirm that the
+- [x] 7.1 Run `openspec validate use-diamond-legalizer --strict` and confirm that the
   `pnr-flow` and `ci-pipeline` deltas still describe what the scripts do after groups 1–4.
   Verify: validation passes, and each scenario in the deltas maps to a code path or to 5.1's
   evidence.
+  — **done.** `openspec validate --strict` passes. Scenario evidence:
+  - *pnr-flow, Placement legalizes:* run `38094932339`, where `dpl ok`, `cts ok` and
+    `Placement legal after dpl` / `after cts` were logged.
+  - *pnr-flow, Legalizer leaves cells illegal:* with the diamond legalizer the failure surfaces
+    as the legalization itself failing (`DPL-0036`, runs `38071835792` and `38087884024`). The
+    stage failed, the run exited non-zero and `grt` never started. The legality check's own
+    failure path (counts in the stage error, report kept) is checked offline against run
+    `37996272102`'s real report (2.1); no lane run has produced overlaps with the new code.
+  - *pnr-flow, Legalizer selected by configuration:* wrapper tests in `newt-eda` (1.3); no lane run
+    used `negotiation`.
+  - *pnr-flow, placement report:* run against real logs with and without a `gpl` log (3.1, 8.3).
+  - *ci-pipeline, legalizer and window inputs:* the inputs exist (`actionlint`, 10 on the probe
+    branch, 9 here); runs `38087884024` and `38094932339` logged the dispatched window in
+    `DPL-0005`. No run dispatched `dpl_legalizer=negotiation`.

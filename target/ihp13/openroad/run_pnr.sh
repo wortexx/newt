@@ -51,7 +51,8 @@
 #   PNR_DIE_SCALE          Passed through to the floorplan: the core's width
 #                           and height relative to the taped-out die. Empty or
 #                           unset: pnr_die_scale's default in common.tcl
-#                           (1.0, the taped-out 6230 x 5478 um die).
+#                           (1.10, a 6777 x 5950 um die); 1.0 is the
+#                           taped-out 6230 x 5478 um die.
 #   PNR_DPL_LEGALIZER      Passed through to every detailed_placement call
 #                           (dpl, cts, grt_repair): `diamond` or
 #                           `negotiation`. Empty or unset: pnr_dpl_legalizer's
@@ -59,7 +60,9 @@
 #                           and cts end with a gated legality check.
 #   PNR_DPL_MAX_DISPLACEMENT Passed through to every detailed_placement
 #                           call as -max_displacement, in microns: one value
-#                           or "x y". Empty or unset: OpenROAD's own window.
+#                           or "x y". Empty or unset: pnr_dpl_max_displacement's
+#                           default in common.tcl (1000 1000); "openroad"
+#                           keeps OpenROAD's own window.
 #   PNR_DRY_RUN            If "1", print the planned per-stage commands
 #                           (in order, honoring resume-skip) and exit 0
 #                           without invoking OpenROAD at all - the cheap

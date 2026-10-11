@@ -48,16 +48,19 @@ if { [info exists ::env(PNR_GPL_DENSITY)] && $::env(PNR_GPL_DENSITY) ne "" } {
 
 # Die scale for the floorplan (floorplan_ring_*way.tcl): the core's width and
 # height relative to the taped-out Basilisk die (6230 x 5478 um), pad and
-# power-ring margins unchanged. Default 1.0, the taped-out die: with
-# pnr_gpl_keep_resize 0 it reached grt (run 37108127061, dpl utilization
-# 60.8 %). 1.10 (core +21 %, utilization ~55 %) is the fallback if a larger
-# netlist stops legalizing in time; the P&R numbers are then for that
-# enlarged floorplan, not the taped-out chip (docs/infra-plan.md Phase 11;
-# raise-gpl-density-target design D5). PNR_DIE_SCALE overrides it.
+# power-ring margins unchanged. Default 1.10 (6777 x 5950 um die, core
+# +21 %), the user's call on 2026-10-12 (use-diamond-legalizer design D7):
+# on the taped-out die (1.0) the SoC with both SHA-3 arms reaches 71.3 %
+# utilization after CTS, and the diamond legalizer leaves cells unplaced
+# there even with a 1000 um window (run 38087884024). At 1.10 dpl and cts
+# legalize, at 56-59 % utilization (run 38094932339). P&R figures are then
+# for the enlarged floorplan, not the taped-out chip, and a reference run
+# needs the same setting before any comparison. PNR_DIE_SCALE overrides it;
+# 1.0 is the taped-out die (docs/infra-plan.md Phase 11).
 if { [info exists ::env(PNR_DIE_SCALE)] && $::env(PNR_DIE_SCALE) ne "" } {
     set pnr_die_scale $::env(PNR_DIE_SCALE)
 } else {
-    set pnr_die_scale 1.0
+    set pnr_die_scale 1.10
 }
 
 # Overflow below which gpl's timing-driven iterations keep their
@@ -97,14 +100,19 @@ if { $pnr_dpl_legalizer ni {diamond negotiation} } {
 
 # Search window for every legalization, as detailed_placement
 # -max_displacement in microns: one value for both directions or "x y".
-# Empty keeps OpenROAD's own window (+/- 500 sites, +/- 100 rows here),
-# which left 3,719 cells unplaced in cts's first legalization at 71.3 %
-# utilization (run 38071835792, DPL-0036). DPL-0005 logs the window used, in
-# sites and rows. PNR_DPL_MAX_DISPLACEMENT overrides it
+# Default "1000 1000" (+/- 2083 sites, +/- 264 rows here): OpenROAD's own
+# window (+/- 500 sites, +/- 100 rows) left 3,719 cells unplaced in cts's
+# first legalization at 71.3 % utilization (run 38071835792, DPL-0036), and
+# the run that legalized every stage used 1000 (run 38094932339). "openroad"
+# passes no flag, keeping OpenROAD's own window. DPL-0005 logs the window
+# used, in sites and rows. PNR_DPL_MAX_DISPLACEMENT overrides it
 # (use-diamond-legalizer design D7).
 if { [info exists ::env(PNR_DPL_MAX_DISPLACEMENT)] && [string trim $::env(PNR_DPL_MAX_DISPLACEMENT)] ne "" } {
     set pnr_dpl_max_displacement [string trim $::env(PNR_DPL_MAX_DISPLACEMENT)]
 } else {
+    set pnr_dpl_max_displacement {1000 1000}
+}
+if { $pnr_dpl_max_displacement eq "openroad" } {
     set pnr_dpl_max_displacement {}
 }
 if { [llength $pnr_dpl_max_displacement] == 1 } {

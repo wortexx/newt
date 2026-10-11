@@ -24,7 +24,7 @@ Settings follow the existing pattern in `common.tcl`:
 **Goals:**
 - One place that decides how the flow legalizes, so the stages can never disagree about it.
 - A run that cannot legalize stops at the stage that failed to legalize, with the evidence kept.
-- A validation run on real data that answers two questions: does the diamond legalizer legalize this design on the taped-out die, and does `drt` then get past guide processing?
+- A validation run on real data that answers two questions: does the diamond legalizer legalize this design on the taped-out die, and does `drt` then get past guide processing? (Answered: not on the taped-out die, yes at `die_scale=1.10`; and no, `DRT-0218` has another cause, see proposal.md's correction.)
 
 **Non-Goals:**
 - Tuning `-max_displacement` or the search windows up front. That's done only if the validation run shows the default window failing.
@@ -87,6 +87,8 @@ Validation run `38071835792` legalized `dpl` in 4 minutes, but `cts`'s first leg
 The default stays empty until a run shows that a wider window legalizes `cts` on the taped-out die. That run's value then becomes the default here, so scheduled runs get it without a dispatch input (task 8.6).
 
 *Alternative:* `die_scale=1.10`. Deferred: it changes the floorplan away from the taped-out die and needs a full run from `floorplan`. It stays the fallback if a wider window fails, or if it legalizes only by moving clock buffers so far that clock skew degrades badly.
+
+**Update 2026-10-12 (the user's call):** run `38094932339` legalized `dpl` and `cts` at `die_scale=1.10` with the 1000 µm window, so both become the defaults: `pnr_die_scale` 1.10 and `pnr_dpl_max_displacement` `1000 1000`. `PNR_DPL_MAX_DISPLACEMENT=openroad` restores OpenROAD's own window, `die_scale=1.0` the taped-out die. Without the die default, every scheduled run would go red at `cts`.
 
 **Update 2026-10-11 (run `38087884024`, the user's call):** a 1000 µm window left 12 cells unplaced, all in one pocket of CVA6 next to the I-cache SRAMs, at 71.3 % utilization. Rather than widen the window again, the next run uses `die_scale=1.10`, the alternative above: about 59 % utilization after CTS, at the cost of a floorplan that is no longer the taped-out die. That run keeps the 1000 µm window, which costs little when few cells are hard to place and guards against another pocket. Its P&R figures describe the enlarged die, so the reference needs the same settings before any comparison is quoted.
 

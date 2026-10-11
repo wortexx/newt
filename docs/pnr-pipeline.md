@@ -61,10 +61,12 @@ behaves exactly like a scheduled run:
 
 - `die_scale` — the core's width and height relative to the taped-out
   Basilisk die. Feeds `PNR_DIE_SCALE`. Empty means `pnr_die_scale`'s default
-  in `common.tcl` (1.0, the taped-out 6230 × 5478 µm die); `1.10` gives a
-  6777 × 5950 µm die (+21 % core area), the fallback if a larger netlist
-  stops legalizing in time. Changing it invalidates every checkpoint
-  from `floorplan` on, so do not combine it with `resume_from_run`.
+  in `common.tcl`, `1.10`: a 6777 × 5950 µm die (+21 % core area), the default
+  since `use-diamond-legalizer` because the SoC with both SHA-3 arms cannot
+  be legalized after `cts` on the taped-out die. `1.0` is the taped-out
+  6230 × 5478 µm die. Lane figures are for the enlarged die, so compare runs
+  only at the same setting. Changing it invalidates every checkpoint from
+  `floorplan` on, so do not combine it with `resume_from_run`.
 
 - `dpl_legalizer` — the legalizer every `detailed_placement` call uses
   (`dpl`, both `cts` passes, `grt_repair`). Feeds `PNR_DPL_LEGALIZER`. Empty
@@ -79,10 +81,12 @@ behaves exactly like a scheduled run:
 - `dpl_max_displacement` — the legalizer's search window, passed to every
   `detailed_placement` call as `-max_displacement`, in microns: one value
   for both directions or `x y`. Feeds `PNR_DPL_MAX_DISPLACEMENT`. Empty means
-  OpenROAD's own window (±500 sites, ±100 rows here), which left 3,719 cells
-  unplaced in `cts` at 71.3 % utilization (run 38071835792). Each stage
-  log's `DPL-0005` line records the window used. Like `dpl_legalizer`, it
-  invalidates the checkpoints of every stage that legalizes.
+  `pnr_dpl_max_displacement`'s default in `common.tcl`, `1000 1000`
+  (±2083 sites, ±264 rows); `openroad` keeps OpenROAD's own window (±500
+  sites, ±100 rows here), which left 3,719 cells unplaced in `cts` at 71.3 %
+  utilization (run 38071835792). Each stage log's `DPL-0005` line records
+  the window used. Like `dpl_legalizer`, it invalidates the checkpoints of
+  every stage that legalizes.
 
 - `skip_grt_repair` — whether to skip post-route timing repair. Feeds
   `PNR_SKIP_GRT_REPAIR`. Empty means `1`, the default on every scheduled and
