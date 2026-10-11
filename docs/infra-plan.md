@@ -1094,6 +1094,9 @@ block power (`docs/results/sha3-ppa.md`, tasks 5.2 and 5.5). Timing and routing 
       only) and +14.6 % (both arms) against the reference, tracking the added logic
       (flip-flops +2.35 % / +5.47 %, cells +8.9 % / +18.7 %). Comparative only; no SoC power is
       quoted in the thesis. No P&R run was re-dispatched for it.
+- [x] **Seen in the lane.** Run `38094932339` (2026-10-11), the first full run carrying the
+      change: `basilisk.pre_place.rpt` prints the uniform-activity label and a total of 2.12 W
+      (enlarged die, both arms). Not comparable with the default-activity figures above.
 
 ---
 
