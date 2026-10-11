@@ -30,7 +30,11 @@ Legend: **[edit]** plain editing; **[eda ~25 min]** needs the `newt-eda` image (
   - name this change and its commit as the point after which lane power figures are uniform-activity and not comparable with earlier runs.
 
   Also update the Phase ordering line for Phase 17. Verify: no unchecked item remains under Phase 17.
-- [ ] 2.4 [long, optional] On the next P&R lane run that happens anyway, check that a stage report (for example `basilisk.pre_place.rpt`) carries the label line and a uniform-activity total. Record the run number in Phase 17. Do not dispatch a run only for this.
+- [x] 2.4 [long, optional] On the next P&R lane run that happens anyway, check that a stage report (for example `basilisk.pre_place.rpt`) carries the label line and a uniform-activity total. Record the run number in Phase 17. Do not dispatch a run only for this.
+  — **done: run `38094932339`** (2026-10-10/11, a full run on `use-diamond-legalizer`, which
+  carries this change). `basilisk.pre_place.rpt` line 1149: `activity: uniform 0.10 per 11.000 ns
+  (fastest clock), duty 0.50; comparative only, not workload power`, then a total of 2.12 W
+  (enlarged die, both SHA-3 arms). Recorded in Phase 17.
 
 ## 3. Results docs (design D3)
 

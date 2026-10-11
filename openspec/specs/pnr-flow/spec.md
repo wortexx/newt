@@ -78,19 +78,66 @@ The system SHALL produce, at the end of a run (successful or not), the reports t
 
 ### Requirement: The run reports how global placement ended
 
-After detailed placement, a run SHALL report whether global placement's final pass converged or reverted after a divergence (and at what overflow), the final placement-area inflation, the utilization entering detailed placement, and the number of illegal cells the legalizer starts from. A final-pass revert SHALL be a named warning in the run's output, not a failure, so that an unconverged placement is noticed before it shows up as a legalization timeout. The report SHALL be produced whether or not detailed placement succeeded, from what detailed placement logs before it legalizes.
+After detailed placement, a run SHALL report:
+
+- whether global placement's final pass converged or reverted after a divergence, and at what overflow;
+- the final placement-area inflation;
+- the utilization entering detailed placement;
+- which legalizer ran;
+- whether the placement legality check passed, with the violation counts when it did not;
+- the number of illegal cells the legalizer starts from, when the legalizer logs one.
+
+A final-pass revert SHALL be a named warning in the run's output, not a failure, so that an unconverged placement is noticed before it shows up as a legalization timeout or a legality failure. The report SHALL be produced whether or not detailed placement succeeded, from what detailed placement logs.
 
 #### Scenario: Placement converges
 
 - **WHEN** the P&R flow runs on the current Basilisk netlist with the default placement settings
-- **THEN** the report shows the final global-placement pass ending without a revert, and detailed placement and CTS complete within their configured stage timeouts
+- **THEN** the report shows the final global-placement pass ending without a revert, names the legalizer, and shows the legality check result, and detailed placement and CTS complete within their configured stage timeouts
 
 #### Scenario: Placement reverts after a divergence
 
 - **WHEN** global placement's final pass reverts to a snapshot after a divergence
-- **THEN** the run's output contains a warning naming the overflow it reverted to and the illegal cells detailed placement starts from, and the run's exit status is still decided only by the stage gates
+- **THEN** the run's output contains a warning naming the overflow it reverted to, and the illegal cells detailed placement starts from when the legalizer logs them, and the run's exit status is still decided only by the stage gates
 
 #### Scenario: Detailed placement times out
 
 - **WHEN** detailed placement exceeds its stage timeout
-- **THEN** the report is still printed, with the utilization and the illegal-cell count taken from the detailed-placement log
+- **THEN** the report is still printed, with the utilization, the legalizer, and any illegal-cell count taken from the detailed-placement log, and states that no legality check result exists
+
+### Requirement: Power reports state their activity assumption
+
+Every power figure in the flow's reports SHALL be computed under switching activity that the report states explicitly. Without a workload activity file, that is a single uniform activity applied to every net. The report SHALL label such a figure as uniform-activity and comparative only, not as the design's workload power. The flow SHALL NOT report power computed from OpenSTA's propagated default activity, because that propagation does not converge on this design and its result depends on the netlist's structure rather than on its logic. The activity setting SHALL apply only to the power report, and SHALL NOT change any later step of the same stage.
+
+#### Scenario: Stage report carries a labelled power figure
+
+- **WHEN** a P&R stage writes its end-of-stage report
+- **THEN** the report's power section names the activity assumption (uniform activity, its value and duty) and states that the figure is comparative, not workload power
+
+#### Scenario: Comparable across netlists
+
+- **WHEN** two netlists that differ only by added logic are reported at the same stage with the same settings
+- **THEN** the power difference between them follows the added logic (more cells and flip-flops give more power), with neither collapsing to near zero nor jumping by an order of magnitude
+
+#### Scenario: Activity setting does not leak into the flow
+
+- **WHEN** a stage runs further commands after writing its report (for example a timing repair)
+- **THEN** those commands see the same activity state as before the report was written
+
+### Requirement: Placement is legal before routing
+
+Every legalization in the flow SHALL either place every cell legally or fail the stage it runs in. After detailed placement, and again at the end of CTS, the flow SHALL check placement legality: no overlapping cells, no padding violations, and no cells on blocked layers. A failed check SHALL fail that stage, which is gated, so the run exits non-zero there and never reaches routing with an illegal placement. The flow SHALL use, by default, a legalizer that never hands on a partly legalized placement. Another legalizer MAY be selected by configuration, and the legality check SHALL apply whichever legalizer runs.
+
+#### Scenario: Placement legalizes
+
+- **WHEN** detailed placement and CTS complete and both legality checks find no violations
+- **THEN** both stages succeed, and routing starts from a placement in which every cell sits on a legal site
+
+#### Scenario: Legalizer leaves cells illegal
+
+- **WHEN** a legalization ends with overlapping cells, padding violations or cells on blocked layers
+- **THEN** the legality check after that stage fails, the stage is reported as failed with the violation counts, its report file is kept, and the run exits non-zero without starting global routing
+
+#### Scenario: Legalizer selected by configuration
+
+- **WHEN** a run is configured to use the non-default legalizer
+- **THEN** every legalization in the flow uses it, and the same legality checks decide whether detailed placement and CTS succeed

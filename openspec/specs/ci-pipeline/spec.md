@@ -243,9 +243,10 @@ The manual dispatch SHALL accept these optional inputs, all empty by default:
 - a list of checkpoints to leave out of that restore, so their stages run again;
 - a stage after which the run stops;
 - the global-placement starting density, the global-placement resize threshold, and the die scale;
+- the legalizer used by detailed placement and CTS, and its search window;
 - whether to skip post-route timing repair.
 
-An empty input SHALL keep the flow's default for that setting. Post-route timing repair SHALL be skipped by default and SHALL run only when the dispatch explicitly asks for it. With all inputs empty, a dispatched run SHALL behave exactly like a scheduled run. These inputs SHALL NOT change the flow's success gate: a run that stops before the gate stage is reached SHALL still exit non-zero, and post-route repair SHALL stay best-effort whether it is skipped, completes, fails or times out.
+An empty input SHALL keep the flow's default for that setting. Post-route timing repair SHALL be skipped by default and SHALL run only when the dispatch explicitly asks for it. With all inputs empty, a dispatched run SHALL behave exactly like a scheduled run. These inputs SHALL NOT change the flow's success gate: a run that stops before the gate stage is reached SHALL still exit non-zero, and post-route repair SHALL stay best-effort whether it is skipped, completes, fails or times out. Selecting a legalizer SHALL NOT bypass the flow's placement legality checks.
 
 #### Scenario: Weekly run
 
@@ -265,12 +266,22 @@ An empty input SHALL keep the flow's default for that setting. Post-route timing
 #### Scenario: Manual dispatch with no inputs
 
 - **WHEN** a user dispatches the P&R lane without setting any input
-- **THEN** the lane runs the full flow from synthesis through detailed route exactly as a scheduled run would, with post-route timing repair skipped
+- **THEN** the lane runs the full flow from synthesis through detailed route exactly as a scheduled run would, with the default legalizer and with post-route timing repair skipped
 
 #### Scenario: Manual dispatch re-runs one slice of the flow
 
 - **WHEN** a user dispatches the P&R lane naming a previous run to resume from, a checkpoint to exclude, and a stage to stop after
 - **THEN** the lane restores that run's checkpoints (refusing if they were built from a different netlist than the dispatched ref produces), skips every stage whose checkpoint was restored, runs the excluded stage again, stops once the named stage completes, publishes reports and checkpoints as usual, and exits 0 if and only if every stage through the gate was completed or restored
+
+#### Scenario: Manual dispatch selects the legalizer
+
+- **WHEN** a user dispatches the P&R lane naming the non-default legalizer
+- **THEN** detailed placement and CTS legalize with it, the placement report names it, and an illegal placement still fails the stage it occurs in
+
+#### Scenario: Manual dispatch widens the legalizer's search window
+
+- **WHEN** a user dispatches the P&R lane with a legalizer search window
+- **THEN** every legalization uses that window, the stage logs record the window used, and an illegal placement still fails the stage it occurs in
 
 #### Scenario: Manual dispatch runs post-route repair
 
