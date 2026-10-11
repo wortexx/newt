@@ -40,7 +40,8 @@ With --pnr RUN_DIR --pnr-ref REF_DIR (task 5.4) it adds the SoC P&R
 section from two P&R lane runs' `pnr-reports` artifacts (`gh run download
 <id> -n pnr-reports -D <dir>`): stages reached, WNS/TNS per stage, grt
 congestion and placement figures, against the pre-coprocessor reference.
-`grt` figures are labelled as taken before post-route repair.
+`grt` figures are labelled as taken before post-route repair, and a note
+says when `check_placement` after `cts` found overlapping cells.
 
 With --pnr-repair DIR --pnr-ref-repair DIR (change
 bounded-grt-repair-measurement), each the `pnr-reports` artifact of a run
@@ -443,7 +444,34 @@ def pnr_metrics(d):
         "hpwl_dpl_um": float(hpwl_dpl.group(1)) if hpwl_dpl else None,
         "hpwl_cts_um": float(hpwl_cts[-1]) if hpwl_cts else None,
         "grt_area_um2": pnr_design_area(rep / "pnr_grt.log", "grt"),
+        "cts_overlaps": pnr_cts_overlaps(cts, rep / "basilisk_cts_check_placement.rpt"),
+        "cts_cells": pnr_legalized_cells(cts),
     }
+
+
+def pnr_cts_overlaps(cts_log, rpt):
+    """Overlapping cells cts's check_placement found, or None when it never
+    ran. Every run before change use-diamond-legalizer legalized with
+    OpenROAD's negotiation legalizer, which left cells overlapping, and cts
+    only warned about it. The log's DPL-0005 count is the total; the JSON
+    report caps its markers at max_markers (10000), so it is only the
+    fallback."""
+    m = re.findall(r"DPL-0005\] Overlap check failed \((\d+)\)", cts_log)
+    if m:
+        return int(m[-1])
+    if not rpt.exists():
+        return None
+    cats = json.loads(rpt.read_text())["DPL"]["category"]
+    return len(cats.get("Overlap_failures", {}).get("violations", []))
+
+
+def pnr_legalized_cells(cts_log):
+    """Cells cts's last legalization placed (its DPL-0393 height
+    distribution), or None."""
+    blocks = cts_log.split("DPL-0392]")
+    if len(blocks) < 2:
+        return None
+    return sum(int(n) for n in re.findall(r"DPL-0393\].*: (\d+) cells", blocks[-1])) or None
 
 
 def pnr_design_area(log, when):
@@ -643,6 +671,23 @@ def pnr_section(run, ref, run_id, ref_id, period, repair=None, ref_repair=None,
         "synthesis (per instance) and from block-level gate-level power, not from this delta.",
         "",
     ]
+    illegal = [(name, m) for name, m in (("reference", ref), ("with both arms", run))
+               if m.get("cts_overlaps")]
+    if illegal:
+        sides = "; ".join(
+            f"{name} {m['cts_overlaps']:,} overlapping cells"
+            + (f" of {m['cts_cells']:,} ({100 * m['cts_overlaps'] / m['cts_cells']:.1f} %)"
+               if m.get("cts_cells") else "")
+            for name, m in illegal)
+        out += [
+            "**Placement was not legal.** `check_placement` after `cts` failed in these runs "
+            f"({sides}). OpenROAD's negotiation legalizer did not converge and `cts` only "
+            "warned, so the `grt` figures above come from placements with overlapping cells, on "
+            "both sides alike. Detailed routing cannot run on such a placement (`DRT-0218`, run "
+            "37996272102). Change `use-diamond-legalizer` makes legality a gated check; requoting "
+            "these figures from legal placements is a separate decision.",
+            "",
+        ]
     return out
 
 

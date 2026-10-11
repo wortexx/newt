@@ -48,7 +48,7 @@ set err [catch {
 
     # legalize cts cells
     utl::report "Detailed placement"
-    detailed_placement
+    pnr_detailed_placement
     utl::report "Estimate parasitics"
     estimate_parasitics -placement
 
@@ -59,31 +59,17 @@ set err [catch {
     repair_timing -setup -skip_pin_swap -verbose -repair_tns 90
     # place inserted cells
     utl::report "Detailed placement"
-    detailed_placement
-    # check_placement is a read-only validation (no repair effect) that
-    # OpenROAD 2c56926 fails hard on thousands of accumulated buffer-cell
-    # overlaps after CTS's repair_timing insertions (DPL-0033) - on the
-    # 2024 OpenROAD chip.tcl was written for, the same call apparently
-    # didn't hard-fail here, matching the stricter-validation pattern hit
-    # repeatedly across this design's other checks this bring-up (PDN
-    # generator, resizer). This design is already known/accepted as
-    # congestion-bound at 63% utilization (docs/infra-plan.md; "clean
-    # route is a stretch goal, not a gate") - a placement-quality
-    # complaint from a diagnostic-only check doesn't change what's
-    # actually placed, so it's caught and reported rather than aborting
-    # the stage; downstream stages (grt onward) already have their own
-    # best-effort handling for whatever consequences this quality has.
-    # Report redirected to a file (-report_file_name) instead of the
-    # thousands of overlap lines it would otherwise dump into the main log.
-    utl::report "Check placement"
-    if { [catch { check_placement -verbose -report_file_name ${report_dir}/${proj_name}_cts_check_placement.rpt } checkErr] } {
-        utl::report "WARNING: check_placement reported violations (non-fatal, see ${report_dir}/${proj_name}_cts_check_placement.rpt): $checkErr"
-    }
+    pnr_detailed_placement
 
     utl::report "Estimate parasitics"
     estimate_parasitics -placement
     report_cts -out_file ${report_dir}/${proj_name}.cts.rpt
     report_metrics "${proj_name}.cts"
+    # Gated legality check (use-diamond-legalizer design D3). It used to be
+    # caught and logged as a warning, which let 10-13 k overlapping cells
+    # through to grt in every run until drt aborted on them (DRT-0218, run
+    # 37996272102). Report: basilisk_cts_check_placement.rpt, as before.
+    pnr_check_placement cts
     save_checkpoint ${proj_name}.cts
     report_image "${proj_name}.cts" true false true
 } errMsg]

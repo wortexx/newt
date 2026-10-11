@@ -773,6 +773,53 @@ Iteration here is now cheap: `PNR_RESUME_EXCLUDE` + `PNR_STOP_AFTER` plus the ch
 restore let a single stage re-run against real data in minutes rather than a full flow, and
 the synth cache removes the ~3h resynthesis.
 
+**2026-10-10 finding: every placement since the OpenROAD bump was illegal.** Run `37996272102`
+(both arms, `main` at `b21a9b2`) was the first run since the bump to go past `grt`: `drt`
+aborted after 18 min with `DRT-0218 Guide is not connected to design`. Reading the reports
+showed that OpenROAD `2c56926`'s default negotiation legalizer never converges on this design
+(`DPL-0701`), and that `cts.tcl` caught the failed `check_placement` (`DPL-0033`) as a warning:
+
+| run | after `dpl` | after `cts` | `check_placement` after `cts` |
+|---|---|---|---|
+| reference `37108127061` | 16,661 left | 23,848 left | 12,596 overlaps (1.5 %), 53 on blocked layers |
+| both arms `37162759719` | 15,539 left | 19,274 left | 9,718 overlaps (1.0 %), 63 on blocked layers |
+
+So every `grt` figure on record, including the thesis's (`docs/results/sha3-ppa.md`), comes
+from placements with overlapping cells, on both sides alike.
+
+- [x] **Legalize with the classic diamond legalizer and gate legality**
+      (`use-diamond-legalizer`). Every `detailed_placement` call goes through
+      `pnr_detailed_placement` (`pnr_dpl_legalizer`, default `diamond`), and `dpl` and `cts` end
+      with a gated `check_placement`, so an illegal placement fails its stage before a checkpoint
+      is saved. Validation:
+      - **Run `38071835792`** (taped-out die, resumed from `gpl2`): `dpl` legal in **4 min**
+        against 1 h 31 m, HPWL +4 % against +9 %. `cts` failed: at 71.3 % utilization 3,719
+        cells found no site within the default window (±500 sites, ±100 rows; `DPL-0036`).
+      - **Run `38087884024`** (window `1000 1000` µm, ±2083 sites, ±264 rows): 12 cells left, all
+        in one pocket of CVA6 next to the I-cache SRAMs.
+      - **Run `38094932339`** (`die_scale=1.10`, window 1000, full flow): `dpl` and `cts` legal
+        (56.2 % / 58.7 % utilization), `cts` 34 min against 4 h 46 m, `grt` demand 65.9 %
+        (Metal3 78.7 %) against 77.3 % (95.3 %), overflowing edges 198 k against 1.44 M. WNS after
+        `grt` is worse, −13.12 ns against −8.23 ns, from longer wires on the bigger die.
+- [x] **Default die enlarged** (the user's call, 2026-10-12): `pnr_die_scale` 1.10 and
+      `pnr_dpl_max_displacement` `1000 1000` are the defaults, so scheduled runs legalize.
+      Lane figures now describe a 6777 × 5950 µm die; `die_scale=1.0` reproduces the taped-out
+      floorplan, which cannot be legalized with both SHA-3 arms.
+- [ ] Requote the thesis P&R figures (reference and both arms) from legal placements at the same
+      `die_scale`. A separate decision; `sha3-evaluation.md` carries the caveat until then.
+
+**2026-10-11 finding: `DRT-0218` is not a placement problem.** Run `38094932339` placed legally
+and `drt` still aborted with `DRT-0218`, on one clock net (`clknet_12_3602__leaf…`). Probes on
+branch `drt-0218-probe` (runs `38138040839`, `38163283136`, `38165507881`, `38169388017`)
+isolated one pin, `clkbuf_leaf_7247/A`, and the cause: global routing left that pin's branch
+connected to the trunk only through a guide running vertically on Metal2, a horizontal layer.
+Detailed routing's guide graph moves along a layer only in its preferred direction, so the pin is
+an island and guide patching does not repair it. Copying every such wrong-direction guide onto
+the adjacent preferred-direction layer (1,264 guides on 639 nets) let guide processing pass.
+The same OpenROAD build reproduces it locally from the `grt` checkpoint alone. The fix is its own
+change; once guides pass, routing iteration 0 on the enlarged die took 2 h 32 m and ended with
+3.12 M violations (against 22.4 M on the old overflowing layout).
+
 ---
 
 ## Phase 12 — yosys fork retired, upstream v0.69  ✅ done (2026-09-17)

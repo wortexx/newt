@@ -22,13 +22,17 @@ set err [catch {
     set DPL_ARGS {}
 
     utl::report "Detailed placement"
-    detailed_placement {*}$DPL_ARGS
+    pnr_detailed_placement {*}$DPL_ARGS
     utl::report "Optimize mirroring"
     optimize_mirroring
 
     utl::report "Estimate parasitics"
     estimate_parasitics -placement
     report_metrics "${proj_name}.dpl"
+    # Gated: an illegal placement fails dpl here, before any checkpoint
+    # exists for a later stage or resume to build on (use-diamond-legalizer
+    # design D3).
+    pnr_check_placement dpl
     save_checkpoint ${proj_name}.dpl
     report_image "${proj_name}.dpl" true true
 } errMsg]

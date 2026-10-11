@@ -48,16 +48,19 @@ if { [info exists ::env(PNR_GPL_DENSITY)] && $::env(PNR_GPL_DENSITY) ne "" } {
 
 # Die scale for the floorplan (floorplan_ring_*way.tcl): the core's width and
 # height relative to the taped-out Basilisk die (6230 x 5478 um), pad and
-# power-ring margins unchanged. Default 1.0, the taped-out die: with
-# pnr_gpl_keep_resize 0 it reached grt (run 37108127061, dpl utilization
-# 60.8 %). 1.10 (core +21 %, utilization ~55 %) is the fallback if a larger
-# netlist stops legalizing in time; the P&R numbers are then for that
-# enlarged floorplan, not the taped-out chip (docs/infra-plan.md Phase 11;
-# raise-gpl-density-target design D5). PNR_DIE_SCALE overrides it.
+# power-ring margins unchanged. Default 1.10 (6777 x 5950 um die, core
+# +21 %), the user's call on 2026-10-12 (use-diamond-legalizer design D7):
+# on the taped-out die (1.0) the SoC with both SHA-3 arms reaches 71.3 %
+# utilization after CTS, and the diamond legalizer leaves cells unplaced
+# there even with a 1000 um window (run 38087884024). At 1.10 dpl and cts
+# legalize, at 56-59 % utilization (run 38094932339). P&R figures are then
+# for the enlarged floorplan, not the taped-out chip, and a reference run
+# needs the same setting before any comparison. PNR_DIE_SCALE overrides it;
+# 1.0 is the taped-out die (docs/infra-plan.md Phase 11).
 if { [info exists ::env(PNR_DIE_SCALE)] && $::env(PNR_DIE_SCALE) ne "" } {
     set pnr_die_scale $::env(PNR_DIE_SCALE)
 } else {
-    set pnr_die_scale 1.0
+    set pnr_die_scale 1.10
 }
 
 # Overflow below which gpl's timing-driven iterations keep their
@@ -74,6 +77,51 @@ if { [info exists ::env(PNR_GPL_KEEP_RESIZE)] && $::env(PNR_GPL_KEEP_RESIZE) ne 
     set pnr_gpl_keep_resize $::env(PNR_GPL_KEEP_RESIZE)
 } else {
     set pnr_gpl_keep_resize 0
+}
+
+# Legalizer for every detailed_placement call (pnr_detailed_placement below).
+# OpenROAD 2c56926 defaults to its negotiation legalizer, which never
+# converges on this design: it returns with DPL-0701 and 15-24 k violations
+# left, in dpl and in both cts passes, and every run on record reached grt on
+# an illegal placement. drt then aborted on it with DRT-0218 (run
+# 37996272102; docs/infra-plan.md Phase 11). `diamond` selects the classic
+# legalizer (-use_diamond_legalizer), the one the 2024 tapeout used: it
+# places every cell or fails the call. `negotiation` restores OpenROAD's
+# default. PNR_DPL_LEGALIZER overrides it
+# (openspec/changes/use-diamond-legalizer design D1/D2).
+if { [info exists ::env(PNR_DPL_LEGALIZER)] && $::env(PNR_DPL_LEGALIZER) ne "" } {
+    set pnr_dpl_legalizer $::env(PNR_DPL_LEGALIZER)
+} else {
+    set pnr_dpl_legalizer diamond
+}
+if { $pnr_dpl_legalizer ni {diamond negotiation} } {
+    error "PNR_DPL_LEGALIZER='$pnr_dpl_legalizer' is not a legalizer: use diamond or negotiation"
+}
+
+# Search window for every legalization, as detailed_placement
+# -max_displacement in microns: one value for both directions or "x y".
+# Default "1000 1000" (+/- 2083 sites, +/- 264 rows here): OpenROAD's own
+# window (+/- 500 sites, +/- 100 rows) left 3,719 cells unplaced in cts's
+# first legalization at 71.3 % utilization (run 38071835792, DPL-0036), and
+# the run that legalized every stage used 1000 (run 38094932339). "openroad"
+# passes no flag, keeping OpenROAD's own window. DPL-0005 logs the window
+# used, in sites and rows. PNR_DPL_MAX_DISPLACEMENT overrides it
+# (use-diamond-legalizer design D7).
+if { [info exists ::env(PNR_DPL_MAX_DISPLACEMENT)] && [string trim $::env(PNR_DPL_MAX_DISPLACEMENT)] ne "" } {
+    set pnr_dpl_max_displacement [string trim $::env(PNR_DPL_MAX_DISPLACEMENT)]
+} else {
+    set pnr_dpl_max_displacement {1000 1000}
+}
+if { $pnr_dpl_max_displacement eq "openroad" } {
+    set pnr_dpl_max_displacement {}
+}
+if { [llength $pnr_dpl_max_displacement] == 1 } {
+    set pnr_dpl_max_displacement [list $pnr_dpl_max_displacement $pnr_dpl_max_displacement]
+}
+if { $pnr_dpl_max_displacement ne {} &&
+     ([llength $pnr_dpl_max_displacement] != 2 ||
+      ![regexp {^[0-9]+ [0-9]+$} [join $pnr_dpl_max_displacement " "]]) } {
+    error "PNR_DPL_MAX_DISPLACEMENT='$::env(PNR_DPL_MAX_DISPLACEMENT)' is not a window: use one or two non-negative integers (microns)"
 }
 
 # OpenROAD's per-process default is 1 thread (`threads_ = 1` in
@@ -219,4 +267,78 @@ proc pnr_status {stage status {detail ""}} {
     set fileId [open ${save_dir}/pnr_status.log a]
     puts $fileId "$stage $status $detail"
     close $fileId
+}
+
+# -----------------------------------------------------------------------
+# pnr_detailed_placement: every legalization in the staged flow goes
+# through here, so dpl, cts and grt_repair can never disagree about the
+# legalizer (use-diamond-legalizer design D1). Logs the legalizer first;
+# run_pnr.sh's placement report reads that line from pnr_dpl.log.
+# -----------------------------------------------------------------------
+proc pnr_detailed_placement {args} {
+    global pnr_dpl_legalizer pnr_dpl_max_displacement
+    if { $pnr_dpl_max_displacement ne {} } {
+        utl::report "Legalizer: $pnr_dpl_legalizer, max displacement $pnr_dpl_max_displacement um"
+        lappend args -max_displacement $pnr_dpl_max_displacement
+    } else {
+        utl::report "Legalizer: $pnr_dpl_legalizer"
+    }
+    if { $pnr_dpl_legalizer eq "diamond" } {
+        lappend args -use_diamond_legalizer
+    }
+    detailed_placement {*}$args
+}
+
+# -----------------------------------------------------------------------
+# pnr_check_placement: gated legality check after dpl and at the end of cts
+# (use-diamond-legalizer design D3). check_placement raises DPL-0033 on any
+# overlap, padding or blocked-layer violation; this re-raises it with the
+# per-category counts from its JSON report, so the stage's catch records
+# them in pnr_status.log and the stage fails before save_checkpoint - no
+# checkpoint is ever saved from an illegal placement. The report file stays
+# in report_dir for the lane to upload. Counts come from the report's
+# markers, which check_placement caps at its max_markers (10000) per
+# category; DPL-0005/0010/0011 in the stage log carry the uncapped totals.
+# -----------------------------------------------------------------------
+proc pnr_check_placement {stage} {
+    global report_dir proj_name
+    set rpt ${report_dir}/${proj_name}_${stage}_check_placement.rpt
+    utl::report "Check placement"
+    if { ![catch { check_placement -verbose -report_file_name $rpt } checkErr] } {
+        utl::report "Placement legal after $stage"
+        return
+    }
+    error "illegal placement after ${stage}: [pnr_placement_violations $rpt] ($checkErr; see [file tail $rpt])"
+}
+
+# Per-category marker counts in a check_placement JSON report, as
+# "Overlap_failures 9718, Padding_failures 9717, ..."; plain Tcl, since the
+# OpenROAD image carries no JSON package. Each marker has exactly one
+# "visited" key, and categories are the keys ending in _failures.
+proc pnr_placement_violations {rpt} {
+    if { ![file exists $rpt] } {
+        return "no report written"
+    }
+    set counts [dict create]
+    set category ""
+    set fh [open $rpt r]
+    while { [gets $fh line] >= 0 } {
+        if { [regexp {"([A-Za-z_]+_failures)"\s*:\s*\{} $line -> name] } {
+            set category $name
+            dict set counts $category 0
+        } elseif { $category ne "" && [string match {*"visited"*} $line] } {
+            dict incr counts $category
+        }
+    }
+    close $fh
+    set parts {}
+    dict for {name n} $counts {
+        if { $n > 0 } {
+            lappend parts "$name $n"
+        }
+    }
+    if { [llength $parts] == 0 } {
+        return "no markers in report"
+    }
+    return [join $parts ", "]
 }

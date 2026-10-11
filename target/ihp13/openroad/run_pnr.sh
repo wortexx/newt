@@ -51,8 +51,19 @@
 #   PNR_DIE_SCALE          Passed through to the floorplan: the core's width
 #                           and height relative to the taped-out die. Empty or
 #                           unset: pnr_die_scale's default in common.tcl
-#                           (1.0, the taped-out 6230 x 5478 um die).
-#   PNR_DRY_RUN             If "1", print the planned per-stage commands
+#                           (1.10, a 6777 x 5950 um die); 1.0 is the
+#                           taped-out 6230 x 5478 um die.
+#   PNR_DPL_LEGALIZER      Passed through to every detailed_placement call
+#                           (dpl, cts, grt_repair): `diamond` or
+#                           `negotiation`. Empty or unset: pnr_dpl_legalizer's
+#                           default in common.tcl (diamond). Either way dpl
+#                           and cts end with a gated legality check.
+#   PNR_DPL_MAX_DISPLACEMENT Passed through to every detailed_placement
+#                           call as -max_displacement, in microns: one value
+#                           or "x y". Empty or unset: pnr_dpl_max_displacement's
+#                           default in common.tcl (1000 1000); "openroad"
+#                           keeps OpenROAD's own window.
+#   PNR_DRY_RUN            If "1", print the planned per-stage commands
 #                           (in order, honoring resume-skip) and exit 0
 #                           without invoking OpenROAD at all - the cheap
 #                           validation path (tasks.md 2.3) for CI/review.
@@ -185,29 +196,54 @@ run_stage_once() {
 }
 
 # Post-dpl placement report (specs/pnr-flow "The run reports how global
-# placement ended"; raise-gpl-density-target design D2). One line with what
-# decides dpl's legalization time: whether gpl's last pass reverted after a
-# divergence (GPL-0999) and at what overflow, the final placement area
-# inflation (GPL-1014), dpl's utilization (DPL-0009) and the illegal cells
-# the negotiation legalizer starts from (its iteration-0 row). dpl prints the
-# last two before it legalizes, so they are there even if the stage later
-# times out. Warns when gpl reverted on divergence, the state that left
-# 80-220 k illegal cells in the runs on record (docs/infra-plan.md Phase 11).
-# Never changes the exit status.
+# placement ended"; raise-gpl-density-target design D2,
+# use-diamond-legalizer design D5). One line with what decides dpl's
+# legalization: whether gpl's last pass reverted after a divergence
+# (GPL-0999) and at what overflow, the final placement area inflation
+# (GPL-1014), dpl's utilization (DPL-0009), the legalizer that ran (the
+# `Legalizer:` line pnr_detailed_placement logs), dpl's legality check
+# (its own pnr_status.log line) and, for the negotiation legalizer, the
+# illegal cells it starts from (its iteration-0 row; the diamond legalizer
+# logs no such count). dpl prints utilization, legalizer and iteration-0
+# row before it legalizes, so they are there even if the stage later times
+# out. Warns when gpl reverted on divergence, the state that left 80-220 k
+# illegal cells in the runs on record (docs/infra-plan.md Phase 11). Never
+# changes the exit status.
 report_placement_state() {
     local gpl="${REPORTS}/pnr_gpl.log" dpl="${REPORTS}/pnr_dpl.log"
-    local revert area util illegal
-    if [ ! -f "$gpl" ]; then
-        echo "Placement: not reported (no ${gpl}; gpl restored from a checkpoint?)."
-        return 0
-    fi
+    local revert area util illegal legalizer dpl_status legality
     revert="$(sed -n 's/.*GPL-0999\] Revert to iter: *\([0-9]*\) overflow: *\([0-9.]*\).*/iter \1, overflow \2/p' \
         "$gpl" 2>/dev/null | tail -1)"
     area="$(sed -n 's/.*GPL-1014\] Final placement area: .*(\([-+0-9.]*%\)).*/\1/p' \
         "$gpl" 2>/dev/null | tail -1)"
     util="$(sed -n 's/.*DPL-0009\] Utilization: *\([0-9.]*%\).*/\1/p' "$dpl" 2>/dev/null | head -1)"
     illegal="$(awk -F'|' '/^ *0 \|/ { gsub(/ /, "", $3); print $3; exit }' "$dpl" 2>/dev/null)"
-    local msg="gpl final area ${area:-?}, dpl utilization ${util:-?} (DPL-0009), illegal cells at legalizer iteration 0: ${illegal:-none reported}"
+    legalizer="$(sed -n 's/.*Legalizer: *\([a-z]*\).*/\1/p' "$dpl" 2>/dev/null | head -1)"
+    if [ -z "$illegal" ] && [ "$legalizer" = "diamond" ]; then
+        illegal="not logged by the diamond legalizer"
+    fi
+    # dpl.tcl's own status line comes first; the driver's "failed exit=..."
+    # line, if any, is appended only after this report.
+    dpl_status="$(grep -m1 '^dpl ' "$STATUS_LOG" 2>/dev/null)"
+    local detail="${dpl_status#dpl failed }"
+    if [ -z "$legalizer" ]; then
+        legality="no legality check (dpl log predates it)"
+    elif [ -z "$dpl_status" ]; then
+        legality="no legality check result (dpl did not finish)"
+    elif [ "${dpl_status#dpl ok}" != "$dpl_status" ]; then
+        legality="legality check passed"
+    elif [ "${detail#illegal placement after dpl: }" != "$detail" ]; then
+        legality="legality check FAILED (${detail#illegal placement after dpl: })"
+    else
+        legality="dpl failed before its legality check (${detail})"
+    fi
+    if [ ! -f "$gpl" ]; then
+        # gpl came from a restored checkpoint: no gpl figures, but dpl's own
+        # fields still matter (use-diamond-legalizer task 8.3).
+        echo "Placement: gpl fields not reported (no ${gpl}; gpl restored from a checkpoint?); dpl utilization ${util:-?} (DPL-0009), legalizer ${legalizer:-unknown}, ${legality}, illegal cells at legalizer iteration 0: ${illegal:-none reported}."
+        return 0
+    fi
+    local msg="gpl final area ${area:-?}, dpl utilization ${util:-?} (DPL-0009), legalizer ${legalizer:-unknown}, ${legality}, illegal cells at legalizer iteration 0: ${illegal:-none reported}"
     # Only a revert in the last gpl pass matters to dpl: GPL-0999 after the
     # pass-2 marker.
     local last_revert
