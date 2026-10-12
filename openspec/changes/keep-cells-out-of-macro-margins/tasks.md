@@ -95,13 +95,39 @@ buffers and tie cells inserted by repair and CTS. Task 2.3 found and corrected t
 
 ## 4. Validation on the lane (design D6)
 
-- [ ] 4.1 **[long-run]** *(needs the user's approval before dispatch)* Run A: full flow, default
+- [x] 4.1 **[long-run]** *(needs the user's approval before dispatch)* Run A: full flow, default
   settings, `stop_after=grt`, on a ref whose synth key matches run `38094932339`. Verify:
   - the placement report shows 0 cells in the margins and no margin warning;
   - `dpl` and `cts` legality checks pass;
   - record every figure in design D6's table against the baseline: channel count, nets outside
     the core, `grt` overflow (total, per layer, max H/V), demand and Metal3, WNS/TNS, slew/cap
     counts, `DPL-0009` utilization, stage runtimes.
+  — done: run `38254112819` (`3c40d7b`, synth cache hit, so the same netlist as the baseline).
+  Every gated stage passed. 33 blockages; margins 0 cells, no warning; `dpl` and `cts` legal.
+
+  | figure | baseline `38094932339` | run A `38254112819` |
+  |---|---:|---:|
+  | cells in margins | 6,308 | **0** |
+  | cells in channels ≤ 40 µm | 5,976 | 6,277 |
+  | nets routed outside the core | 8,259 | **5,210** (−37 %) |
+  | `grt` overflowing edges | 198,046 | **603,825** (×3.0) |
+  | max overflow H / V | 30 / 29 | 58 / 66 |
+  | per layer M2 / M3 / M4 / M5 / TM1 | 32 k / 47 k / 67 k / 41 k / 11 k | 151 k / 173 k / 162 k / 99 k / 19 k |
+  | demand (total) / Metal3 | 65.9 % / 78.7 % | 65.3 % / 81.5 % |
+  | WNS / TNS at `grt` | −13.12 ns / −116.1 k ns | **−9.31 ns / −75.1 k ns** |
+  | setup / hold violating endpoints | 42,999 / 316 | 22,592 / 375 |
+  | max slew / max cap violations | 4,293 / 1,914 | 4,859 / 2,093 |
+  | WNS after `cts` | −4.07 ns | −3.60 ns |
+  | `DPL-0009` / `GPL-1014` | 56.2 % / +56.19 % | 56.2 % / +57.45 % |
+  | `gpl` / `dpl` / `cts` / `grt` | 2 h 33 / 5 m / 34 m / 2 h 10 | 2 h 24 / 5 m / 60 m / 2 h 32 |
+
+  Sampled overflow (congestion report, 10 k edges per direction) moved: over macros 15.8 k →
+  13.7 k and near-zero-capacity edges 7,609 → 5,943, but a north-east hotspot around the SPI
+  host (x 5.4–6.8 mm, y 4.2–6.0 mm) grew from about 10 k to 58 k. The SPI host sits there in
+  both runs; in run A it is about 190 µm further south and the area is slightly denser
+  (250 µm tiles above 75 % cell density: 69 → 88). With one run per side, how much of the
+  ×3 overflow is this change and how much is run-to-run variation is not known.
+
 - [ ] 4.2 **[edit]** Record run A in `docs/infra-plan.md` Phase 11:
   - a new dated finding with the diagnosis (proposal table) and run A's before/after table;
   - the `addHaloToBlock` no-op as a recorded finding;
