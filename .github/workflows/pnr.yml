@@ -570,15 +570,16 @@ jobs:
         # Antenna repair is manufacturing signoff, not PPA - skip it in CI
         # (see drt.tcl's comment for the -jumper_only middle ground).
         #
-        # PNR_DRT_END_ITER=8: design D4's 8-16 band, low end. The stock 40
-        # iterations can't converge on this congestion-bound design, and
-        # only an iteration budget detailed_route reaches *by itself* ends
-        # the stage cleanly (checkpoint saved, final runs, DEF produced) -
-        # hitting the 16h timeout instead loses everything, as every drt
-        # attempt so far has demonstrated. No 16-vCPU per-iteration timing
-        # data exists yet (detailed_route has never actually started in a
-        # real run); tune once the first run survives repair_antennas'
-        # removal from the path.
+        # PNR_DRT_END_ITER=5 and PNR_TIMEOUT_DRT=86400 (24 h)
+        # (bridge-wrong-way-route-guides D4). Measured on the enlarged die (run
+        # 38178131540): ~30 min of setup, then ~3 h per routing iteration, not
+        # getting faster, with violations 3.12 M -> 2.64 M -> 2.58 M: the design
+        # does not converge at this congestion, so more iterations buy almost
+        # nothing. 5 iterations end in about 15.5 h, so detailed_route stops at
+        # its own budget, saves its checkpoint and lets final write the DEF;
+        # hitting the timeout instead loses all of that. The 24 h timeout is
+        # the margin; run_pnr.sh's 16 h default would be too tight. The job's
+        # 48 h ceiling holds: a full run reaches drt in about 6 h.
         #
         # PROJ_NAME=basilisk: the "Synthesize" step above runs `make
         # synth-all` from the repo root, which includes iguana.mk - that's
@@ -619,7 +620,7 @@ jobs:
         # empty by default (common.tcl's 1000 1000; OpenROAD's own window left
         # 3,719 cells unplaced in cts at 71.3 % utilization, run 38071835792).
         # Quoted, as it may hold "x y".
-        run: PNR_GPL_DENSITY=${{ github.event.inputs.gpl_density || '' }} PNR_GPL_KEEP_RESIZE=${{ github.event.inputs.gpl_keep_resize || '' }} PNR_DIE_SCALE=${{ github.event.inputs.die_scale || '' }} PNR_DPL_LEGALIZER=${{ github.event.inputs.dpl_legalizer || '' }} PNR_DPL_MAX_DISPLACEMENT="${{ github.event.inputs.dpl_max_displacement || '' }}" PNR_TIMEOUT_GRT=57600 PNR_TIMEOUT_GRT_REPAIR=57600 PNR_SKIP_GRT_REPAIR=${{ github.event.inputs.skip_grt_repair || '1' }} PNR_SKIP_ANTENNA_REPAIR=1 PNR_DRT_END_ITER=8 PNR_STOP_AFTER=${{ github.event.inputs.stop_after || '' }} make -C target/ihp13/openroad -f openroad.mk run-pnr PROJ_NAME=basilisk
+        run: PNR_GPL_DENSITY=${{ github.event.inputs.gpl_density || '' }} PNR_GPL_KEEP_RESIZE=${{ github.event.inputs.gpl_keep_resize || '' }} PNR_DIE_SCALE=${{ github.event.inputs.die_scale || '' }} PNR_DPL_LEGALIZER=${{ github.event.inputs.dpl_legalizer || '' }} PNR_DPL_MAX_DISPLACEMENT="${{ github.event.inputs.dpl_max_displacement || '' }}" PNR_TIMEOUT_GRT=57600 PNR_TIMEOUT_GRT_REPAIR=57600 PNR_SKIP_GRT_REPAIR=${{ github.event.inputs.skip_grt_repair || '1' }} PNR_SKIP_ANTENNA_REPAIR=1 PNR_DRT_END_ITER=5 PNR_TIMEOUT_DRT=86400 PNR_STOP_AFTER=${{ github.event.inputs.stop_after || '' }} make -C target/ihp13/openroad -f openroad.mk run-pnr PROJ_NAME=basilisk
 
       # Move the checkpoints out of the shared workspace before this job
       # releases the runner. This is the whole fix for the collision that

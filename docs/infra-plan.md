@@ -820,6 +820,19 @@ The same OpenROAD build reproduces it locally from the `grt` checkpoint alone. T
 change; once guides pass, routing iteration 0 on the enlarged die took 2 h 32 m and ended with
 3.12 M violations (against 22.4 M on the old overflowing layout).
 
+- [x] **Bridge wrong-direction guides before detailed routing**
+      (`bridge-wrong-way-route-guides`). `drt.tcl` calls `pnr_bridge_wrong_way_guides`
+      (`PNR_BRIDGE_GUIDES`, default on) before `detailed_route`. Validation run `38178131540`
+      (resumed from `38094932339`): `Bridged 1264 wrong-direction guides on 639 nets`, guide
+      processing passed, and detailed routing ran for the first time in the lane. Violations
+      3,117,279 → 2,644,950 → 2,580,218 over iterations 0–2, about 3 h per iteration, peak memory
+      42.5 GB. Cancelled in iteration 3: at that pace 8 iterations would have hit the timeout and
+      lost the DEF. The lane now runs 5 iterations (`PNR_DRT_END_ITER=5`, about 15.5 h) with a
+      24 h `drt` timeout, so `final` writes a DEF.
+- [ ] **Detailed routing does not converge** at this congestion (about 2.6 M violations after
+      three iterations, −2.4 % per iteration and falling). A routable die needs the congestion
+      levers above, not more iterations.
+
 ---
 
 ## Phase 12 — yosys fork retired, upstream v0.69  ✅ done (2026-09-17)

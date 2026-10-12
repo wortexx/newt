@@ -48,6 +48,14 @@ set err [catch {
     pnr_set_dont_use
     pnr_apply_routing_layers
 
+    # Make every net's guides traversable before detailed routing reads them
+    # (common.tcl pnr_bridge_wrong_way_guides; bridge-wrong-way-route-guides).
+    if { $pnr_bridge_guides } {
+        pnr_bridge_wrong_way_guides
+    } else {
+        utl::report "Guide bridging off (PNR_BRIDGE_GUIDES=0)"
+    }
+
     if { $skip_antenna } {
         utl::report "PNR_SKIP_ANTENNA_REPAIR=1: skipping antenna repair"
     } else {
