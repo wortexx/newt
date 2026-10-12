@@ -27,7 +27,7 @@ Two more pieces of evidence:
   - **What stays:** global routing's own guides are kept, and nothing is removed.
   - **Logging:** the stage logs how many guides it added on how many nets.
 - **Setting.** `pnr_bridge_guides` (`PNR_BRIDGE_GUIDES`) defaults to on, and `0` turns the bridge off. There is no dispatch input: `pnr.yml` has no room for one that this decision needs.
-- **`drt` budget.** One routing iteration took 2 h 32 m on the enlarged die. The lane's 8 iterations need more than the 16 h `drt` timeout, and hitting a timeout loses the stage's output, so `PNR_TIMEOUT_DRT` rises to 24 h. The job's 48 h ceiling still holds for a full scheduled run (about 6 h to `grt`).
+- **`drt` budget.** A routing iteration takes about 3 h on the enlarged die, and the violation count barely falls after the first two (3.12 M → 2.64 M → 2.58 M, run `38178131540`). The lane's 8 iterations would hit any reasonable timeout, and a timeout loses the stage's output. So `PNR_DRT_END_ITER` drops to 5 (about 15.5 h), and `PNR_TIMEOUT_DRT` rises to 24 h as margin. The job's 48 h ceiling still holds for a full scheduled run (about 6 h to `grt`).
 - **Docs:** `docs/infra-plan.md` Phase 11 and `docs/pnr-pipeline.md` (the `drt` stage and its timeout).
 
 Flow stages touched: **backend** (`drt.tcl`, `common.tcl`) and **CI** (one timeout in `pnr.yml`), plus **docs**. No RTL, synthesis, simulation or software change.
@@ -35,7 +35,7 @@ Flow stages touched: **backend** (`drt.tcl`, `common.tcl`) and **CI** (one timeo
 ## Non-goals
 
 - **Fixing OpenROAD.** The bridge works around global routing's output. Reporting it upstream is optional follow-up.
-- **Making detailed routing converge.** Iteration 0 ended with 3.12 M violations. Whether 8 iterations bring that near zero is what the validation run measures, not a promise of this change.
+- **Making detailed routing converge.** It does not at this congestion (about 2.6 M violations after three iterations). That needs the congestion levers in Phase 11, not this change.
 - **GDS.** Streaming the DEF to GDS (`target/ihp13/klayout/`, KLayout not in the image) is a separate change.
 - **Antenna repair and post-route timing repair** stay skipped, as today.
 
@@ -52,6 +52,6 @@ None.
 ## Impact
 
 - **Code:** `target/ihp13/openroad/scripts/pnr/{common,drt}.tcl`, `target/ihp13/openroad/run_pnr.sh` (header), `.github/workflows/pnr.yml` (`PNR_TIMEOUT_DRT`).
-- **Cost:** a scheduled run can use up to 8 h more VM time in `drt`, about $10 per run at most.
+- **Cost:** a scheduled run now finishes `drt` in about 15.5 h instead of being cut off at 16 h with nothing saved; about the same VM time.
 - **Routing:** the added guides only widen where detailed routing may go, on nets that already had a wrong-direction guide (about 0.07 % of nets in run `38094932339`).
 - **Depends on** `use-diamond-legalizer` (PR #68) for a legal placement. This branch is based on it.
