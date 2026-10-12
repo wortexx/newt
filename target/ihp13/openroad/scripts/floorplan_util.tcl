@@ -66,6 +66,55 @@ proc placeInstance { name x y orient } {
 }
 
 
+# Block placement in the gap between each macro and the core edge.
+# The floorplans keep macros floorPaddingX/Y off the core edge without cutting
+# the rows there, so the placer filled those margins with logic that the macro
+# walls in: SRAMs obstruct Metal1-Metal4, so its nets crossed the macro on
+# almost nothing or left the core (run 38094932339: 6,308 such cells, 8,259
+# nets routed outside the core; docs/infra-plan.md Phase 11). For every BLOCK
+# instance, each side whose distance to the matching core edge is in
+# (0, max_gap] microns gets a hard placement blockage over that gap, along the
+# side's full length. Call it after the last macro is placed. max_gap 0 turns
+# it off (openspec/changes/keep-cells-out-of-macro-margins design D1).
+proc block_macro_core_margins {max_gap} {
+  if { $max_gap <= 0 } {
+    puts "Macro margin blocking: off"
+    return 0
+  }
+  set block   [ord::get_db_block]
+  set core    [$block getCoreArea]
+  set cx0     [$core xMin]
+  set cy0     [$core yMin]
+  set cx1     [$core xMax]
+  set cy1     [$core yMax]
+  set gap_dbu [ord::microns_to_dbu $max_gap]
+  set count   0
+
+  foreach inst [$block getInsts] {
+    if { [[$inst getMaster] getType] ne "BLOCK" } { continue }
+    set bbox [$inst getBBox]
+    set x0 [$bbox xMin]
+    set y0 [$bbox yMin]
+    set x1 [$bbox xMax]
+    set y1 [$bbox yMax]
+    # side -> gap and the blockage box covering it
+    set sides [list \
+      W [expr {$x0 - $cx0}] [list $cx0 $y0 $x0  $y1] \
+      E [expr {$cx1 - $x1}] [list $x1  $y0 $cx1 $y1] \
+      S [expr {$y0 - $cy0}] [list $x0  $cy0 $x1 $y0] \
+      N [expr {$cy1 - $y1}] [list $x0  $y1 $x1  $cy1]]
+    foreach {side gap box} $sides {
+      if { $gap <= 0 || $gap > $gap_dbu } { continue }
+      odb::dbBlockage_create $block {*}$box
+      incr count
+      puts [format "Macro margin blocked: %s %s, gap %.2f um" \
+              [$inst getName] $side [ord::dbu_to_microns $gap]]
+    }
+  }
+  puts "Macro margin blocking: $count blockages (gap <= $max_gap um)"
+  return $count
+}
+
 proc addHaloToBlock {left bottom right top name} {
   set block [ord::get_db_block]
   set inst [odb::dbBlock_findInst $block $name]

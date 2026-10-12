@@ -29,6 +29,11 @@ set err [catch {
     utl::report "Estimate parasitics"
     estimate_parasitics -placement
     report_metrics "${proj_name}.dpl"
+    # Report only, and before the gated check so the counts exist when it
+    # fails (keep-cells-out-of-macro-margins design D3).
+    if { [catch { pnr_report_macro_margins } reportErr] } {
+        utl::report "Macro margins: not computed ($reportErr)"
+    }
     # Gated: an illegal placement fails dpl here, before any checkpoint
     # exists for a later stage or resume to build on (use-diamond-legalizer
     # design D3).

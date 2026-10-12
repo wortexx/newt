@@ -22,6 +22,11 @@ set err [catch {
     pnr_set_dont_use
     pnr_apply_routing_layers
 
+    # For run_pnr.sh's count of nets routed outside the core
+    # (keep-cells-out-of-macro-margins design D4).
+    set core [[ord::get_db_block] getCoreArea]
+    utl::report "Core area (dbu): [$core xMin] [$core yMin] [$core xMax] [$core yMax]"
+
     utl::report "Global route"
     # -congestion_iterations 80->20->14, -verbose kept (task 2.4/3.2 real
     # bring-up, third data point): the first two unattended attempts ran
@@ -55,6 +60,7 @@ set err [catch {
         -congestion_iterations 14 \
         -allow_congestion \
         -verbose
+    utl::report "Route guides written: ${report_dir}/${proj_name}_route.guide"
 
     utl::report "Estimate parasitics"
     estimate_parasitics -global_routing

@@ -141,6 +141,43 @@ if { $pnr_bridge_guides ni {0 1} } {
     error "PNR_BRIDGE_GUIDES='$pnr_bridge_guides' is not 0 or 1"
 }
 
+# Widest gap between a macro and the core edge that the floorplan blocks for
+# placement, in microns (block_macro_core_margins in floorplan_util.tcl). The
+# floorplan keeps macros floorPaddingX/Y off the core edge but never cut the
+# rows there, so the placer filled the margins with logic walled in by the
+# macro: SRAMs obstruct Metal1-Metal4 and their power grid takes most of
+# TopMetal1, so those nets crossed the macro on almost nothing or detoured
+# through the band outside the core. Run 38094932339 had 6,308 cells there
+# and 8,259 nets routed outside the core (docs/infra-plan.md Phase 11). The
+# measured gaps are 8.00 um east and west and 14.00 um south and north
+# (floorPaddingX/Y from the snapped core edge); 20 covers all four at any
+# die scale, since the padding is absolute. 0 turns the blocking off.
+# PNR_MACRO_MARGIN_MAX overrides it
+# (openspec/changes/keep-cells-out-of-macro-margins design D2).
+if { [info exists ::env(PNR_MACRO_MARGIN_MAX)] && [string trim $::env(PNR_MACRO_MARGIN_MAX)] ne "" } {
+    set pnr_macro_margin_max [string trim $::env(PNR_MACRO_MARGIN_MAX)]
+} else {
+    set pnr_macro_margin_max 20
+}
+if { ![string is double -strict $pnr_macro_margin_max] || $pnr_macro_margin_max < 0 } {
+    error "PNR_MACRO_MARGIN_MAX='$pnr_macro_margin_max' is not a width: use a non-negative number (microns)"
+}
+
+# Widest channel between two facing macros that dpl's report counts cells in
+# (pnr_report_macro_margins below), in microns. Report only: channels keep
+# their rows. 40 catches the 30 um channels between the stacked cache-data
+# SRAMs, where the lower macro's pins face the channel (5,976 channel
+# cells in run 38094932339). PNR_MACRO_CHANNEL_MAX overrides it
+# (keep-cells-out-of-macro-margins design D3).
+if { [info exists ::env(PNR_MACRO_CHANNEL_MAX)] && [string trim $::env(PNR_MACRO_CHANNEL_MAX)] ne "" } {
+    set pnr_macro_channel_max [string trim $::env(PNR_MACRO_CHANNEL_MAX)]
+} else {
+    set pnr_macro_channel_max 40
+}
+if { ![string is double -strict $pnr_macro_channel_max] || $pnr_macro_channel_max <= 0 } {
+    error "PNR_MACRO_CHANNEL_MAX='$pnr_macro_channel_max' is not a width: use a positive number (microns)"
+}
+
 # OpenROAD's per-process default is 1 thread (`threads_ = 1` in
 # OpenRoad.cc), and set_thread_count is what feeds STA and the global
 # router their thread budgets. chip.tcl set this once globally (line 93)
@@ -358,6 +395,101 @@ proc pnr_placement_violations {rpt} {
         return "no markers in report"
     }
     return [join $parts ", "]
+}
+
+# -----------------------------------------------------------------------
+# pnr_report_macro_margins: count the standard cells placed where macros
+# wall them in, and log them for run_pnr.sh's placement report
+# (keep-cells-out-of-macro-margins design D3):
+#   Macro margins: <n> cells (gap <= <w> um)
+#   Macro channels: <n> cells (gap <= <w> um)
+# Margins are the gaps between a BLOCK instance and the core edge, with the
+# same geometry block_macro_core_margins (../floorplan_util.tcl) blocks; with
+# the blocking off they are still counted, at the default width. Channels are
+# the gaps between two facing macros, over the length both sides share. A
+# cell counts where its centre lies. Boxes are bucketed into 100 um tiles, so
+# the walk over all instances is one dict lookup per cell. Report only: the
+# caller must not let it fail the stage.
+# -----------------------------------------------------------------------
+proc pnr_report_macro_margins {} {
+    global pnr_macro_margin_max pnr_macro_channel_max
+    set margin_w [expr {$pnr_macro_margin_max > 0 ? $pnr_macro_margin_max : 20}]
+    set block [ord::get_db_block]
+    set core  [$block getCoreArea]
+    set cx0 [$core xMin]; set cy0 [$core yMin]
+    set cx1 [$core xMax]; set cy1 [$core yMax]
+    set mw [ord::microns_to_dbu $margin_w]
+    set chw [ord::microns_to_dbu $pnr_macro_channel_max]
+
+    set macros {}
+    foreach inst [$block getInsts] {
+        if { [[$inst getMaster] getType] eq "BLOCK" } {
+            set bb [$inst getBBox]
+            lappend macros [list [$bb xMin] [$bb yMin] [$bb xMax] [$bb yMax]]
+        }
+    }
+
+    # boxes: list of {kind x0 y0 x1 y1}
+    set boxes {}
+    foreach m $macros {
+        lassign $m x0 y0 x1 y1
+        foreach {gap box} [list \
+            [expr {$x0 - $cx0}] [list $cx0 $y0 $x0 $y1] \
+            [expr {$cx1 - $x1}] [list $x1 $y0 $cx1 $y1] \
+            [expr {$y0 - $cy0}] [list $x0 $cy0 $x1 $y0] \
+            [expr {$cy1 - $y1}] [list $x0 $y1 $x1 $cy1]] {
+            if { $gap > 0 && $gap <= $mw } { lappend boxes [list margin {*}$box] }
+        }
+    }
+    foreach a $macros {
+        lassign $a ax0 ay0 ax1 ay1
+        foreach b $macros {
+            lassign $b bx0 by0 bx1 by1
+            # b to the right of a, sharing some height
+            set gap [expr {$bx0 - $ax1}]
+            set lo [expr {max($ay0, $by0)}]; set hi [expr {min($ay1, $by1)}]
+            if { $gap > 0 && $gap <= $chw && $lo < $hi } {
+                lappend boxes [list channel $ax1 $lo $bx0 $hi]
+            }
+            # b above a, sharing some width
+            set gap [expr {$by0 - $ay1}]
+            set lo [expr {max($ax0, $bx0)}]; set hi [expr {min($ax1, $bx1)}]
+            if { $gap > 0 && $gap <= $chw && $lo < $hi } {
+                lappend boxes [list channel $lo $ay1 $hi $by0]
+            }
+        }
+    }
+
+    set tile [ord::microns_to_dbu 100]
+    set grid [dict create]
+    foreach box $boxes {
+        lassign $box kind x0 y0 x1 y1
+        for {set tx [expr {$x0 / $tile}]} {$tx <= $x1 / $tile} {incr tx} {
+            for {set ty [expr {$y0 / $tile}]} {$ty <= $y1 / $tile} {incr ty} {
+                dict lappend grid "$tx,$ty" $box
+            }
+        }
+    }
+
+    set counts [dict create margin 0 channel 0]
+    foreach inst [$block getInsts] {
+        if { ![string match CORE* [[$inst getMaster] getType]] || ![$inst isPlaced] } { continue }
+        set bb [$inst getBBox]
+        set x [expr {([$bb xMin] + [$bb xMax]) / 2}]
+        set y [expr {([$bb yMin] + [$bb yMax]) / 2}]
+        set key "[expr {$x / $tile}],[expr {$y / $tile}]"
+        if { ![dict exists $grid $key] } { continue }
+        foreach box [dict get $grid $key] {
+            lassign $box kind x0 y0 x1 y1
+            if { $x >= $x0 && $x < $x1 && $y >= $y0 && $y < $y1 } {
+                dict incr counts $kind
+                break
+            }
+        }
+    }
+    utl::report "Macro margins: [dict get $counts margin] cells (gap <= $margin_w um)"
+    utl::report "Macro channels: [dict get $counts channel] cells (gap <= $pnr_macro_channel_max um)"
+    return $counts
 }
 
 # -----------------------------------------------------------------------

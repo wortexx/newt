@@ -441,3 +441,12 @@ if { ![info exists ::env(HYPER_CONF)] || $::env(HYPER_CONF) ne "NO_HYPERBUS"} {
   placeInstance $delay_line_rx $X $dLineY_rounded  R0
   placeInstance $delay_line_tx $X $dLineY2_rounded R0
 }
+
+
+##########################################################################
+# Keep standard cells out of the macro-to-core margins
+##########################################################################
+# Last step, so every macro (the delay lines included) is placed. See
+# block_macro_core_margins in floorplan_util.tcl and pnr_macro_margin_max in
+# pnr/common.tcl.
+block_macro_core_margins $pnr_macro_margin_max
