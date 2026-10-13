@@ -53,6 +53,13 @@
 #                           unset: pnr_die_scale's default in common.tcl
 #                           (1.10, a 6777 x 5950 um die); 1.0 is the
 #                           taped-out 6230 x 5478 um die.
+#   PNR_MACRO_MARGIN_MAX   Passed through to the floorplan: the widest gap
+#                           between a macro and the core edge, in microns,
+#                           that is blocked for placement. Empty or unset:
+#                           pnr_macro_margin_max's default in common.tcl (20,
+#                           covering every margin of the current floorplan);
+#                           0 turns the blocking off. Changing it invalidates
+#                           every checkpoint from floorplan on.
 #   PNR_DPL_LEGALIZER      Passed through to every detailed_placement call
 #                           (dpl, cts, grt_repair): `diamond` or
 #                           `negotiation`. Empty or unset: pnr_dpl_legalizer's
@@ -241,13 +248,23 @@ report_placement_state() {
     else
         legality="dpl failed before its legality check (${detail})"
     fi
+    # Cells walled in by macros (pnr_report_macro_margins in dpl.tcl;
+    # keep-cells-out-of-macro-margins design D3). The margins should be empty.
+    local margins channels margin_cells
+    margins="$(sed -n 's/.*Macro margins: *//p' "$dpl" 2>/dev/null | head -1)"
+    channels="$(sed -n 's/.*Macro channels: *//p' "$dpl" 2>/dev/null | head -1)"
+    margin_cells="${margins%% cells*}"
+    if [[ "$margin_cells" =~ ^[0-9]+$ ]] && [ "$margin_cells" -gt 0 ]; then
+        echo "::warning::Cells placed in macro margins: ${margins}; macros wall them in, so their nets cross the macro or leave the core. See docs/infra-plan.md Phase 11 (PNR_MACRO_MARGIN_MAX)."
+    fi
+    local macro_fields="macro margins: ${margins:-not reported}, macro channels: ${channels:-not reported}"
     if [ ! -f "$gpl" ]; then
         # gpl came from a restored checkpoint: no gpl figures, but dpl's own
         # fields still matter (use-diamond-legalizer task 8.3).
-        echo "Placement: gpl fields not reported (no ${gpl}; gpl restored from a checkpoint?); dpl utilization ${util:-?} (DPL-0009), legalizer ${legalizer:-unknown}, ${legality}, illegal cells at legalizer iteration 0: ${illegal:-none reported}."
+        echo "Placement: gpl fields not reported (no ${gpl}; gpl restored from a checkpoint?); dpl utilization ${util:-?} (DPL-0009), legalizer ${legalizer:-unknown}, ${legality}, illegal cells at legalizer iteration 0: ${illegal:-none reported}, ${macro_fields}."
         return 0
     fi
-    local msg="gpl final area ${area:-?}, dpl utilization ${util:-?} (DPL-0009), legalizer ${legalizer:-unknown}, ${legality}, illegal cells at legalizer iteration 0: ${illegal:-none reported}"
+    local msg="gpl final area ${area:-?}, dpl utilization ${util:-?} (DPL-0009), legalizer ${legalizer:-unknown}, ${legality}, illegal cells at legalizer iteration 0: ${illegal:-none reported}, ${macro_fields}"
     # Only a revert in the last gpl pass matters to dpl: GPL-0999 after the
     # pass-2 marker.
     local last_revert
@@ -257,6 +274,37 @@ report_placement_state() {
     else
         echo "Placement: gpl pass 2 converged without a revert; ${msg}."
     fi
+}
+
+# Count the nets that global routing routed outside the core, from grt's
+# route guides (keep-cells-out-of-macro-margins design D4). Cells walled in
+# behind macros escape through the band between the core and the pads, which
+# has almost no capacity: 9,313 such nets in run 38094932339
+# (docs/infra-plan.md Phase 11). A net counts once, if any of its guide
+# rectangles has its centre outside the core. Only reads what this grt run
+# logged, so a stale guide file is never counted. Never changes the exit
+# status.
+report_routes_outside_core() {
+    local log="${REPORTS}/pnr_grt.log" core guide n
+    core="$(sed -n 's/.*Core area (dbu): *\([0-9]* [0-9]* [0-9]* [0-9]*\).*/\1/p' "$log" 2>/dev/null | tail -1)"
+    guide="$(sed -n 's/.*Route guides written: *//p' "$log" 2>/dev/null | tail -1)"
+    if [ -z "$core" ]; then
+        echo "Nets routed outside the core: not computed (no core area in ${log})"
+        return 0
+    elif [ -z "$guide" ] || [ ! -f "$guide" ]; then
+        echo "Nets routed outside the core: not computed (grt wrote no route guides)"
+        return 0
+    fi
+    # shellcheck disable=SC2086 # $core is four numbers, split on purpose
+    n="$(set -- $core; awk -v x0="$1" -v y0="$2" -v x1="$3" -v y1="$4" '
+        $1 == "(" { out = 0; next }
+        $1 == ")" { if (out) n++; next }
+        NF >= 5 && !out {
+            cx = ($1 + $3) / 2; cy = ($2 + $4) / 2
+            if (cx < x0 || cx > x1 || cy < y0 || cy > y1) out = 1
+        }
+        END { print n + 0 }' "$guide")"
+    echo "Nets routed outside the core: ${n:-not computed (awk failed)}"
 }
 
 past_gate=0
@@ -318,6 +366,7 @@ for stage in "${STAGES[@]}"; do
     done
 
     [ "$stage" = "dpl" ] && report_placement_state
+    [ "$stage" = "grt" ] && report_routes_outside_core
 
     if [ "$rc" -ne 0 ]; then
         echo "::error::stage '${stage}' failed after ${attempt} attempt(s), exit ${rc}"

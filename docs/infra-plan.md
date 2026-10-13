@@ -720,14 +720,17 @@ density makes the jump bigger.
 - [x] ~~**Raise the `gpl` density target above real utilization**~~ — tried at 0.72 (run
       `37037836332`), made legalization worse; see the correction above.
 
-Candidate levers, roughly cheapest first — none yet tried. **Future work**: since the framing
+Candidate levers, roughly cheapest first. The first one tried, margin blocking plus stronger routability inflation, is the 2026-10-14 finding at the end of this phase. **Future work**: since the framing
 question below is settled, none of these is needed for the thesis. They matter only for a
 detail-routed DEF, or for making post-route repair fit (2026-10-07 finding below).
 
 - [ ] *(future work)* **Relax our own layer adjustments.** `pnr_apply_routing_layers` removes 30% of M2/M3
       capacity (`set_global_routing_layer_adjustment Metal2-Metal3 0.30`) and 20% of
       TopMetal1 — and Metal3 is the worst-congested layer. This looks self-inflicted and is a
-      one-line experiment.
+      one-line experiment. *Caveat (2026-10-12):* the adjustment only changes how much capacity
+      global routing thinks M2/M3 have. Relaxing it moves demand onto Metal2, where half of
+      detailed routing's violations already are (1.04 M shorts + 294 k spacing of 2.64 M, run
+      `38178131540`), so judge it by detailed routing, not by the `grt` report.
 - [ ] *(future work)* **Restore `grt` congestion iterations.** Stock `chip.tcl` uses 80; we cut to 14 purely
       to fit a timeout, with a comment explicitly accepting "a more-congested result for drt
       to deal with". Not a straight revert: iterations cost ~25 min each (80 ≈ 20–33h) and
@@ -832,6 +835,58 @@ change; once guides pass, routing iteration 0 on the enlarged die took 2 h 32 m 
 - [ ] **Detailed routing does not converge** at this congestion (about 2.6 M violations after
       three iterations, −2.4 % per iteration and falling). A routable die needs the congestion
       levers above, not more iterations.
+
+**2026-10-14 finding: cells trapped behind the macros, and routability inflation capped at ×1.2**
+(change `keep-cells-out-of-macro-margins`). The floorplan keeps every macro 8 µm (east/west) or
+14 µm (south/north) off the core edge and never cut the rows there, so the placer filled those
+margins with logic the macro walls in. The SRAMs obstruct Metal1–Metal4 and their power grid takes
+most of TopMetal1, so those nets cross the macro on almost nothing or leave the core through the
+band before the pads. On run `38094932339`'s `grt` checkpoint:
+- 6,308 cells in the margins (east 2,200, north 1,748, south 1,681, west 679), 3,355 of them
+  buffers and tie cells inserted by repair and CTS;
+- 9,313 nets with global-route guides outside the core;
+- sampled overflow 29.5 % over macros and 10.7 % outside the core.
+
+Side finding: `addHaloToBlock` (`floorplan_util.tcl`) computes a halo box and discards it, so the
+floorplan's macro halos have never existed. Recorded, not fixed.
+
+| run | what | `grt` overflow | max H/V | WNS / TNS at `grt` | outside core |
+|---|---|---:|---:|---|---:|
+| `38094932339` | baseline | 198,046 | 30 / 29 | −13.12 ns / −116.1 k ns | 9,313 |
+| `38254112819` | margins blocked (run A) | 603,825 | 58 / 66 | −9.31 ns / −75.1 k ns | 5,210 |
+| `38322276116` | run A's commit, blocking off | 198,046 | 30 / 29 | −13.12 ns / −116.1 k ns | 9,313 |
+| `38359120738` | + SPI host padding | — (`cts` failed, `DPL-0036`) | | | |
+| `38395368038` | margins + corners + inflation 2.5 (probe B) | **74,776** | 28 / 22 | **−8.96 ns** / −103.6 k ns | **3,866** |
+
+- **The flow is deterministic.** The blocking-off run reproduced the baseline byte for byte, so
+  single-run comparisons on this lane are meaningful.
+- **Blocking alone made routing worse.** About 5,400 displaced cells went into the north-east
+  corner, which the SPI host already made the densest area. Sampled overflow there grew from
+  about 10 k to 58 k.
+- **Padding at legalization does not fit.** Legalization cannot move cells far, and with the
+  padding, `cts` found no site for one cell within the 1000 µm window. That cell sat in an
+  enclosed corner pocket where two blocked margins meet, so the blocking now covers the four
+  corners too.
+- **Routability inflation was capped.** `gpl.tcl` carried upstream's 2024 tuning,
+  `-routability_inflation_ratio_coef 1.2 -routability_max_inflation_ratio 1.2`: about +1 % area
+  per routability iteration, ending at "could not reach target" in every run on record. At 2.5,
+  global placement moves cells out of the corner itself. Overflow drops 62 % against the
+  baseline and demand from 65.9 % to 59.7 %. Repair inserts far less (`GPL-1014` +34 % instead
+  of +56 %), and slew/cap violations (3,846 / 1,735) and power (1.06 W, uniform activity) end
+  below the baseline. TNS and the count of setup-violating endpoints (39,673) improve on the
+  baseline but not as much as with the blocking alone.
+- **Not isolated:** inflation 2.5 without the blocking was not run, so the split of the gain
+  between the two is unknown.
+
+- [x] **Block the macro margins and raise routability inflation to 2.5**
+      (`keep-cells-out-of-macro-margins`). Defaults: `pnr_macro_margin_max` 20 µm
+      (`PNR_MACRO_MARGIN_MAX`, 0 = off). The run reports margin and channel cell counts after `dpl`
+      and the nets routed outside the core after `grt`. **P&R figures before and after this
+      change come from different placements**; the requote below must re-run both sides with it.
+- [ ] The SPI host corner still holds about 76 % of the remaining sampled overflow: the next
+      lever if routing needs more headroom.
+- [ ] *(optional)* Detailed routing on probe B's layout, against run `38178131540`'s 2.6 M
+      violations.
 
 ---
 

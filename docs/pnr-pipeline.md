@@ -142,9 +142,9 @@ doing anything else.
 
 | # | Stage | Checkpoint | Gate? | What it does |
 |---|---|---|---|---|
-| 1 | `floorplan` | `power_grid` | **Gate** | Reads the synthesized netlist, links the design, reads SDC, runs `check_setup`/`report_checks` sanity checks, creates the floorplan (ring layout, 2-way or 4-way L1 cache depending on `L1CACHE_WAYS`; die scaled by `pnr_die_scale`, default 1.0 = the taped-out die, see `die_scale` above), then builds the power grid (stripes/rings). Only stage that reads the netlist directly — everything after loads a checkpoint. |
+| 1 | `floorplan` | `power_grid` | **Gate** | Reads the synthesized netlist, links the design, reads SDC, runs `check_setup`/`report_checks` sanity checks, creates the floorplan (ring layout, 2-way or 4-way L1 cache depending on `L1CACHE_WAYS`; die scaled by `pnr_die_scale`, default 1.10, see `die_scale` above), then blocks placement in every gap between a macro and the core edge no wider than `pnr_macro_margin_max` (`scripts/pnr/common.tcl`, default 20 µm; `PNR_MACRO_MARGIN_MAX`, `0` turns it off). The floorplan keeps macros 8 µm (east/west) or 14 µm (south/north) off the core edge, and without the blocking the placer filled those margins with logic the macros wall in (6,308 cells and 9,313 nets routed outside the core in run 38094932339; change `keep-cells-out-of-macro-margins`). The log lists every blockage (`Macro margin blocked: …`) and the total. Then it builds the power grid (stripes/rings). Only stage that reads the netlist directly — everything after loads a checkpoint. Changing `PNR_MACRO_MARGIN_MAX`, or resuming a run with this blocking from checkpoints made before it, mixes floorplans: the restore's synth-key guard does not catch it, because the netlist is the same, so do not combine either with `resume_from_run` across that boundary. |
 | 2 | `pre_place` | `pre_place` | **Gate** | Repairs tie-cell fanout, then `remove_buffers`. Deliberately its own tiny stage: `remove_buffers` is known to segfault roughly 1 run in 3, and isolating it means a retry only redoes this cheap step, not floorplan/power-grid. The only stage with a configured retry (1). |
-| 3 | `gpl` | `gpl2` | **Gate** | Global placement, two passes. Pass 1 (routability-driven) gives rough parasitics; `repair_design`/`repair_timing -repair_tns 70` clean up setup violations on that rough placement; pass 2 (routability + timing-driven) is the placement that actually carries forward. Both passes start from target density `pnr_gpl_density` (`scripts/pnr/common.tcl`, default 0.65; `PNR_GPL_DENSITY` / the `gpl_density` input override it). Pass 2's timing-driven iterations are virtual (`-keep_resize_below_overflow`, `pnr_gpl_keep_resize`, default 0; `PNR_GPL_KEEP_RESIZE` / the `gpl_keep_resize` input): they re-weight nets but insert no buffers. `gpl.tcl` logs both values. Only stage besides `drt` that calls `set_thread_count` (up to 32 threads, capped by the VM's core count). |
+| 3 | `gpl` | `gpl2` | **Gate** | Global placement, two passes. Pass 1 (routability-driven) gives rough parasitics; `repair_design`/`repair_timing -repair_tns 70` clean up setup violations on that rough placement; pass 2 (routability + timing-driven) is the placement that actually carries forward. Both passes start from target density `pnr_gpl_density` (`scripts/pnr/common.tcl`, default 0.65; `PNR_GPL_DENSITY` / the `gpl_density` input override it). Pass 2's timing-driven iterations are virtual (`-keep_resize_below_overflow`, `pnr_gpl_keep_resize`, default 0; `PNR_GPL_KEEP_RESIZE` / the `gpl_keep_resize` input): they re-weight nets but insert no buffers. `gpl.tcl` logs both values. Both passes run routability mode with `-routability_inflation_ratio_coef 2.5 -routability_max_inflation_ratio 2.5`, so cells in congested regions are inflated enough to move; upstream's 1.2 added about 1 % area per routability iteration, and with the macro margins blocked it let the displaced cells pile into the SPI host corner and tripled `grt` overflow (change `keep-cells-out-of-macro-margins`, runs 38254112819 and 38395368038). Only stage besides `drt` that calls `set_thread_count` (up to 32 threads, capped by the VM's core count). |
 | 4 | `dpl` | `dpl` | **Gate** | Detailed (legalized) placement + mirror optimization. Single-threaded. Legalizes with `pnr_dpl_legalizer` (`scripts/pnr/common.tcl`, default `diamond`, OpenROAD's classic legalizer; `PNR_DPL_LEGALIZER=negotiation` selects OpenROAD's default, which leaves cells overlapping on this design). Ends with a **gated** `check_placement`: any overlap, padding or blocked-layer violation fails the stage before its checkpoint is saved, with the counts in `pnr_status.log` and the markers in `basilisk_dpl_check_placement.rpt`. Afterwards `run_pnr.sh` reports how `gpl` ended (below). |
 | 5 | `cts` | `cts` | **Gate** | Clock tree synthesis. Lifts clock dont-touch (only stage that does — clock nets are protected everywhere else), repairs clock inverters and post-CTS wire length, legalizes, then `repair_timing -setup -repair_tns 90` to fix the setup violations CTS itself introduces. Both legalizations use the same legalizer as `dpl`, and the stage ends with the same **gated** `check_placement` (`basilisk_cts_check_placement.rpt`). Until `use-diamond-legalizer` this check was caught and non-fatal, and 10–13 k overlapping cells reached `grt` in every run, until `drt` aborted on them (`DRT-0218`, run 37996272102). |
 | 6 | `grt` | `grt` | **Gate — the actual gate** (`PNR_GATE` default) | Global route: `global_route -congestion_iterations 14 -allow_congestion -verbose`. This is the stage the whole flow is judged on — `run_pnr.sh` exits non-zero if this fails, regardless of the best-effort stages after it. The long pole by far: single-threaded, congestion-bound at ~63–65% utilization. `-congestion_iterations` was cut from `chip.tcl`'s original 80, to 20, to 14 across three real timeout failures — the last cut wasn't about average per-iteration cost but a specific finding: iterations 1–14 complete trivially, then iteration 15 itself triggers a clock-net NDR-relaxation cascade with no observed sign of ever terminating (10+ hours, no completion). See Notes. |
@@ -176,6 +176,27 @@ The report never changes the exit status (`specs/pnr-flow`). Why it exists:
 in every run on record, pass 2 reverted at overflow ≈ 0.19–0.22, and `dpl`
 started from 83 k to 223 k illegal cells, which timed it out at its old 2 h
 limit (`docs/infra-plan.md` Phase 11).
+
+The same line ends with two counts of cells that macros wall in, from
+`dpl.tcl`'s `Macro margins:` and `Macro channels:` log lines (change
+`keep-cells-out-of-macro-margins`): `macro margins: <n> cells (gap <= 20 um)`
+and `macro channels: <n> cells (gap <= 40 um)`. The first counts cells
+between a macro and the core edge, which the floorplan blocks, so it should
+be 0; a non-zero count raises a `::warning::`. The second counts cells in
+channels between two facing macros (`PNR_MACRO_CHANNEL_MAX`, default 40 µm),
+which keep their rows and are only reported. Either is `not reported` when
+`dpl` did not get that far. Both are logged before `dpl`'s legality check,
+so a failed check still has them.
+
+**Routes outside the core** (`run_pnr.sh`, after `grt`). One line,
+`Nets routed outside the core: <n>`: the nets with at least one route-guide
+rectangle whose centre lies outside the core area, counted from
+`basilisk_route.guide` with the core area `grt.tcl` logs. Nets walled in
+behind macros escape through the band between the core and the pads, which
+has almost no routing capacity; run 38094932339 had 9,313 of them. It reads
+only what the current `grt` run logged (`Route guides written:`), prints
+`not computed (<reason>)` otherwise, takes about 15 s, and never changes the
+exit status.
 
 **Per-stage timeouts** (`run_pnr.sh`, override via `PNR_TIMEOUT_<STAGE>` or
 blanket `PNR_STAGE_TIMEOUT`): `floorplan` 1h, `pre_place` 30m, `gpl` 4h,
