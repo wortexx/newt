@@ -73,7 +73,7 @@ Alternative: compute the counts in `run_pnr.sh` from a DEF. Rejected: stage chec
 
 Alternative: iterate `dbNet` guides in Tcl inside `grt.tcl`. Rejected: about 1 M nets × several guides is slow in Tcl, and it would delay the stage checkpoint for a report. `awk` streams the 500 MB file in about a minute.
 
-The "centre outside the core" test matches the probe that found 8,259 nets, so the probe's number is the expected value on the old checkpoint.
+On the old guide file, with the snapped core area `grt.tcl` logs, the count is 9,313. (The exploration's probe found 8,259 because it used the unsnapped 380 / 380 / 6397 / 5570 µm.)
 
 ### D5. No new dispatch input
 
@@ -87,7 +87,7 @@ Run A is a full flow at default settings, `stop_after=grt`, on a ref whose synth
 |---|---|---|
 | cells in margins | 6,308 | 0 |
 | cells in narrow channels | 5,976 | similar (not targeted) |
-| nets routed outside the core | 8,259 | far fewer |
+| nets routed outside the core | 9,313 | far fewer |
 | `grt` overflowing edges (total, per layer), max H/V | 198,046; 30/29 | lower |
 | `grt` demand / Metal3 | 65.9 % / 78.7 % | about the same |
 | WNS / TNS at `grt` | −13.12 ns / −116 k ns | no worse |

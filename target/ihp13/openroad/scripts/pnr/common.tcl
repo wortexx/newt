@@ -148,7 +148,7 @@ if { $pnr_bridge_guides ni {0 1} } {
 # macro: SRAMs obstruct Metal1-Metal4 and their power grid takes most of
 # TopMetal1, so those nets crossed the macro on almost nothing or detoured
 # through the band outside the core. Run 38094932339 had 6,308 cells there
-# and 8,259 nets routed outside the core (docs/infra-plan.md Phase 11). The
+# and 9,313 nets routed outside the core (docs/infra-plan.md Phase 11). The
 # measured gaps are 8.00 um east and west and 14.00 um south and north
 # (floorPaddingX/Y from the snapped core edge); 20 covers all four at any
 # die scale, since the padding is absolute. 0 turns the blocking off.

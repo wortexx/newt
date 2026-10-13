@@ -9,7 +9,7 @@ Measured on the `grt` checkpoint of run `38094932339` (enlarged die, both SHA-3 
 | finding | value |
 |---|---|
 | standard cells placed in the margins (east / north / south / west) | 6,308 (2,200 / 1,748 / 1,681 / 679), 3,355 of them buffers and tie cells inserted by repair and CTS |
-| nets with global-route guides outside the core | 8,259 |
+| nets with global-route guides outside the core | 9,313 |
 | sampled overflow over macros, or outside the core | 29.5 % + 10.7 % |
 | hottest open-area tile | the 530 µm gap between D-cache tag 3 and LLC tag 3, the way out of the east margin |
 | original-netlist cells in the east margin, by module | CVA6 258, USB OHCI 225, SPI host 113 (the other 1,597 there are inserted buffers and tie cells) |

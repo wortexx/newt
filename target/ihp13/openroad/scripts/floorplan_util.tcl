@@ -70,7 +70,7 @@ proc placeInstance { name x y orient } {
 # The floorplans keep macros floorPaddingX/Y off the core edge without cutting
 # the rows there, so the placer filled those margins with logic that the macro
 # walls in: SRAMs obstruct Metal1-Metal4, so its nets crossed the macro on
-# almost nothing or left the core (run 38094932339: 6,308 such cells, 8,259
+# almost nothing or left the core (run 38094932339: 6,308 such cells, 9,313
 # nets routed outside the core; docs/infra-plan.md Phase 11). For every BLOCK
 # instance, each side whose distance to the matching core edge is in
 # (0, max_gap] microns gets a hard placement blockage over that gap, along the

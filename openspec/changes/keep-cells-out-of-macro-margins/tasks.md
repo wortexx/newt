@@ -12,9 +12,10 @@ Tags:
 
 Baseline numbers to reproduce come from the exploration on run `38094932339` (proposal.md
 table): 6,308 margin cells (2,200 / 1,748 / 1,681 / 679 east / north / south / west), 5,976
-cells in channels ≤ 40 µm, 8,259 nets with guides outside the core. (The exploration first
+cells in channels ≤ 40 µm, 9,313 nets with guides outside the core. (The exploration first
 quoted 2,627 and 3,439: its DEF parser skipped every cell carrying `+ SOURCE TIMING`, i.e. all
-buffers and tie cells inserted by repair and CTS. Task 2.3 found and corrected this.)
+buffers and tie cells inserted by repair and CTS; and 8,259 nets, measured against the
+unsnapped core edge. Tasks 2.3 and 4.1 found and corrected both.)
 
 ## 1. Margin blocking in the floorplan (design D1, D2)
 
@@ -73,8 +74,7 @@ buffers and tie cells inserted by repair and CTS. Task 2.3 found and corrected t
   buffers and tie cells inserted by repair and CTS (`+ SOURCE TIMING`), e.g. 803 `buf_16` and
   1,359 tie cells. The exploration's 2,627 / 3,439 came from a DEF regex that skipped every
   component carrying `+ SOURCE TIMING` before `+ PLACED`, so it missed all inserted cells; the
-  proposal, design and comments now carry the corrected figures. The 8,259 nets outside the
-  core came from the guide file and stand.
+  proposal, design and comments now carry the corrected figures.
 
 ## 3. Global-routing report: nets outside the core (design D4)
 
@@ -87,7 +87,9 @@ buffers and tie cells inserted by repair and CTS. Task 2.3 found and corrected t
   logic.
 - [x] 3.2 **[edit]** Check the `awk` count against the baseline: run it on run
   `38094932339`'s `basilisk_route.guide` (`pnr-reports` artifact of that run, `gh run download 38094932339 -n pnr-reports`) with
-  that run's core area (380000 380000 6397000 5570000). Verify: it prints 8,259. Record its
+  that run's core area. Verify: it reproduces the exploration's count. (It printed 8,259 with
+  the unsnapped core 380000 380000 6397000 5570000; with the snapped core `grt.tcl` logs,
+  380160 381780 6396960 5567940, the correct figure is 9,313 — found in task 4.1.) Record its
   wall time and peak memory (`/usr/bin/time -l`). A missing-file run prints `not computed`.
 - [x] 3.3 **[edit]** Add the two report lines (placement counts, nets outside the core) to
   `docs/pnr-pipeline.md` next to the existing placement-report paragraph. Verify: the documented
@@ -109,7 +111,7 @@ buffers and tie cells inserted by repair and CTS. Task 2.3 found and corrected t
   |---|---:|---:|
   | cells in margins | 6,308 | **0** |
   | cells in channels ≤ 40 µm | 5,976 | 6,277 |
-  | nets routed outside the core | 8,259 | **5,210** (−37 %) |
+  | nets routed outside the core | 9,313 | **5,210** (−44 %) |
   | `grt` overflowing edges | 198,046 | **603,825** (×3.0) |
   | max overflow H / V | 30 / 29 | 58 / 66 |
   | per layer M2 / M3 / M4 / M5 / TM1 | 32 k / 47 k / 67 k / 41 k / 11 k | 151 k / 173 k / 162 k / 99 k / 19 k |
@@ -125,8 +127,15 @@ buffers and tie cells inserted by repair and CTS. Task 2.3 found and corrected t
   13.7 k and near-zero-capacity edges 7,609 → 5,943, but a north-east hotspot around the SPI
   host (x 5.4–6.8 mm, y 4.2–6.0 mm) grew from about 10 k to 58 k. The SPI host sits there in
   both runs; in run A it is about 190 µm further south and the area is slightly denser
-  (250 µm tiles above 75 % cell density: 69 → 88). With one run per side, how much of the
-  ×3 overflow is this change and how much is run-to-run variation is not known.
+  (250 µm tiles above 75 % cell density: 69 → 88).
+
+  Attribution run `38322276116` (branch `margin-blocking-off-probe`: run A's commit with the
+  default margin width set to 0, same cached netlist) reproduced the baseline exactly: the same
+  guide file byte for byte, 198,046 overflowing edges, WNS −13.12 ns, TNS −116,071.70 ns, the
+  same slew/cap counts and `GPL-1014` area. The flow is deterministic, so every difference
+  between the baseline and run A comes from the margin blocking: the timing gain and the
+  ×3 overflow alike. With blocking off, `dpl` counts 5,428 margin cells (6,308 at `grt`, after
+  CTS adds buffers).
 
 - [ ] 4.2 **[edit]** Record run A in `docs/infra-plan.md` Phase 11:
   - a new dated finding with the diagnosis (proposal table) and run A's before/after table;

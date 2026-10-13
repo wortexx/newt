@@ -279,7 +279,7 @@ report_placement_state() {
 # Count the nets that global routing routed outside the core, from grt's
 # route guides (keep-cells-out-of-macro-margins design D4). Cells walled in
 # behind macros escape through the band between the core and the pads, which
-# has almost no capacity: 8,259 such nets in run 38094932339
+# has almost no capacity: 9,313 such nets in run 38094932339
 # (docs/infra-plan.md Phase 11). A net counts once, if any of its guide
 # rectangles has its centre outside the core. Only reads what this grt run
 # logged, so a stale guide file is never counted. Never changes the exit
