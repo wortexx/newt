@@ -27,16 +27,24 @@ set err [catch {
 
     # -density and pass 2's -keep_resize_below_overflow are passed at each
     # call, from common.tcl.
+    #
+    # Routability inflation 2.5 in both passes (upstream's 2024 tuning had
+    # 1.2, which capped it at x1.2: about +1 % area per routability
+    # iteration, never reaching its target). With the macro margins blocked
+    # (keep-cells-out-of-macro-margins), 1.2 let the displaced cells pile
+    # into the SPI host corner and tripled grt overflow (run 38254112819:
+    # 603,825 edges against 198,046); 2.5 brought it to 74,776, WNS at grt
+    # -8.96 ns against -13.12 (run 38395368038; docs/infra-plan.md Phase 11).
     set GPL_ARGS {  -routability_driven
                     -routability_check_overflow 0.40
-                    -routability_inflation_ratio_coef 1.2
-                    -routability_max_inflation_ratio 1.2
+                    -routability_inflation_ratio_coef 2.5
+                    -routability_max_inflation_ratio 2.5
                     -max_phi_coef 1.04 }
 
     set GPL2_ARGS { -routability_driven
                     -routability_check_overflow 0.60
-                    -routability_inflation_ratio_coef 1.2
-                    -routability_max_inflation_ratio 1.2
+                    -routability_inflation_ratio_coef 2.5
+                    -routability_max_inflation_ratio 2.5
                     -timing_driven
                     -max_phi_coef 1.02 }
 

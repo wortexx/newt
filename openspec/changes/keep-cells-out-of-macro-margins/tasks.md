@@ -148,17 +148,61 @@ unsnapped core edge. Tasks 2.3 and 4.1 found and corrected both.)
   ×3 overflow alike. With blocking off, `dpl` counts 5,428 margin cells (6,308 at `grt`, after
   CTS adds buffers).
 
-- [ ] 4.2 **[edit]** Record run A in `docs/infra-plan.md` Phase 11:
-  - a new dated finding with the diagnosis (proposal table) and run A's before/after table;
+## 5. Routability inflation in global placement (design D7)
+
+- [x] 5.1 **[long-run]** *(approved 2026-10-13)* Probe: pad the SPI host's cells 1 site each side
+  during legalization (branch `spi-host-padding-probe`, run `38359120738`, resumed from run A's
+  `gpl2`). Verify: `grt` overflow against run A.
+  — done, negative. `dpl` legalized with the padding (26,988 instances), but `cts`'s second
+  legalization, after `repair_timing` inserted 3,441 buffers and upsized 1,436 cells, failed
+  `DPL-0036` on one cell: the north-east corner had no free site within the 1000 µm window.
+  Padding acts only at legalization, which cannot move cells far, and the corner was full. The
+  failing cell sat in an unblocked, enclosed corner pocket, which led to task 1.5.
+- [x] 5.2 **[edit]** In `gpl.tcl`, raise `-routability_inflation_ratio_coef` and
+  `-routability_max_inflation_ratio` from 1.2 to 2.5 in both passes (design D7), with a comment
+  citing the runs. Verify: `tclsh` parse; ignoring comments, `gpl.tcl` matches the probe that
+  measured it (branch `gpl-inflation-probe`, `3fdacef`).
+- [x] 5.3 **[long-run]** *(approved 2026-10-13)* Probe B: margin blocking with corners
+  (`73727ad`) plus the inflation change, full flow, `stop_after=grt` (run `38395368038`,
+  synth cache hit). Verify against the baseline and run A.
+  — done. Every gated stage passed; 37 blockages; margins 0 cells; `dpl`/`cts` legal.
+
+  | figure | baseline `38094932339` | run A `38254112819` | probe B `38395368038` |
+  |---|---:|---:|---:|
+  | `grt` overflowing edges | 198,046 | 603,825 | **74,776** (−62 %) |
+  | max overflow H / V | 30 / 29 | 58 / 66 | **28 / 22** |
+  | per layer M2 / M3 / M4 / M5 / TM1 | 32 k / 47 k / 67 k / 41 k / 11 k | 151 k / 173 k / 162 k / 99 k / 19 k | 16 k / 26 k / 15 k / 15 k / 3 k |
+  | demand (total) | 65.9 % | 65.3 % | **59.7 %** |
+  | nets routed outside the core | 9,313 | 5,210 | **3,866** (−58 %) |
+  | WNS / TNS at `grt` | −13.12 ns / −116.1 k ns | −9.31 ns / **−75.1 k ns** | **−8.96 ns** / −103.6 k ns |
+  | setup violating endpoints | 42,999 | **22,592** | 39,673 |
+  | max slew / max cap violations | 4,293 / 1,914 | 4,859 / 2,093 | **3,846 / 1,735** |
+  | WNS after `cts` | −4.07 ns | −3.60 ns | **−3.36 ns** |
+  | `GPL-1014` final placement area | +56.19 % | +57.45 % | **+34.25 %** |
+  | `DPL-0009` | 56.2 % | 56.2 % | 56.3 % |
+  | power (uniform activity, comparative) | 1.07 W | 1.17 W | **1.06 W** |
+  | `gpl` / `cts` / `grt` | 2 h 33 / 34 m / 2 h 10 | 2 h 24 / 60 m / 2 h 32 | 2 h 45 / 33 m / 1 h 59 |
+
+  The north-east SPI host corner still holds most of the remaining sampled overflow (76 %),
+  at far lower totals. Not isolated: inflation 2.5 without the margin blocking was not run, so
+  how the gain splits between the two is unknown (design D7).
+
+## 6. Write-up
+
+- [x] 6.1 **[edit]** Record the change in `docs/infra-plan.md` Phase 11:
+  - a new dated finding with the diagnosis (proposal table) and the four runs: baseline, run A,
+    the attribution run, the padding probe and probe B, with task 5.3's table;
+  - the routability-inflation finding (design D7) and the attribution gap;
   - the `addHaloToBlock` no-op as a recorded finding;
   - tick or reword the Phase 11 lever list to match.
 
-  Verify: the figures match run A's reports, and the "relax our own layer adjustments" lever
+  Also describe the inflation in `docs/pnr-pipeline.md`'s `gpl` row. Verify: the figures match
+  the runs' reports, and the "relax our own layer adjustments" lever
   carries the caveat from this exploration (it moves demand onto Metal2, where half the DRC
   violations are).
-- [ ] 4.3 **[long-run]** *(optional; the user's call after 4.1)* Run B: `resume_from_run=<A>`, no
+- [ ] 6.2 **[long-run]** *(optional; the user's call)* Detailed routing: `resume_from_run=<probe B>`, no
   `resume_exclude` (`grt_repair` is skipped and only re-saves `grt` as `grt_repaired`), the
   lane's 5 `drt` iterations. Compare violations per
-  layer and type against run `38178131540`'s iterations 0–2, and record them in Phase 11.
+  layer and type against run `38178131540`'s iterations 0–2 (the old layout), and record them in Phase 11.
   Verify: the comparison table is in Phase 11, or the task is marked skipped with the user's
   decision.

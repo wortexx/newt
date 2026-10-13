@@ -16,9 +16,12 @@ Measured on the `grt` checkpoint of run `38094932339` (enlarged die, both SHA-3 
 
 Those three modules are also the ones that dominate the congestion report. Detailed routing on this layout ends at about 2.6 M violations, 85 % of them shorts, and does not converge (`docs/infra-plan.md` Phase 11). This is the first lever there that goes after a cause rather than more routing effort. It is also cheap: it moves no macro and costs about 0.15 mm² of a 31 mm² core.
 
+Measured on the lane, blocking the margins alone made things worse: the displaced cells piled into the already dense SPI host corner and global-route overflow tripled (run `38254112819`). Global placement had been allowed to inflate congested cells by at most ×1.2 (upstream's 2024 tuning), too little to move them out. With that raised to 2.5, the combination cut overflow by 62 % against the baseline and improved WNS at `grt` from −13.12 to −8.96 ns (run `38395368038`; tasks 4.1 and 5.3).
+
 ## What Changes
 
 - **No standard cells in the macro-to-core margins.** The floorplan stage blocks placement in every gap between a macro and the core edge no wider than a configured margin width. The default, 20 µm, covers the measured margins of 8.0 µm (east and west) and 14.0 µm (south and north). The blocking covers the length of the macro's side, and a width of 0 turns it off. Neither global placement nor legalization can then put a cell there.
+- **Global placement may inflate congested cells harder.** Both `gpl` passes raise `-routability_inflation_ratio_coef` and `-routability_max_inflation_ratio` from 1.2 to 2.5, so routability mode moves cells out of congested regions instead of giving up after about +1 % area per iteration. Without it, the margin blocking triples overflow.
 - **The run reports what is left in tight spots.**
   - After detailed placement, a count of cells in the macro margins (expected 0) and a count of cells in narrow channels between two macros. The run's channel figure was 5,976, mostly between the stacked cache-data SRAMs, where the lower macro's pins face the channel.
   - After global routing, the number of nets with route guides outside the core.
@@ -29,7 +32,7 @@ Those three modules are also the ones that dominate the congestion report. Detai
   - `docs/infra-plan.md` Phase 11 records the diagnosis and the validation outcome.
   - `docs/pnr-pipeline.md` describes the `floorplan` stage's blocking and the new report lines.
 
-Flow stages touched: **backend** (floorplan scripts, OpenROAD stage scripts, `run_pnr.sh`) and **docs**. No RTL, synthesis, simulation, software or CI-workflow change.
+Flow stages touched: **backend** (floorplan scripts, OpenROAD stage scripts including global placement, `run_pnr.sh`) and **docs**. No RTL, synthesis, simulation, software or CI-workflow change.
 
 ## Non-goals
 
@@ -58,8 +61,9 @@ None.
   - `target/ihp13/openroad/scripts/floorplan_util.tcl` (new blocking helper)
   - `target/ihp13/openroad/scripts/floorplan_ring_4way.tcl` and `floorplan_ring_2way.tcl` (call it)
   - `target/ihp13/openroad/scripts/pnr/{common,dpl,grt}.tcl` (reports)
+  - `target/ihp13/openroad/scripts/pnr/gpl.tcl` (routability inflation)
   - `target/ihp13/openroad/run_pnr.sh` (surface the report lines)
 - **Checkpoints:** every checkpoint from `floorplan` on is invalidated. A run with this change cannot resume from an older run.
-- **Runtime:** expected unchanged. The blocked area is about 0.5 % of the core.
+- **Runtime:** about unchanged (probe B: `gpl` +12 min, `grt` −11 min against the baseline). The blocked area is about 0.5 % of the core.
 - **Risk:**
   - The margin cells move into the open area next to the macros. If the right column's gaps were also carrying through-traffic, the hotspot may only shift. The validation run's overflow figures will show that.

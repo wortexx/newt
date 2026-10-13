@@ -101,12 +101,28 @@ Success is the first three rows moving as expected with the timing rows no worse
 
 Run B (optional, the user's call after A) resumes from A's `grt` checkpoint, runs `drt` with the lane's 5 iterations (about 15.5 h) and compares violations per layer against run `38178131540`.
 
+### D7. Routability inflation 2.5 in both global-placement passes
+
+The outcome of D6 forced this. Run A (margins blocked, everything else unchanged) emptied the margins and improved timing, but tripled `grt` overflow. The attribution run (D6, task 4.1) showed the flow is deterministic, so the blocking itself caused it. About 5,400 displaced cells went into the north-east corner, where the SPI host already made the densest area of the die.
+
+Two levers were tried:
+- **Padding the SPI host's cells at legalization** (probe `38359120738`). It failed in `cts`: legalization can only move cells a short way, and the corner had no room left (task 5.1).
+- **Letting global placement inflate congested cells harder** (probe B, `38395368038`). `gpl.tcl` carried upstream's 2024 tuning, `-routability_inflation_ratio_coef 1.2 -routability_max_inflation_ratio 1.2`, which caps inflation at ×1.2. In every run on record, routability mode added about 1 % area per iteration and ended at "could not reach target". At 2.5 in both passes, overflow fell to 74,776 edges (−62 % against the baseline), WNS at `grt` to −8.96 ns, and slew/cap violations and power fell below the baseline. Repair then inserts far less (`GPL-1014` +34 % instead of +56 %).
+
+2.5 is not a fitted value: it was chosen as a clearly stronger round number, believed to match OpenROAD's historical default (not verified for this build, whose defaults are compiled in). No sweep was run. Alternatives:
+- **A higher value or a sweep.** Not done: each point is a 6 h lane run, and 2.5 already turned the result.
+- **`-routability_use_grt`** (FastRoute instead of RUDY for the congestion estimate). Not tried: one global route takes about 2 h here, and routability mode runs 15 or more iterations.
+- **Shipping the margin blocking alone.** Rejected: it makes routing worse.
+
+The gain is not split between D1 and D7: inflation 2.5 without margin blocking was not run. What is shown is that D1 alone hurts and D1 with D7 helps on every figure but TNS and the count of setup-violating endpoints, which are better than the baseline but worse than with D1 alone.
+
 ## Risks / Trade-offs
 
 - **[The hotspot only moves.]** Cells pushed out of the east margin land next to the macro column. The column's gaps may still funnel traffic. → The guide count and per-layer overflow show it. The channel count (D3) is the next lever, in its own change.
 - **[A placement step ignores the blockage.]** → Task 1.3 checks the blockages on the real floorplan checkpoint. After a run, the margin count (D3) shows any cell that got in anyway. The `dpl`/`cts` legality gates are unaffected.
 - **[Utilization rises slightly.]** About 0.15 mm² blocked of a 31 mm² core (≈ 0.5 %). → Negligible at the current 56–59 % utilization. `DPL-0009` in the run reports it.
 - **[The awk guide count is too slow or memory-hungry on the VM.]** → It streams, holding only the current net, and runs once per run after `grt`. Task 3.2 times it on the real 500 MB file.
+- **[The SPI host corner remains the hotspot.]** It holds about 76 % of the remaining sampled overflow in probe B, at far lower totals. → The next lever if routing needs more headroom, in its own change.
 - **[Comparability.]** Figures before and after are from different placements. → Proposal marks this BREAKING. The thesis requote decision (Phase 11) must re-run both sides.
 
 ## Migration Plan
