@@ -49,6 +49,17 @@ unsnapped core edge. Tasks 2.3 and 4.1 found and corrected both.)
   this change cannot resume from older checkpoints, which the synth-key guard does not catch.
   Verify: `bash -n run_pnr.sh`; the doc row names the setting, its default and the resume caveat.
 
+- [x] 1.5 **[eda]** Block the corner pockets (design D1 step 4). Probe run `38359120738` failed `cts`
+  on one cell in the unblocked corner square north-east of LLC tag 3, which the two side
+  blockages and the core edges enclose. Move the box geometry into
+  `macro_core_margin_boxes` (shared with `pnr_report_macro_margins`) and add the four corner
+  squares. Verify: a pure-Tcl unit test of the proc (corner boxes only where two sides qualify;
+  none with width 0); on run `38094932339`'s floorplan checkpoint the helper creates 37
+  blockages (33 + 4 corners); on run A's `grt` checkpoint the report counts the cells that sit
+  in the corners.
+  — done. Unit test passes; 37 blockages (the four new ones 8 × 14 µm: SW, SE, NE, NW); run A's
+  `grt` checkpoint has 18 cells in the corner squares, which the side-only geometry missed.
+
 ## 2. Placement report: margin and channel counts (design D3)
 
 - [x] 2.1 **[edit]** Next to `pnr_macro_margin_max` in `common.tcl`, add `pnr_macro_channel_max`

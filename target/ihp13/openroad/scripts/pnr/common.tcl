@@ -429,16 +429,14 @@ proc pnr_report_macro_margins {} {
         }
     }
 
-    # boxes: list of {kind x0 y0 x1 y1}
+    # boxes: list of {kind x0 y0 x1 y1}; the margins, corners included, come
+    # from the same proc the floorplan blocks them with.
+    global openroad_dir
+    source ${openroad_dir}/scripts/floorplan_util.tcl
     set boxes {}
     foreach m $macros {
-        lassign $m x0 y0 x1 y1
-        foreach {gap box} [list \
-            [expr {$x0 - $cx0}] [list $cx0 $y0 $x0 $y1] \
-            [expr {$cx1 - $x1}] [list $x1 $y0 $cx1 $y1] \
-            [expr {$y0 - $cy0}] [list $x0 $cy0 $x1 $y0] \
-            [expr {$cy1 - $y1}] [list $x0 $y1 $x1 $cy1]] {
-            if { $gap > 0 && $gap <= $mw } { lappend boxes [list margin {*}$box] }
+        foreach {side box} [macro_core_margin_boxes {*}$m $cx0 $cy0 $cx1 $cy1 $mw] {
+            lappend boxes [list margin {*}$box]
         }
     }
     foreach a $macros {

@@ -2,7 +2,7 @@
 
 ### Requirement: Standard cells stay out of the margins between macros and the core edge
 
-The floorplan SHALL block standard-cell placement in every gap between a placed macro and the core edge that is no wider than a configured margin width, along the full length of the macro's side facing that edge. The default margin width SHALL cover the padding the floorplan leaves between macros and the core edge on every side of the core. A margin width of 0 SHALL turn the blocking off, reproducing the floorplan from before this requirement. The blocking SHALL hold for global placement, every legalization and every repair step that inserts cells, so that no standard cell is ever placed in such a gap. It SHALL NOT block any other area: gaps between two macros and the open core area keep their rows.
+The floorplan SHALL block standard-cell placement in every gap between a placed macro and the core edge that is no wider than a configured margin width, along the full length of the macro's side facing that edge. Where a macro is within the margin width of two core edges, the floorplan SHALL also block the corner between the macro and the core's corner, which the two side margins and the core edges would otherwise enclose. The default margin width SHALL cover the padding the floorplan leaves between macros and the core edge on every side of the core. A margin width of 0 SHALL turn the blocking off, reproducing the floorplan from before this requirement. The blocking SHALL hold for global placement, every legalization and every repair step that inserts cells, so that no standard cell is ever placed in such a gap. It SHALL NOT block any other area: gaps between two macros and the open core area keep their rows.
 
 After detailed placement, the run SHALL report:
 
@@ -15,6 +15,11 @@ A non-zero margin count SHALL be a named warning in the run's output. Neither co
 
 - **WHEN** the P&R flow runs on the current Basilisk floorplan with default settings
 - **THEN** the report after detailed placement shows 0 cells in the macro margins and states the count of cells in narrow channels between macros, and no warning is raised
+
+#### Scenario: Macro near a core corner
+
+- **WHEN** a macro lies within the margin width of two core edges
+- **THEN** both side margins and the corner square between the macro and the core's corner are blocked, so no enclosed pocket remains where a cell could be placed
 
 #### Scenario: A cell reaches a margin
 

@@ -32,7 +32,10 @@ A new helper, `block_macro_core_margins {max_gap}` in `floorplan_util.tcl`, work
 1. Walk the block's instances whose master is a `BLOCK`.
 2. For each of the four sides, measure the distance from the macro's bounding box to the matching core edge.
 3. Where that distance is greater than 0 and no greater than `max_gap`, create a **hard** placement blockage (`odb::dbBlockage_create`, not `setSoft`) covering the gap along the full length of that side.
-4. Log one line per blockage and a total.
+4. Where two adjacent sides both qualify, also block the corner square between the macro's corner and the core's corner.
+5. Log one line per blockage and a total.
+
+The corner step was added after probe run `38359120738`: with only the side blockages, the corner square north-east of LLC tag 3 stayed open but enclosed (the east blockage to the south, the north blockage to the west, the core edges), and `cts` failed on the one cell placed there once padding had used up the space around it. The box geometry lives in `macro_core_margin_boxes`, which the report proc (D3) also uses.
 
 Both ring floorplans call the helper as their last step, after every macro is placed. That includes the two hyperbus delay lines: they are `CLASS BLOCK` too (39.8 × 41.6 µm), and the 4-way floorplan places them 8.00 µm off the west core edge **after** its last `cut_rows`, on purpose, because they sit on rows like multi-row cells. Calling the helper before that `cut_rows` would miss them.
 

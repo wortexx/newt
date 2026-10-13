@@ -76,6 +76,34 @@ proc placeInstance { name x y orient } {
 # (0, max_gap] microns gets a hard placement blockage over that gap, along the
 # side's full length. Call it after the last macro is placed. max_gap 0 turns
 # it off (openspec/changes/keep-cells-out-of-macro-margins design D1).
+#
+# Where a macro is within max_gap of two core edges, the square between its
+# corner and the core's corner is blocked too: the two side blockages and the
+# core edges would otherwise enclose it, and a cell there is walled in on every
+# side (run 38359120738 failed cts on one cell in the north-east one).
+
+# Margin boxes for one macro bbox, in dbu: a flat list of side name (W, E, S,
+# N, or a corner SW/SE/NW/NE) and box {x0 y0 x1 y1}. Shared with
+# pnr_report_macro_margins, so the report counts what is blocked.
+proc macro_core_margin_boxes {x0 y0 x1 y1 cx0 cy0 cx1 cy1 max_gap} {
+  set gap [dict create W [expr {$x0 - $cx0}] E [expr {$cx1 - $x1}] \
+                       S [expr {$y0 - $cy0}] N [expr {$cy1 - $y1}]]
+  set ok {}
+  dict for {side g} $gap {
+    dict set ok $side [expr {$g > 0 && $g <= $max_gap}]
+  }
+  set boxes {}
+  if { [dict get $ok W] } { lappend boxes W  [list $cx0 $y0  $x0  $y1] }
+  if { [dict get $ok E] } { lappend boxes E  [list $x1  $y0  $cx1 $y1] }
+  if { [dict get $ok S] } { lappend boxes S  [list $x0  $cy0 $x1  $y0] }
+  if { [dict get $ok N] } { lappend boxes N  [list $x0  $y1  $x1  $cy1] }
+  if { [dict get $ok S] && [dict get $ok W] } { lappend boxes SW [list $cx0 $cy0 $x0  $y0] }
+  if { [dict get $ok S] && [dict get $ok E] } { lappend boxes SE [list $x1  $cy0 $cx1 $y0] }
+  if { [dict get $ok N] && [dict get $ok W] } { lappend boxes NW [list $cx0 $y1  $x0  $cy1] }
+  if { [dict get $ok N] && [dict get $ok E] } { lappend boxes NE [list $x1  $y1  $cx1 $cy1] }
+  return $boxes
+}
+
 proc block_macro_core_margins {max_gap} {
   if { $max_gap <= 0 } {
     puts "Macro margin blocking: off"
@@ -97,18 +125,14 @@ proc block_macro_core_margins {max_gap} {
     set y0 [$bbox yMin]
     set x1 [$bbox xMax]
     set y1 [$bbox yMax]
-    # side -> gap and the blockage box covering it
-    set sides [list \
-      W [expr {$x0 - $cx0}] [list $cx0 $y0 $x0  $y1] \
-      E [expr {$cx1 - $x1}] [list $x1  $y0 $cx1 $y1] \
-      S [expr {$y0 - $cy0}] [list $x0  $cy0 $x1 $y0] \
-      N [expr {$cy1 - $y1}] [list $x0  $y1 $x1  $cy1]]
-    foreach {side gap box} $sides {
-      if { $gap <= 0 || $gap > $gap_dbu } { continue }
+    foreach {side box} [macro_core_margin_boxes $x0 $y0 $x1 $y1 \
+                          $cx0 $cy0 $cx1 $cy1 $gap_dbu] {
       odb::dbBlockage_create $block {*}$box
       incr count
-      puts [format "Macro margin blocked: %s %s, gap %.2f um" \
-              [$inst getName] $side [ord::dbu_to_microns $gap]]
+      puts [format "Macro margin blocked: %s %s, %.2f x %.2f um" \
+              [$inst getName] $side \
+              [ord::dbu_to_microns [expr {[lindex $box 2] - [lindex $box 0]}]] \
+              [ord::dbu_to_microns [expr {[lindex $box 3] - [lindex $box 1]}]]]
     }
   }
   puts "Macro margin blocking: $count blockages (gap <= $max_gap um)"
