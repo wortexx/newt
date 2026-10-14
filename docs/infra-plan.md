@@ -885,8 +885,43 @@ floorplan's macro halos have never existed. Recorded, not fixed.
       change come from different placements**; the requote below must re-run both sides with it.
 - [ ] The SPI host corner still holds about 76 % of the remaining sampled overflow: the next
       lever if routing needs more headroom.
-- [ ] *(optional)* Detailed routing on probe B's layout, against run `38178131540`'s 2.6 M
-      violations.
+- [x] *(optional)* Detailed routing on probe B's layout, against run `38178131540`'s 2.6 M
+      violations. **Done 2026-10-14: run `38473439796`** (`a416399`, resumed from probe B, the
+      lane's 5 iterations). Detailed routing finished in 17 h 44 m (peak 38.8 GB) and `final`
+      wrote a DEF, the lane's first detail-routed one. Violations by iteration:
+
+      | iteration | 0 | 1 | 2 | 3 | 4 | 5 |
+      |---|---:|---:|---:|---:|---:|---:|
+      | old layout (`38178131540`) | 3,117,279 | 2,644,950 | 2,580,218 | — | — | — |
+      | probe B (`38473439796`) | 1,928,860 | 1,314,060 | 1,247,623 | 847,112 | 751,136 | **715,558** |
+      | change | −38 % | −50 % | −52 % | | | |
+      | probe B time per iteration | 1 h 46 | 1 h 46 | 1 h 42 | 4 h 49 | 4 h 03 | 3 h 38 |
+
+      Iterations 0 and 1 by type and layer (old → probe B; the old run's log ends before
+      iteration 2's table, so only its total is on record):
+
+      | | iteration 0 | iteration 1 |
+      |---|---:|---:|
+      | Short | 2,466,535 → 1,414,106 | 2,244,092 → 1,073,211 |
+      | Metal Spacing | 378,241 → 289,301 | 396,987 → 239,970 |
+      | Recheck | 267,928 → 224,138 | 191 → 170 |
+      | Cut Spacing | 4,305 → 1,110 | 3,519 → 568 |
+      | Metal2 | 1,392,071 → 1,032,183 | 1,335,280 → 757,281 |
+      | Metal3 | 362,053 → 213,059 | 358,104 → 152,394 |
+      | Metal4 | 692,717 → 409,998 | 450,672 → 226,254 |
+      | Metal5 | 635,616 → 253,053 | 479,220 → 165,460 |
+      | TopMetal1 | 17,784 → 12,216 | 14,769 → 10,314 |
+
+      - **Every layer and type improves, Metal2 least.** Metal5 drops 65 % at iteration 1,
+        Metal3 57 %, Metal4 50 %, Metal2 43 %. Metal2's share of the violations rises from 50 %
+        to 58 %, which makes the Metal2 caveat on the layer-adjustment lever above stronger.
+      - **It still does not converge.** Iteration 3 cut violations by 32 %, but iterations 4 and 5
+        only by 11 % and 5 %. After iteration 5, 715,558 remain: 620,671 shorts and 94,393
+        metal-spacing violations, with 44 % of them on Metal2. Iterations 3–5 each took 3.6–4.8 h,
+        so more iterations cannot fit the 24 h `drt` timeout, which this run left with 6.3 h to
+        spare.
+      - Wire length after iteration 0 is 129.6 M µm, against 143.3 M µm on the old layout
+        (−10 %), with 8.88 M vias against 9.44 M.
 
 ---
 

@@ -200,7 +200,7 @@ unsnapped core edge. Tasks 2.3 and 4.1 found and corrected both.)
   the runs' reports, and the "relax our own layer adjustments" lever
   carries the caveat from this exploration (it moves demand onto Metal2, where half the DRC
   violations are).
-- [ ] 6.2 **[long-run]** *(optional; the user's call)* Detailed routing: `resume_from_run=<probe B>`, no
+- [x] 6.2 **[long-run]** *(optional; the user's call)* Detailed routing: `resume_from_run=<probe B>`, no
   `resume_exclude` (`grt_repair` is skipped and only re-saves `grt` as `grt_repaired`), the
   lane's 5 `drt` iterations. Compare violations per
   layer and type against run `38178131540`'s iterations 0–2 (the old layout), and record them in Phase 11.
