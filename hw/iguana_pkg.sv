@@ -75,15 +75,10 @@ package iguana_pkg;
     // cheshire (RegOut.num_out) in the patch at target/ihp13/picle/patch/svase/svase.sed
     ret.BusErr = 0; // too large
 
-    // CV-X-IF coprocessor port of core 0 (Keccak ISE, see hw/coproc/)
-    ret.Cva6CvxifEn = 1;
-
-    // Keccak MMIO accelerator on the external AXI subordinate port
-    ret.AxiExtNumSlv          = 1;
-    ret.AxiExtNumRules        = 1;
-    ret.AxiExtRegionIdx   [0] = AxiOutKeccakIdx;
-    ret.AxiExtRegionStart [0] = AxiOutKeccakBase;
-    ret.AxiExtRegionEnd   [0] = AxiOutKeccakEnd;
+    // MEASUREMENT REFERENCE, NEVER MERGED (branch pnr-reference-no-arms,
+    // openspec change requote-sha3-pnr-legal-placement, design D1): no SHA-3
+    // hardware. Cva6CvxifEn and the AxiExt* fields keep Cheshire's defaults
+    // (CV-X-IF off, no external AXI subordinate), as before the coprocessor.
 
     // Hyberbus configuration port
     ret.RegExtNumSlv          = 1;
