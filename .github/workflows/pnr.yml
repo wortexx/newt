@@ -62,6 +62,14 @@ on:
         description: 'Skip post-route timing repair (empty = skip, as on scheduled runs; 0 = run grt_repair.tcl''s bounded repair, best-effort, 16h timeout)'
         required: false
         default: ''
+      drt_end_iter:
+        description: 'Detailed-routing iteration budget, -droute_end_iter (empty = 5, as on scheduled runs; 64 = OpenROAD''s default; the 24h drt timeout still applies)'
+        required: false
+        default: ''
+      antenna_repair:
+        description: 'Run antenna repair before detailed routing (empty = skip, as on scheduled runs; 1 = run repair_antennas, best-effort)'
+        required: false
+        default: ''
   push:
     tags: ['**']
 
@@ -570,6 +578,14 @@ jobs:
         # Antenna repair is manufacturing signoff, not PPA - skip it in CI
         # (see drt.tcl's comment for the -jumper_only middle ground).
         #
+        # The skip is now the antenna_repair dispatch input's default
+        # (drc-clean-pnr D1): empty keeps PNR_SKIP_ANTENNA_REPAIR=1, so
+        # scheduled, tag and input-less runs are unchanged, and 1 runs
+        # repair_antennas on demand. The hang above was at 101% demand;
+        # whether repair fits on a sparser, legal layout is what that change
+        # measures. Written as `!= '1' && '1' || '0'` so the expression never
+        # relies on the string '0' being truthy.
+        #
         # PNR_DRT_END_ITER=5 and PNR_TIMEOUT_DRT=86400 (24 h)
         # (bridge-wrong-way-route-guides D4). Measured on the enlarged die (run
         # 38178131540): ~30 min of setup, then ~3 h per routing iteration, not
@@ -579,7 +595,10 @@ jobs:
         # its own budget, saves its checkpoint and lets final write the DEF;
         # hitting the timeout instead loses all of that. The 24 h timeout is
         # the margin; run_pnr.sh's 16 h default would be too tight. The job's
-        # 48 h ceiling holds: a full run reaches drt in about 6 h.
+        # 48 h ceiling holds: a full run reaches drt in about 6 h. The budget
+        # is now the drt_end_iter dispatch input, empty = 5 (drc-clean-pnr
+        # D1), so a probe or a route-to-convergence run needs no commit; the
+        # timeout stays fixed.
         #
         # PROJ_NAME=basilisk: the "Synthesize" step above runs `make
         # synth-all` from the repo root, which includes iguana.mk - that's
@@ -620,7 +639,7 @@ jobs:
         # empty by default (common.tcl's 1000 1000; OpenROAD's own window left
         # 3,719 cells unplaced in cts at 71.3 % utilization, run 38071835792).
         # Quoted, as it may hold "x y".
-        run: PNR_GPL_DENSITY=${{ github.event.inputs.gpl_density || '' }} PNR_GPL_KEEP_RESIZE=${{ github.event.inputs.gpl_keep_resize || '' }} PNR_DIE_SCALE=${{ github.event.inputs.die_scale || '' }} PNR_DPL_LEGALIZER=${{ github.event.inputs.dpl_legalizer || '' }} PNR_DPL_MAX_DISPLACEMENT="${{ github.event.inputs.dpl_max_displacement || '' }}" PNR_TIMEOUT_GRT=57600 PNR_TIMEOUT_GRT_REPAIR=57600 PNR_SKIP_GRT_REPAIR=${{ github.event.inputs.skip_grt_repair || '1' }} PNR_SKIP_ANTENNA_REPAIR=1 PNR_DRT_END_ITER=5 PNR_TIMEOUT_DRT=86400 PNR_STOP_AFTER=${{ github.event.inputs.stop_after || '' }} make -C target/ihp13/openroad -f openroad.mk run-pnr PROJ_NAME=basilisk
+        run: PNR_GPL_DENSITY=${{ github.event.inputs.gpl_density || '' }} PNR_GPL_KEEP_RESIZE=${{ github.event.inputs.gpl_keep_resize || '' }} PNR_DIE_SCALE=${{ github.event.inputs.die_scale || '' }} PNR_DPL_LEGALIZER=${{ github.event.inputs.dpl_legalizer || '' }} PNR_DPL_MAX_DISPLACEMENT="${{ github.event.inputs.dpl_max_displacement || '' }}" PNR_TIMEOUT_GRT=57600 PNR_TIMEOUT_GRT_REPAIR=57600 PNR_SKIP_GRT_REPAIR=${{ github.event.inputs.skip_grt_repair || '1' }} PNR_SKIP_ANTENNA_REPAIR=${{ github.event.inputs.antenna_repair != '1' && '1' || '0' }} PNR_DRT_END_ITER=${{ github.event.inputs.drt_end_iter || '5' }} PNR_TIMEOUT_DRT=86400 PNR_STOP_AFTER=${{ github.event.inputs.stop_after || '' }} make -C target/ihp13/openroad -f openroad.mk run-pnr PROJ_NAME=basilisk
 
       # Move the checkpoints out of the shared workspace before this job
       # releases the runner. This is the whole fix for the collision that
@@ -714,6 +733,19 @@ jobs:
               done < "$STATUS_LOG"
             else
               echo "| (none) | no status log found | run_pnr.sh may not have started |"
+            fi
+            # The router's own violation counts (drc-clean-pnr design D2):
+            # run_pnr.sh's report_drt_outcome puts a `drt-violations` row
+            # right under drt's own in the table above, and the per-iteration
+            # trajectory plus the final table by type and layer here.
+            VIOLATIONS=target/ihp13/openroad/reports/basilisk.drt.violations.txt
+            if [ -f "$VIOLATIONS" ]; then
+              echo
+              echo "**Detailed-route violations** (the router's count, not the capped DRC report file):"
+              echo
+              echo '```'
+              cat "$VIOLATIONS"
+              echo '```'
             fi
             # State the DEF outcome explicitly (specs/ci-pipeline: "Run exits 0
             # without a routed design"). Detailed routing is best-effort, so a

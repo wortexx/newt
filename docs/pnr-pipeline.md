@@ -32,10 +32,11 @@ independent of this workflow — the backstop for a `stop` job that never ran.
 
 ### Manual dispatch inputs
 
-`workflow_dispatch` accepts seven optional inputs, all empty by default
+`workflow_dispatch` accepts eleven optional inputs, all empty by default
 (`resume_from_run`, `resume_exclude`, `stop_after`, `gpl_density`,
-`gpl_keep_resize`, `die_scale`, `skip_grt_repair` — matching `pnr.yml`'s
-`inputs:` keys exactly). With all seven empty, a dispatched run
+`gpl_keep_resize`, `die_scale`, `dpl_legalizer`, `dpl_max_displacement`,
+`skip_grt_repair`, `drt_end_iter`, `antenna_repair` — matching `pnr.yml`'s
+`inputs:` keys exactly). With all of them empty, a dispatched run
 behaves exactly like a scheduled run:
 
 - `resume_from_run` — a previous run's ID whose checkpoints to restore
@@ -95,6 +96,20 @@ behaves exactly like a scheduled run:
   table). It stays best-effort either way: a failure or a timeout
   (`PNR_TIMEOUT_GRT_REPAIR`, 16h in `pnr.yml`) is logged in
   `pnr_status.log` and never changes the run's exit status.
+
+- `drt_end_iter` — detailed routing's iteration budget,
+  `detailed_route -droute_end_iter`. Feeds `PNR_DRT_END_ITER`. Empty means
+  `5`, the budget on every scheduled and tag run; `64` is OpenROAD's own
+  default, for routing to convergence (change `drc-clean-pnr`). The stage's
+  24h timeout (`PNR_TIMEOUT_DRT`) is fixed and still applies, and `drt`
+  stays best-effort. Its `pnr_status.log` line records the budget used.
+
+- `antenna_repair` — whether to run `repair_antennas` before detailed
+  routing. Feeds `PNR_SKIP_ANTENNA_REPAIR`. Empty means skip (`1`), as on
+  every scheduled and tag run, since repair hung for about 14h at 101 %
+  routing demand (run 34389061373, see `drt.tcl`); `1` runs it. Either way
+  `drt` stays best-effort, and its `pnr_status.log` line says
+  `antenna=repaired` or `antenna=skipped`.
 
   The `gpl_*` inputs let a placement experiment run without a commit.
   Combined with `resume_from_run`, exclude `gpl` and every later checkpoint,
@@ -197,6 +212,19 @@ has almost no routing capacity; run 38094932339 had 9,313 of them. It reads
 only what the current `grt` run logged (`Route guides written:`), prints
 `not computed (<reason>)` otherwise, takes about 15 s, and never changes the
 exit status.
+
+**Detailed-route violations** (`run_pnr.sh`, after `drt`, whatever its
+outcome; change `drc-clean-pnr`). The router's own counts from
+`pnr_drt.log`: every `DRT-0199 Number of violations = N` line (one per
+iteration) and the `Viol/Layer` table after the last one (the final
+iteration by type and layer). They go to `reports/basilisk.drt.violations.txt`
+and to one `pnr_status.log` line,
+`drt-violations final=<N> iterations=<k> trajectory=<n0,n1,…>`, or
+`drt-violations none` when the router logged no count; the step summary
+shows both. Never the DRC report file's entries: OpenROAD caps
+`basilisk_route_drc.rpt` at 10,000 markers per violation type, so run
+38473439796 listed 21,110 entries where the router counted 715,558. The
+report never changes the exit status.
 
 **Per-stage timeouts** (`run_pnr.sh`, override via `PNR_TIMEOUT_<STAGE>` or
 blanket `PNR_STAGE_TIMEOUT`): `floorplan` 1h, `pre_place` 30m, `gpl` 4h,

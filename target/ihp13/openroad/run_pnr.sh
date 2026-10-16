@@ -307,6 +307,51 @@ report_routes_outside_core() {
     echo "Nets routed outside the core: ${n:-not computed (awk failed)}"
 }
 
+# Detailed-route outcome from the router's own counts (specs/pnr-flow
+# "Detailed routing reports the router's own violation counts";
+# drc-clean-pnr design D2). Reads pnr_drt.log: every `DRT-0199 Number of
+# violations = N` line, one per iteration, and the `Viol/Layer` table after
+# the last of them (the final iteration by type and layer). Writes both to
+# <proj>.drt.violations.txt and appends `drt-violations final=<N>
+# iterations=<k> trajectory=<n0,...>` to pnr_status.log, or
+# `drt-violations none` when the router logged no count. Deliberately not
+# the DRC report file: OpenROAD caps that at 10,000 markers per violation
+# type, so run 38473439796's listed 21,110 entries where the router counted
+# 715,558. Runs whether drt reached its budget, converged, failed or timed
+# out. Never changes the exit status.
+report_drt_outcome() {
+    local log="${REPORTS}/pnr_drt.log" out="${REPORTS}/${PROJ_NAME}.drt.violations.txt"
+    local counts n final trajectory
+    counts="$(awk '/DRT-0199\]/ && /Number of violations =/ {
+        v = $NF; sub(/\.$/, "", v); print v }' "$log" 2>/dev/null)"
+    if [ -z "$counts" ]; then
+        echo "Detailed-route violations: none reported (no DRT-0199 line in ${log})" | tee "$out"
+        log_status drt-violations none ""
+        return 0
+    fi
+    n="$(grep -c . <<< "$counts")"
+    final="$(tail -1 <<< "$counts")"
+    trajectory="$(paste -sd, - <<< "$counts")"
+    {
+        echo "Detailed-route violations: the router's own counts (DRT-0199 in pnr_drt.log)"
+        echo
+        echo "iteration  violations"
+        awk '{ printf "%9d  %10d\n", NR - 1, $1 }' <<< "$counts"
+        echo
+        echo "Final iteration by type and layer:"
+        # The table follows its DRT-0199 line and ends at the next log line
+        # ([INFO ...]) or a blank one. A clean iteration may print none.
+        awk '/DRT-0199\]/ { table = ""; grab = 0; next }
+             /^Viol\/Layer/ { table = $0 "\n"; grab = 1; next }
+             grab && (/^\[/ || /^[[:space:]]*$/) { grab = 0 }
+             grab { table = table $0 "\n" }
+             END { printf "%s", (table == "" ? "(no table logged)\n" : table) }' "$log"
+    } > "$out"
+    log_status drt-violations "final=${final}" "iterations=${n} trajectory=${trajectory}"
+    echo "Detailed-route violations (router's count): final ${final} after ${n} iteration(s), trajectory ${trajectory}"
+    cat "$out"
+}
+
 past_gate=0
 overall_rc=0
 best_effort_broken=0
@@ -367,6 +412,7 @@ for stage in "${STAGES[@]}"; do
 
     [ "$stage" = "dpl" ] && report_placement_state
     [ "$stage" = "grt" ] && report_routes_outside_core
+    [ "$stage" = "drt" ] && report_drt_outcome
 
     if [ "$rc" -ne 0 ]; then
         echo "::error::stage '${stage}' failed after ${attempt} attempt(s), exit ${rc}"
