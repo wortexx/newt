@@ -1,0 +1,70 @@
+# Spec Delta
+
+## MODIFIED Requirements
+
+### Requirement: P&R lane runs weekly, on demand, and on tags — never per-PR
+
+The system SHALL provide a P&R CI lane, in a workflow separate from the fast and synth lanes, that runs on: a weekly schedule against `main`, a manual `workflow_dispatch`, and pushed tags/releases. It SHALL NOT run on pushes or pull requests (labeled or otherwise), so no fork-sourced code can ever reach it via a PR event.
+
+The manual dispatch SHALL accept these optional inputs, all empty by default:
+
+- a previous run whose checkpoints to restore before the flow starts;
+- a list of checkpoints to leave out of that restore, so their stages run again;
+- a stage after which the run stops;
+- the global-placement starting density, the global-placement resize threshold, and the die scale;
+- the legalizer used by detailed placement and CTS, and its search window;
+- whether to skip post-route timing repair.
+- detailed routing's iteration budget;
+- whether to run antenna repair.
+
+An empty input SHALL keep the flow's default for that setting. Post-route timing repair SHALL be skipped by default and SHALL run only when the dispatch explicitly asks for it. Antenna repair SHALL likewise be skipped by default and SHALL run only when the dispatch explicitly asks for it. An empty iteration budget SHALL keep the lane's default budget. With all inputs empty, a dispatched run SHALL behave exactly like a scheduled run. These inputs SHALL NOT change the flow's success gate: a run that stops before the gate stage is reached SHALL still exit non-zero, and post-route repair, antenna repair and detailed routing SHALL stay best-effort whether they are skipped, complete, fail or time out. Selecting a legalizer SHALL NOT bypass the flow's placement legality checks.
+
+#### Scenario: Weekly run
+
+- **WHEN** the weekly scheduled trigger fires
+- **THEN** the P&R lane runs once against the current `main`
+
+#### Scenario: Tag push
+
+- **WHEN** a tag is pushed
+- **THEN** the P&R lane runs against that tag
+
+#### Scenario: Ordinary PR or push
+
+- **WHEN** a pull request is opened/labeled or a branch is pushed
+- **THEN** the P&R lane does not run
+
+#### Scenario: Manual dispatch with no inputs
+
+- **WHEN** a user dispatches the P&R lane without setting any input
+- **THEN** the lane runs the full flow from synthesis through detailed route exactly as a scheduled run would, with the default legalizer and with post-route timing repair skipped
+
+#### Scenario: Manual dispatch re-runs one slice of the flow
+
+- **WHEN** a user dispatches the P&R lane naming a previous run to resume from, a checkpoint to exclude, and a stage to stop after
+- **THEN** the lane restores that run's checkpoints (refusing if they were built from a different netlist than the dispatched ref produces), skips every stage whose checkpoint was restored, runs the excluded stage again, stops once the named stage completes, publishes reports and checkpoints as usual, and exits 0 if and only if every stage through the gate was completed or restored
+
+#### Scenario: Manual dispatch selects the legalizer
+
+- **WHEN** a user dispatches the P&R lane naming the non-default legalizer
+- **THEN** detailed placement and CTS legalize with it, the placement report names it, and an illegal placement still fails the stage it occurs in
+
+#### Scenario: Manual dispatch widens the legalizer's search window
+
+- **WHEN** a user dispatches the P&R lane with a legalizer search window
+- **THEN** every legalization uses that window, the stage logs record the window used, and an illegal placement still fails the stage it occurs in
+
+#### Scenario: Manual dispatch runs post-route repair
+
+- **WHEN** a user dispatches the P&R lane asking for post-route timing repair not to be skipped
+- **THEN** the post-route repair stage runs its bounded repair instead of re-saving the global-route checkpoint, its reports are published like any other stage's, and its failure or timeout is recorded in the run's status without changing the run's exit status
+
+#### Scenario: Manual dispatch sets the detailed-routing budget
+
+- **WHEN** a user dispatches the P&R lane with a detailed-routing iteration budget
+- **THEN** detailed routing stops after at most that many iterations, the stage's status records the budget used, and the run's exit status still follows the global-route gate
+
+#### Scenario: Manual dispatch runs antenna repair
+
+- **WHEN** a user dispatches the P&R lane asking for antenna repair
+- **THEN** the detailed-route stage runs antenna repair before routing, its status records that repair ran, and a failure or timeout in it does not change the run's exit status

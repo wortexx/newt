@@ -31,6 +31,9 @@
 # signoff concern, not a PPA one, so CI skips it; a cheaper middle ground
 # to try later is `repair_antennas -jumper_only` (layer-hopping jumpers,
 # no cell insertion/legalization/reroute).
+#
+# The P&R lane keeps the skip by default; its antenna_repair dispatch
+# input runs the repair on demand (drc-clean-pnr design D1, D5).
 
 source [file join [file dirname [info script]] common.tcl]
 
@@ -86,28 +89,18 @@ set err [catch {
     report_design_area
 } errMsg]
 
-# Best-effort stage-detail line for the summary: pull the final DRC
-# violation count out of the route-DRC report if it exists, regardless of
-# whether the stage above raised a Tcl error.
-set drc_detail ""
-set drc_report ${report_dir}/${proj_name}_route_drc.rpt
-if { [file exists $drc_report] } {
-    set drc_count 0
-    set fh [open $drc_report r]
-    while { [gets $fh line] >= 0 } {
-        if { [string match "*violation*" $line] } {
-            incr drc_count
-        }
-    }
-    close $fh
-    set drc_detail "drc_report_lines=$drc_count"
-}
+# The violation counts are not read here: run_pnr.sh's report_drt_outcome
+# takes the router's own totals (DRT-0199) from this stage's log once it
+# ends (drc-clean-pnr design D2). The route-DRC report above stays for its
+# marker locations, but it is capped at 10,000 markers per violation type,
+# so counting its entries understated run 38473439796 by 34x (21,110
+# against the router's 715,558).
 
 if { $err } {
-    pnr_status drt failed "$errMsg $drc_detail"
+    pnr_status drt failed "$errMsg"
     utl::report "ERROR in drt stage (best-effort, non-fatal to the flow): $errMsg"
     exit 1
 } else {
-    pnr_status drt ok "droute_end_iter=$droute_end_iter antenna=[expr {$skip_antenna ? "skipped" : "repaired"}] $drc_detail"
+    pnr_status drt ok "droute_end_iter=$droute_end_iter antenna=[expr {$skip_antenna ? "skipped" : "repaired"}]"
     exit 0
 }
