@@ -70,6 +70,11 @@
 #                           or "x y". Empty or unset: pnr_dpl_max_displacement's
 #                           default in common.tcl (1000 1000); "openroad"
 #                           keeps OpenROAD's own window.
+#   PNR_GRT_METAL2_ADJUST  Passed through to every routing stage (grt,
+#                           grt_repair, drt): the share of Metal2's capacity
+#                           global routing holds back, in [0, 1). Empty or
+#                           unset: pnr_grt_metal2_adjust's default in
+#                           common.tcl (0.30); Metal3 stays at 0.30.
 #   PNR_BRIDGE_GUIDES      Passed through to drt.tcl: "0" skips copying
 #                           wrong-direction route guides onto the adjacent
 #                           preferred-direction layer before detailed routing

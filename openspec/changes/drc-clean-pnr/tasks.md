@@ -27,16 +27,16 @@ Tags: **[edit]** plain editing, cheap to verify. **[eda]** needs the EDA tools l
 
 ## 4. Phase 1: probe sweep (design D3, D4)
 
-- [ ] 4.1 **[long-run]** *(ask the user first)* Dispatch P2: `die_scale=1.25`, `gpl_density=0.50`, `stop_after=drt`, `drt_end_iter=1`, other inputs empty. Save its `pnr-reports` under `target/ihp13/openroad/out/ci-<run>/`. Verify:
+- [x] 4.1 **[long-run]** *(ask the user first)* Dispatch P2: `die_scale=1.25`, `gpl_density=0.50`, `stop_after=drt`, `drt_end_iter=1`, other inputs empty. Save its `pnr-reports` under `target/ihp13/openroad/out/ci-<run>/`. Verify:
   - every gated stage is `ok`;
   - `gpl` converged (placement report);
   - legal after `dpl` and `cts`;
   - record iteration-0/1 violations by type and layer, `grt` demand and overflow, utilization, WNS, and the wire per layer.
 
   If floorplan or PDN fails at 1.25, stop and report.
-- [ ] 4.2 **[edit]** Compare P2 with probe B (iteration 0: 1,928,860; iteration 1: 1,314,060) against D3's thresholds. Record the result, and the choice of next probe, in `docs/infra-plan.md` Phase 11. If P2 passes, the next probe is P1. Otherwise it is P3.
-- [ ] 4.3 **[long-run]** *(ask the user first)* Dispatch the probe 4.2 chose (P1: `die_scale=1.10`, `gpl_density=0.60`; or P3: `die_scale=1.40`, `gpl_density=0.45`) with the same other inputs. Verify the same points as 4.1.
-- [ ] 4.4 **[edit]** Pick the best setting, or none, against D3's thresholds. Record it with the probe table in Phase 11, and ask the user to confirm the pick before Phase 2. If no probe reaches the go threshold, skip group 5 and go to group 6.
+- [x] 4.2 **[edit]** Compare P2 with probe B (iteration 0: 1,928,860; iteration 1: 1,314,060) against D3's thresholds. Record the result, and the choice of next probe, in `docs/infra-plan.md` Phase 11. If P2 passes, the next probe is P1. Otherwise it is P3.
+- [ ] 4.3 ~~**[long-run]** *(ask the user first)* Dispatch the probe 4.2 chose (P1: `die_scale=1.10`, `gpl_density=0.60`; or P3: `die_scale=1.40`, `gpl_density=0.45`) with the same other inputs. Verify the same points as 4.1.~~ **Skipped 2026-10-17, user decision:** P2 missed the go threshold, but Metal2 holds 84 % of what is left, which more spreading (P3) is unlikely to fix. See Phase 11.
+- [x] 4.4 **[edit]** Pick the best setting, or none, against D3's thresholds. Record it with the probe table in Phase 11, and ask the user to confirm the pick before Phase 2. If no probe reaches the go threshold, skip group 5 and go to group 6. **Done 2026-10-17:** none reaches the go threshold; P2 (1.25, 0.50) is the best measured. Group 5 skipped.
 
 ## 5. Phase 2: route to convergence (design D5)
 
@@ -46,7 +46,18 @@ Tags: **[edit]** plain editing, cheap to verify. **[eda]** needs the EDA tools l
 
 ## 6. Phase 3: decision (design D6)
 
-- [ ] 6.1 **[edit]** If routing has not converged, write the probe evidence and the three candidate levers into Phase 11, then ask the user which to pursue. Add the chosen lever's tasks here, or open a follow-up change, before any further dispatch. If routing converged, mark this task done with "not needed".
+- [x] 6.1 **[edit]** If routing has not converged, write the probe evidence and the three candidate levers into Phase 11, then ask the user which to pursue. Add the chosen lever's tasks here, or open a follow-up change, before any further dispatch. If routing converged, mark this task done with "not needed". **Done 2026-10-17:** the user chose holding more of Metal2 back from global routing (design D7); tasks 6.2–6.6.
+- [x] 6.2 **[edit]** In `common.tcl`, add `pnr_grt_metal2_adjust` (`PNR_GRT_METAL2_ADJUST`, default 0.30, validated as a number in [0, 1)). `pnr_apply_routing_layers` applies it to Metal2 alone, keeps Metal3 at 0.30, and logs both values. Add the `grt_metal2_adjust` input to `pnr.yml` the D1 way, document it in `run_pnr.sh`'s header and `docs/pnr-pipeline.md`. Verify:
+  - actionlint is clean;
+  - with the input empty, the `pnr` step's rendered command is byte-identical to today's apart from one empty `PNR_GRT_METAL2_ADJUST=` assignment;
+  - the Tcl is checked against the OpenROAD build in the `newt-eda` image (`set_global_routing_layer_adjustment` on a single layer).
+- [x] 6.3 **[edit]** Open the PR with 6.2 and the updated change artifacts. After the user merges, the probe dispatches on `main`.
+- [ ] 6.4 **[long-run]** *(ask the user first)* Dispatch P2-M: `resume_from_run=38931700180`, `resume_exclude=grt grt_repaired drt`, `grt_metal2_adjust=0.60`, `stop_after=drt`, `drt_end_iter=1`, other inputs empty. Save its `pnr-reports` under `target/ihp13/openroad/out/ci-<run>/`. Verify:
+  - the restore reused P2's placement: `cts` and earlier are skipped on resume;
+  - `grt.tcl` logged Metal2 0.60;
+  - record `grt` usage per layer and overflow, and violations after iterations 0 and 1 by type and layer, against P2.
+- [ ] 6.5 **[edit]** Compare with P2 against D3's thresholds and record it in Phase 11. If it reaches the go threshold, ask the user to confirm and continue at group 5 with P2's die and density plus this adjustment (5.1's dispatch gains `grt_metal2_adjust`). Otherwise pick D7's second value and ask before dispatching it, or report that cell padding is next.
+- [ ] 6.6 **[long-run]** *(only if 6.5 calls for a second value; ask the user first)* Dispatch it the same way as 6.4 and record it the same way as 6.5.
 
 ## 7. Close-out
 

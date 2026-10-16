@@ -32,10 +32,10 @@ independent of this workflow — the backstop for a `stop` job that never ran.
 
 ### Manual dispatch inputs
 
-`workflow_dispatch` accepts eleven optional inputs, all empty by default
+`workflow_dispatch` accepts twelve optional inputs, all empty by default
 (`resume_from_run`, `resume_exclude`, `stop_after`, `gpl_density`,
 `gpl_keep_resize`, `die_scale`, `dpl_legalizer`, `dpl_max_displacement`,
-`skip_grt_repair`, `drt_end_iter`, `antenna_repair` — matching `pnr.yml`'s
+`skip_grt_repair`, `drt_end_iter`, `antenna_repair`, `grt_metal2_adjust` — matching `pnr.yml`'s
 `inputs:` keys exactly). With all of them empty, a dispatched run
 behaves exactly like a scheduled run:
 
@@ -110,6 +110,16 @@ behaves exactly like a scheduled run:
   routing demand (run 34389061373, see `drt.tcl`); `1` runs it. Either way
   `drt` stays best-effort, and its `pnr_status.log` line says
   `antenna=repaired` or `antenna=skipped`.
+
+- `grt_metal2_adjust` — the share of Metal2's capacity that global routing
+  holds back (`set_global_routing_layer_adjustment Metal2`), in [0, 1).
+  Feeds `PNR_GRT_METAL2_ADJUST`. Empty means `pnr_grt_metal2_adjust`'s
+  default in `common.tcl`, `0.30`, chip.tcl's value; Metal3 stays at 0.30.
+  A larger value moves global routes off Metal2, which held 84 % of the
+  detailed-routing violations on probe P2 (change `drc-clean-pnr`, design
+  D7). Every routing stage logs `Global routing layer adjustment:` with the
+  values used. It invalidates the `grt` checkpoint and everything after it,
+  so with `resume_from_run` also exclude `grt grt_repaired drt`.
 
   The `gpl_*` inputs let a placement experiment run without a commit.
   Combined with `resume_from_run`, exclude `gpl` and every later checkpoint,

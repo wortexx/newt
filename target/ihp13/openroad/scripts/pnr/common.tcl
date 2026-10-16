@@ -141,6 +141,24 @@ if { $pnr_bridge_guides ni {0 1} } {
     error "PNR_BRIDGE_GUIDES='$pnr_bridge_guides' is not 0 or 1"
 }
 
+# Share of Metal2's capacity that global routing holds back
+# (set_global_routing_layer_adjustment in pnr_apply_routing_layers below).
+# chip.tcl derated Metal2 and Metal3 together by 0.30. On probe P2 (run
+# 38931700180) grt then planned Metal2 at 61 % while Metal4/Metal5 sat at
+# 39 % / 29 %, and detailed routing left 84 % of its violations on Metal2,
+# where pin access already takes many of the tracks. A larger value moves
+# global routes up to the layers with room. Metal3 keeps 0.30.
+# PNR_GRT_METAL2_ADJUST overrides it (openspec/changes/drc-clean-pnr design D7).
+if { [info exists ::env(PNR_GRT_METAL2_ADJUST)] && [string trim $::env(PNR_GRT_METAL2_ADJUST)] ne "" } {
+    set pnr_grt_metal2_adjust [string trim $::env(PNR_GRT_METAL2_ADJUST)]
+} else {
+    set pnr_grt_metal2_adjust 0.30
+}
+if { ![string is double -strict $pnr_grt_metal2_adjust] ||
+     $pnr_grt_metal2_adjust < 0 || $pnr_grt_metal2_adjust >= 1 } {
+    error "PNR_GRT_METAL2_ADJUST='$pnr_grt_metal2_adjust' is not an adjustment: use a number in \[0, 1)"
+}
+
 # Widest gap between a macro and the core edge that the floorplan blocks for
 # placement, in microns (block_macro_core_margins in floorplan_util.tcl). The
 # floorplan keeps macros floorPaddingX/Y off the core edge but never cut the
@@ -281,15 +299,19 @@ proc pnr_set_dont_use {} {
 # -----------------------------------------------------------------------
 # pnr_apply_routing_layers: the GRT layer config from chip.tcl's Global
 # Route section (reduce M2/M3/TopMetal1 routing resources, restrict signal
-# and clock routing to Metal2-TopMetal1). Must be re-applied after every
+# and clock routing to Metal2-TopMetal1), with Metal2's reduction from
+# pnr_grt_metal2_adjust (default 0.30, chip.tcl's value). Must be re-applied after every
 # load_checkpoint that precedes a global_route/detailed_route call in the
 # same process, or routing fails with DRT-0155 (guides on TopMetal2) -
 # docs/infra-plan.md Appendix B item 4, design D1. Cheap and idempotent;
 # every stage from grt.tcl onward calls it before routing.
 # -----------------------------------------------------------------------
 proc pnr_apply_routing_layers {} {
-    set_global_routing_layer_adjustment Metal2-Metal3 0.30
+    global pnr_grt_metal2_adjust
+    set_global_routing_layer_adjustment Metal2 $pnr_grt_metal2_adjust
+    set_global_routing_layer_adjustment Metal3 0.30
     set_global_routing_layer_adjustment TopMetal1 0.20
+    utl::report "Global routing layer adjustment: Metal2 $pnr_grt_metal2_adjust, Metal3 0.30, TopMetal1 0.20"
     set_routing_layers -signal Metal2-TopMetal1 -clock Metal2-TopMetal1
 }
 
