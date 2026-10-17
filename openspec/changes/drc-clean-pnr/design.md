@@ -99,6 +99,20 @@ If the best probe does not converge, the next levers are:
 
 The user chooses with the probe data in hand. Each needs a small flow or RTL edit and its own measured run, scoped then.
 
+### D7. First Phase 3 lever: hold more of Metal2 back from global routing (decided 2026-10-17)
+
+P2 (run `38931700180`, die scale 1.25, density 0.50) missed D3's go threshold at 989,906 violations after iteration 0. Iteration 1 left 442,669, and 84 % of them are on Metal2. Metal3–Metal5 fell 82–91 % against probe B, Metal2 only 51 %. P3 was skipped by user decision. More spreading mostly helps the upper layers, and they are already nearly clean.
+
+Global routing sees things differently. `pnr_apply_routing_layers` derates Metal2 and Metal3 together by 0.30. With that, `grt` plans Metal2 at 61 % of its derated capacity, while Metal4 and Metal5 sit at 39 % and 29 %, and it reports only 354 overflowing edges. Detailed routing cannot deliver the Metal2 plan, because pin access to Metal1 pins already takes much of Metal2's tracks. A larger Metal2-only derate makes `grt` move wires up to the layers that have room.
+
+- `PNR_GRT_METAL2_ADJUST` sets Metal2's adjustment on its own. Empty keeps 0.30, so the default flow is unchanged. Metal3 keeps 0.30.
+- The P&R lane gains a `grt_metal2_adjust` input, empty by default, as in D1.
+- `grt.tcl` logs the adjustments it applies.
+- Probe P2-M: resume P2's checkpoints, excluding `grt grt_repaired drt`, so placement is identical and only routing changes. Run at 0.60, with `stop_after=drt` and `drt_end_iter=1`. At 0.60, `grt`'s Metal2 resource drops to about 5.3 M against P2's 5.6 M demand, so at least that excess has to move up. D3's thresholds apply unchanged.
+- Adaptive second value. If P2-M improves on P2 but misses the go threshold, try 0.75. If `grt` overflow explodes, or detailed routing gets worse, try 0.45. Cell padding (D6) is the next lever if neither reaches the go threshold.
+
+*Alternative considered:* cell padding first. It targets pin access directly, but it is a larger flow edit and needs a full run from `gpl`. The derate is a one-line edit tested from a checkpoint in about 3 h.
+
 ## Risks / Trade-offs
 
 - **[Die scales above 1.10 are untested.]** Macro placement and the power grid scale with the core in `floorplan_ring_*way.tcl`, but nothing has run at 1.25 or 1.40. → A floorplan or PDN failure shows within minutes of the run. Fix it, or fall back to the next scale.
