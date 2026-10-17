@@ -75,6 +75,11 @@
 #                           global routing holds back, in [0, 1). Empty or
 #                           unset: pnr_grt_metal2_adjust's default in
 #                           common.tcl (0.30); Metal3 stays at 0.30.
+#   PNR_CELL_PAD_SITES     Passed through to gpl and every legalization
+#                           (dpl, cts, grt_repair): free sites kept on each
+#                           side of every standard cell. Empty or unset:
+#                           pnr_cell_pad_sites's default in common.tcl (0,
+#                           no padding). final clears it before fillers.
 #   PNR_BRIDGE_GUIDES      Passed through to drt.tcl: "0" skips copying
 #                           wrong-direction route guides onto the adjacent
 #                           preferred-direction layer before detailed routing

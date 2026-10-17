@@ -18,6 +18,9 @@ set err [catch {
     pnr_set_pad_dont_touch
     pnr_set_dont_use
 
+    # Fillers abut the cells, so legalization's cell padding
+    # (pnr_cell_pad_sites, drc-clean-pnr design D8) must not apply here.
+    set_placement_padding -global -left 0 -right 0
     utl::report "Filler placement"
     filler_placement sg13g2_fill*
     # Same non-fatal treatment as cts.tcl - see its comment for why

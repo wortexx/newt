@@ -25,6 +25,7 @@ Spreading the placement is the first lever. Two of the flow's existing inputs, g
 - **Full route of the best probe (Phase 2).** Detailed routing to convergence, with antenna repair on.
 - **Decision point (Phase 3).** If the best setting does not converge, choose among further levers with the user: cell padding, more signal capacity on TopMetal1/TopMetal2, or a lower `kperm` rounds-per-cycle. Each is scoped then, in this change or a follow-up.
 - **First Phase 3 lever (added 2026-10-17, design D7).** P2 left Metal2 with 84 % of the violations. A `grt_metal2_adjust` input lets global routing hold back more of Metal2, so wires move up to Metal4/Metal5. It is tested from P2's checkpoints.
+- **Second Phase 3 lever (added 2026-10-17, design D8).** Holding back Metal2 moved its violations to Metal4/Metal5. A `cell_pad_sites` input pads every standard cell from global placement through legalization, to free Metal2 tracks next to the pins.
 - **Out of scope.** Re-running the reference and both-arms thesis comparison on the new settings is a follow-up change. So are timing closure and signoff checks (KLayout DRC, LVS).
 
 Flow stages touched: **backend** (detailed-route reporting) and **CI** (two new `pnr.yml` dispatch inputs). Several long P&R runs on the self-hosted VM, each dispatched only with the user's approval. No RTL, sim, synth or sw change. The default flow settings change only if a probe proves a better default, and then only by the user's decision.

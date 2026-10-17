@@ -32,10 +32,10 @@ independent of this workflow — the backstop for a `stop` job that never ran.
 
 ### Manual dispatch inputs
 
-`workflow_dispatch` accepts twelve optional inputs, all empty by default
+`workflow_dispatch` accepts thirteen optional inputs, all empty by default
 (`resume_from_run`, `resume_exclude`, `stop_after`, `gpl_density`,
 `gpl_keep_resize`, `die_scale`, `dpl_legalizer`, `dpl_max_displacement`,
-`skip_grt_repair`, `drt_end_iter`, `antenna_repair`, `grt_metal2_adjust` — matching `pnr.yml`'s
+`skip_grt_repair`, `drt_end_iter`, `antenna_repair`, `grt_metal2_adjust`, `cell_pad_sites` — matching `pnr.yml`'s
 `inputs:` keys exactly). With all of them empty, a dispatched run
 behaves exactly like a scheduled run:
 
@@ -120,6 +120,17 @@ behaves exactly like a scheduled run:
   D7). Every routing stage logs `Global routing layer adjustment:` with the
   values used. It invalidates the `grt` checkpoint and everything after it,
   so with `resume_from_run` also exclude `grt grt_repaired drt`.
+
+- `cell_pad_sites` — free sites kept on each side of every standard cell.
+  Feeds `PNR_CELL_PAD_SITES`. Empty means `pnr_cell_pad_sites`'s default in
+  `common.tcl`, `0`, no padding. Both `gpl` passes plan for it
+  (`-pad_left/-pad_right`), and every `detailed_placement` call (`dpl`,
+  `cts`, `grt_repair`) keeps it (`set_placement_padding -global`), so the
+  gated legality checks after `dpl` and `cts` also fail on padding
+  violations. `final` clears it before filler placement. Each stage logs
+  `Cell padding: <n> sites`. Meant to free Metal2 tracks for pin access
+  (change `drc-clean-pnr`, design D8). One site adds about 22 % to the cell
+  area. It invalidates the `gpl2` checkpoint and everything after it.
 
   The `gpl_*` inputs let a placement experiment run without a commit.
   Combined with `resume_from_run`, exclude `gpl` and every later checkpoint,
