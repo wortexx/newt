@@ -16,9 +16,10 @@ The manual dispatch SHALL accept these optional inputs, all empty by default:
 - whether to skip post-route timing repair.
 - detailed routing's iteration budget;
 - whether to run antenna repair;
-- the share of Metal2's capacity that global routing holds back.
+- the share of Metal2's capacity that global routing holds back;
+- the placement padding, in sites, on each side of every standard cell.
 
-An empty input SHALL keep the flow's default for that setting. Post-route timing repair SHALL be skipped by default and SHALL run only when the dispatch explicitly asks for it. Antenna repair SHALL likewise be skipped by default and SHALL run only when the dispatch explicitly asks for it. An empty iteration budget SHALL keep the lane's default budget. An empty Metal2 hold-back SHALL keep the flow's default. With all inputs empty, a dispatched run SHALL behave exactly like a scheduled run. These inputs SHALL NOT change the flow's success gate: a run that stops before the gate stage is reached SHALL still exit non-zero, and post-route repair, antenna repair and detailed routing SHALL stay best-effort whether they are skipped, complete, fail or time out. Selecting a legalizer SHALL NOT bypass the flow's placement legality checks.
+An empty input SHALL keep the flow's default for that setting. Post-route timing repair SHALL be skipped by default and SHALL run only when the dispatch explicitly asks for it. Antenna repair SHALL likewise be skipped by default and SHALL run only when the dispatch explicitly asks for it. An empty iteration budget SHALL keep the lane's default budget. An empty Metal2 hold-back SHALL keep the flow's default. An empty cell padding SHALL keep the flow's default of no padding. With all inputs empty, a dispatched run SHALL behave exactly like a scheduled run. These inputs SHALL NOT change the flow's success gate: a run that stops before the gate stage is reached SHALL still exit non-zero, and post-route repair, antenna repair and detailed routing SHALL stay best-effort whether they are skipped, complete, fail or time out. Selecting a legalizer SHALL NOT bypass the flow's placement legality checks.
 
 #### Scenario: Weekly run
 
@@ -74,3 +75,8 @@ An empty input SHALL keep the flow's default for that setting. Post-route timing
 
 - **WHEN** a user dispatches the P&R lane with a Metal2 hold-back for global routing
 - **THEN** global routing and every later routing stage hold back that share of Metal2's capacity, the stage logs record the value used, Metal3 keeps the flow's default, and the run's exit status still follows the global-route gate
+
+#### Scenario: Manual dispatch pads standard cells
+
+- **WHEN** a user dispatches the P&R lane with a cell padding of N sites
+- **THEN** global placement and every legalization keep N free sites on each side of every standard cell, the stage logs record N, the gated legality checks after `dpl` and `cts` fail the stage on any padding violation, filler placement is not padded, and the run's exit status still follows the global-route gate

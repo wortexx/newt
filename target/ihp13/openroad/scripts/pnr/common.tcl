@@ -141,6 +141,26 @@ if { $pnr_bridge_guides ni {0 1} } {
     error "PNR_BRIDGE_GUIDES='$pnr_bridge_guides' is not 0 or 1"
 }
 
+# Free sites kept on each side of every standard cell, from global placement
+# through legalization (openspec/changes/drc-clean-pnr design D8). On probe
+# P2 (run 38931700180) 84 % of detailed routing's violations were on Metal2,
+# and holding Metal2 back from global routing only moved them to
+# Metal4/Metal5 (run 39006065323): pin access needs free Metal2 tracks next
+# to the pins. gpl.tcl passes it to both global_placement passes,
+# pnr_detailed_placement sets it before every legalization, so the gated
+# check_placement after it checks padding too, and final.tcl clears it
+# before filler placement. Each stage is its own process, so it is
+# re-applied there rather than trusted to the checkpoint. Default 0, no
+# padding; PNR_CELL_PAD_SITES overrides it.
+if { [info exists ::env(PNR_CELL_PAD_SITES)] && [string trim $::env(PNR_CELL_PAD_SITES)] ne "" } {
+    set pnr_cell_pad_sites [string trim $::env(PNR_CELL_PAD_SITES)]
+} else {
+    set pnr_cell_pad_sites 0
+}
+if { ![string is integer -strict $pnr_cell_pad_sites] || $pnr_cell_pad_sites < 0 } {
+    error "PNR_CELL_PAD_SITES='$pnr_cell_pad_sites' is not a site count: use a non-negative integer"
+}
+
 # Share of Metal2's capacity that global routing holds back
 # (set_global_routing_layer_adjustment in pnr_apply_routing_layers below).
 # chip.tcl derated Metal2 and Metal3 together by 0.30. On probe P2 (run
@@ -352,7 +372,11 @@ proc pnr_status {stage status {detail ""}} {
 # run_pnr.sh's placement report reads that line from pnr_dpl.log.
 # -----------------------------------------------------------------------
 proc pnr_detailed_placement {args} {
-    global pnr_dpl_legalizer pnr_dpl_max_displacement
+    global pnr_dpl_legalizer pnr_dpl_max_displacement pnr_cell_pad_sites
+    utl::report "Cell padding: $pnr_cell_pad_sites sites"
+    if { $pnr_cell_pad_sites > 0 } {
+        set_placement_padding -global -left $pnr_cell_pad_sites -right $pnr_cell_pad_sites
+    }
     if { $pnr_dpl_max_displacement ne {} } {
         utl::report "Legalizer: $pnr_dpl_legalizer, max displacement $pnr_dpl_max_displacement um"
         lappend args -max_displacement $pnr_dpl_max_displacement
@@ -363,6 +387,20 @@ proc pnr_detailed_placement {args} {
         lappend args -use_diamond_legalizer
     }
     detailed_placement {*}$args
+}
+
+# -----------------------------------------------------------------------
+# pnr_gpl_pad_args: global_placement's padding arguments for
+# pnr_cell_pad_sites (drc-clean-pnr design D8), so global placement plans for
+# the padded widths that legalization will keep. Empty at 0, so the default
+# flow passes global_placement exactly the arguments it always had.
+# -----------------------------------------------------------------------
+proc pnr_gpl_pad_args {} {
+    global pnr_cell_pad_sites
+    if { $pnr_cell_pad_sites == 0 } {
+        return {}
+    }
+    return [list -pad_left $pnr_cell_pad_sites -pad_right $pnr_cell_pad_sites]
 }
 
 # -----------------------------------------------------------------------

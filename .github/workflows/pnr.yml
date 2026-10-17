@@ -74,6 +74,10 @@ on:
         description: 'Share of Metal2 capacity global routing holds back, 0 to <1 (empty = the default in scripts/pnr/common.tcl, 0.30; Metal3 stays 0.30)'
         required: false
         default: ''
+      cell_pad_sites:
+        description: 'Free sites kept on each side of every standard cell, gpl through legalization (empty = the default in scripts/pnr/common.tcl, 0 = no padding)'
+        required: false
+        default: ''
   push:
     tags: ['**']
 
@@ -648,7 +652,12 @@ jobs:
         # default (common.tcl's 0.30, chip.tcl's value). Applied by every stage
         # that routes (grt, grt_repair, drt), so with resume_from_run exclude
         # grt and every later checkpoint (drc-clean-pnr D7).
-        run: PNR_GPL_DENSITY=${{ github.event.inputs.gpl_density || '' }} PNR_GPL_KEEP_RESIZE=${{ github.event.inputs.gpl_keep_resize || '' }} PNR_DIE_SCALE=${{ github.event.inputs.die_scale || '' }} PNR_DPL_LEGALIZER=${{ github.event.inputs.dpl_legalizer || '' }} PNR_DPL_MAX_DISPLACEMENT="${{ github.event.inputs.dpl_max_displacement || '' }}" PNR_TIMEOUT_GRT=57600 PNR_TIMEOUT_GRT_REPAIR=57600 PNR_SKIP_GRT_REPAIR=${{ github.event.inputs.skip_grt_repair || '1' }} PNR_SKIP_ANTENNA_REPAIR=${{ github.event.inputs.antenna_repair != '1' && '1' || '0' }} PNR_DRT_END_ITER=${{ github.event.inputs.drt_end_iter || '5' }} PNR_TIMEOUT_DRT=86400 PNR_STOP_AFTER=${{ github.event.inputs.stop_after || '' }} PNR_GRT_METAL2_ADJUST=${{ github.event.inputs.grt_metal2_adjust || '' }} make -C target/ihp13/openroad -f openroad.mk run-pnr PROJ_NAME=basilisk
+        #
+        # PNR_CELL_PAD_SITES: the cell_pad_sites dispatch input, empty by
+        # default (common.tcl's 0, no padding). Applied from gpl on, so with
+        # resume_from_run exclude gpl2 and every later checkpoint
+        # (drc-clean-pnr D8). dpl's and cts's gated legality checks cover it.
+        run: PNR_GPL_DENSITY=${{ github.event.inputs.gpl_density || '' }} PNR_GPL_KEEP_RESIZE=${{ github.event.inputs.gpl_keep_resize || '' }} PNR_DIE_SCALE=${{ github.event.inputs.die_scale || '' }} PNR_DPL_LEGALIZER=${{ github.event.inputs.dpl_legalizer || '' }} PNR_DPL_MAX_DISPLACEMENT="${{ github.event.inputs.dpl_max_displacement || '' }}" PNR_TIMEOUT_GRT=57600 PNR_TIMEOUT_GRT_REPAIR=57600 PNR_SKIP_GRT_REPAIR=${{ github.event.inputs.skip_grt_repair || '1' }} PNR_SKIP_ANTENNA_REPAIR=${{ github.event.inputs.antenna_repair != '1' && '1' || '0' }} PNR_DRT_END_ITER=${{ github.event.inputs.drt_end_iter || '5' }} PNR_TIMEOUT_DRT=86400 PNR_STOP_AFTER=${{ github.event.inputs.stop_after || '' }} PNR_GRT_METAL2_ADJUST=${{ github.event.inputs.grt_metal2_adjust || '' }} PNR_CELL_PAD_SITES=${{ github.event.inputs.cell_pad_sites || '' }} make -C target/ihp13/openroad -f openroad.mk run-pnr PROJ_NAME=basilisk
 
       # Move the checkpoints out of the shared workspace before this job
       # releases the runner. This is the whole fix for the collision that

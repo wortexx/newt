@@ -113,6 +113,21 @@ Global routing sees things differently. `pnr_apply_routing_layers` derates Metal
 
 *Alternative considered:* cell padding first. It targets pin access directly, but it is a larger flow edit and needs a full run from `gpl`. The derate is a one-line edit tested from a checkpoint in about 3 h.
 
+### D8. Second Phase 3 lever: cell padding (decided 2026-10-17)
+
+P2-M (run `39006065323`, Metal2 hold-back 0.60 on P2's placement) cut violations after iteration 1 by 25 %, to 332,259, but missed D3's go threshold at 932,994 after iteration 0. Metal2's violations halved, while Metal4 and Metal5 gained almost as many, and WNS fell from −5.88 to −11.02 ns. Moving wires up does not remove the Metal2 problem. D7's second value was skipped by user decision. The lever that targets Metal2 pin access is padding: keeping free sites between cells leaves Metal2 tracks next to the pins.
+
+- `PNR_CELL_PAD_SITES` (`pnr_cell_pad_sites` in `common.tcl`) is a non-negative integer. Default 0, so the default flow is unchanged.
+- `gpl.tcl` passes `-pad_left N -pad_right N` to both `global_placement` passes, so placement plans for the padded widths.
+- `pnr_detailed_placement` sets `set_placement_padding -global -left N -right N` before every legalization (`dpl`, `cts`, `grt_repair`). The gated `check_placement` that follows in the same process then checks padding too. Each stage runs in its own process, so padding is re-applied there rather than trusted to the checkpoint.
+- `final.tcl` clears the padding before `filler_placement`, so fillers can abut cells.
+- Every stage that applies padding logs `Cell padding: N sites`. The P&R lane gains a `cell_pad_sites` input, empty by default, as in D1.
+- Sizing: P2's 829,545 movable cells average 16.3 µm², about 9 sites (4.3 µm). One site on each side adds about 22 % cell area, taking P2's 43.5 % utilization to about 51 %. Two sites take it to about 58 %.
+- Probe P2-P: a full run with P2's die and density, `cell_pad_sites=1`, Metal2 hold-back at its default, `stop_after=drt`, `drt_end_iter=1`. Placement changes, so nothing is resumed. Comparing with P2 isolates padding. D3's thresholds apply unchanged.
+- Adaptive second value. If P2-P improves on P2 but misses the go threshold, try 2 sites. If `gpl` diverges or legalization fails, report it and decide with the user.
+
+*Risk:* the earlier padding attempt (run `38359120738`, SPI host only, applied at legalization only, on the 1.10 die) failed in `cts` with `DPL-0036`. This one is applied from `gpl` on, at 43.5 % utilization with the margins blocked. A failure shows up as a `dpl` or `cts` legality failure within hours, not as bad data.
+
 ## Risks / Trade-offs
 
 - **[Die scales above 1.10 are untested.]** Macro placement and the power grid scale with the core in `floorplan_ring_*way.tcl`, but nothing has run at 1.25 or 1.40. → A floorplan or PDN failure shows within minutes of the run. Fix it, or fall back to the next scale.

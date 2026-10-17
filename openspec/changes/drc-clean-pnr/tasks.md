@@ -52,12 +52,19 @@ Tags: **[edit]** plain editing, cheap to verify. **[eda]** needs the EDA tools l
   - with the input empty, the `pnr` step's rendered command is byte-identical to today's apart from one empty `PNR_GRT_METAL2_ADJUST=` assignment;
   - the Tcl is checked against the OpenROAD build in the `newt-eda` image (`set_global_routing_layer_adjustment` on a single layer).
 - [x] 6.3 **[edit]** Open the PR with 6.2 and the updated change artifacts. After the user merges, the probe dispatches on `main`.
-- [ ] 6.4 **[long-run]** *(ask the user first)* Dispatch P2-M: `resume_from_run=38931700180`, `resume_exclude=grt grt_repaired drt`, `grt_metal2_adjust=0.60`, `stop_after=drt`, `drt_end_iter=1`, other inputs empty. Save its `pnr-reports` under `target/ihp13/openroad/out/ci-<run>/`. Verify:
+- [x] 6.4 **[long-run]** *(ask the user first)* Dispatch P2-M: `resume_from_run=38931700180`, `resume_exclude=grt grt_repaired drt`, `grt_metal2_adjust=0.60`, `stop_after=drt`, `drt_end_iter=1`, other inputs empty. Save its `pnr-reports` under `target/ihp13/openroad/out/ci-<run>/`. Verify:
   - the restore reused P2's placement: `cts` and earlier are skipped on resume;
   - `grt.tcl` logged Metal2 0.60;
   - record `grt` usage per layer and overflow, and violations after iterations 0 and 1 by type and layer, against P2.
-- [ ] 6.5 **[edit]** Compare with P2 against D3's thresholds and record it in Phase 11. If it reaches the go threshold, ask the user to confirm and continue at group 5 with P2's die and density plus this adjustment (5.1's dispatch gains `grt_metal2_adjust`). Otherwise pick D7's second value and ask before dispatching it, or report that cell padding is next.
-- [ ] 6.6 **[long-run]** *(only if 6.5 calls for a second value; ask the user first)* Dispatch it the same way as 6.4 and record it the same way as 6.5.
+- [x] 6.5 **[edit]** Compare with P2 against D3's thresholds and record it in Phase 11. If it reaches the go threshold, ask the user to confirm and continue at group 5 with P2's die and density plus this adjustment (5.1's dispatch gains `grt_metal2_adjust`). Otherwise pick D7's second value and ask before dispatching it, or report that cell padding is next. **Done 2026-10-17:** P2-M missed the go threshold (932,994 after iteration 0); recorded in Phase 11. The user chose cell padding over D7's second value (design D8).
+- [ ] 6.6 ~~**[long-run]** *(only if 6.5 calls for a second value; ask the user first)* Dispatch it the same way as 6.4 and record it the same way as 6.5.~~ **Skipped 2026-10-17, user decision:** cell padding instead (6.7–6.10).
+- [x] 6.7 **[edit]** Add `pnr_cell_pad_sites` (`PNR_CELL_PAD_SITES`, default 0, validated as a non-negative integer) to `common.tcl`. Apply it as design D8 says: both `global_placement` passes in `gpl.tcl`, `pnr_detailed_placement`, and a reset before `filler_placement` in `final.tcl`. Log the value in each stage that applies it. Add the `cell_pad_sites` input to `pnr.yml` the D1 way. Document it in `run_pnr.sh`'s header and `docs/pnr-pipeline.md`. Verify:
+  - actionlint is clean;
+  - with the input empty, the `pnr` step's rendered command is byte-identical to today's apart from one empty `PNR_CELL_PAD_SITES=` assignment;
+  - in the `newt-eda` image, the padding commands are accepted and invalid values are rejected.
+- [x] 6.8 **[edit]** Open the PR with 6.7 and the updated change artifacts. After the user merges, the probe dispatches on `main`.
+- [ ] 6.9 **[long-run]** *(ask the user first)* Dispatch P2-P: `die_scale=1.25`, `gpl_density=0.50`, `cell_pad_sites=1`, `stop_after=drt`, `drt_end_iter=1`, other inputs empty. Save its `pnr-reports` under `target/ihp13/openroad/out/ci-<run>/`. Verify the same points as 4.1, plus `Cell padding: 1` in the `gpl`, `dpl` and `cts` logs, and record it against P2.
+- [ ] 6.10 **[edit]** Compare with P2 against D3's thresholds and record it in Phase 11. If it reaches the go threshold, ask the user to confirm, then continue at group 5 with P2's die and density plus this padding (5.1's dispatch gains `cell_pad_sites`). Otherwise, if it improved, ask before trying 2 sites the same way. If not, report the evidence and decide the next step with the user.
 
 ## 7. Close-out
 
