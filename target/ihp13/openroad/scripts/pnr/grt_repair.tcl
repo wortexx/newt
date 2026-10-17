@@ -63,7 +63,7 @@ set err [catch {
         # Run to get modified net by DPL
         global_route -start_incremental -verbose
         # Running DPL to fix overlapped instances
-        pnr_detailed_placement
+        pnr_legalize_with_pad_fallback
         # Route only the modified net by DPL
         global_route -end_incremental \
                     -congestion_report_file ${report_dir}/congestion_repaired_initial.rpt \
@@ -87,7 +87,7 @@ set err [catch {
 
         utl::report "GRT (2)..."
         # Running DPL to fix overlapped instances
-        pnr_detailed_placement
+        pnr_legalize_with_pad_fallback
         global_route -guide_file ${report_dir}/${proj_name}_route.guide \
             -congestion_report_file ${report_dir}/${proj_name}_congestion.rpt \
             -congestion_iterations 14 \
@@ -97,7 +97,7 @@ set err [catch {
         repair_timing -skip_pin_swap -hold -hold_margin 0.1 -verbose -repair_tns 20 -max_buffer_percent 15
         global_route -start_incremental -verbose
         # Running DPL to fix overlapped instances
-        pnr_detailed_placement
+        pnr_legalize_with_pad_fallback
         # Route only the modified net by DPL
         global_route -end_incremental \
                     -congestion_report_file ${report_dir}/congestion_repaired_initial.rpt \
@@ -116,6 +116,6 @@ if { $err } {
     utl::report "ERROR in grt_repair stage (best-effort, non-fatal to the flow): $errMsg"
     exit 1
 } else {
-    pnr_status grt_repair ok [expr {$skip_repair ? "skipped" : ""}]
+    pnr_status grt_repair ok [expr {$skip_repair ? "skipped" : ($pnr_cell_pad_fallbacks ? "cell_pad_fallbacks=$pnr_cell_pad_fallbacks" : "")}]
     exit 0
 }

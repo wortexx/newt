@@ -128,6 +128,16 @@ P2-M (run `39006065323`, Metal2 hold-back 0.60 on P2's placement) cut violations
 
 *Risk:* the earlier padding attempt (run `38359120738`, SPI host only, applied at legalization only, on the 1.10 die) failed in `cts` with `DPL-0036`. This one is applied from `gpl` on, at 43.5 % utilization with the margins blocked. A failure shows up as a `dpl` or `cts` legality failure within hours, not as bad data.
 
+**Amended 2026-10-17 after P2-P (run `39031099535`).** The risk came true one stage later than hoped. `gpl` and `dpl` legalized the padded placement and passed the padding-aware legality check at 43.6 % utilization. Then `cts`, after inserting its clock buffers and 623 long-wire buffers (46.4 %), could not legalize 25 of 983,276 cells (`DPL-0036`). All 25 are in CVA6: ITLB tag registers, clock buffers and repair buffers. By user decision, the stages that insert cells into a padded placement (`cts`, `grt_repair`) now legalize through `pnr_legalize_with_pad_fallback`:
+
+- It legalizes with padding first.
+- On `DPL-0036`, and only with padding on, it clears the padding and legalizes again. The few cells that could not fit padded then abut their neighbours. `DPL-0034` lists them in the log.
+- It logs `Cell padding fallback:` and counts fallbacks in the stage's status line (`cell_pad_fallbacks=N`).
+- Every other error is raised as before, and the gated `check_placement` still fails the stage on any overlap.
+- `dpl` keeps the plain call, so padding the initial legalization stays strict.
+
+The test resumes P2-P's `dpl` checkpoint, so placement through `dpl` is identical and padded.
+
 ## Risks / Trade-offs
 
 - **[Die scales above 1.10 are untested.]** Macro placement and the power grid scale with the core in `floorplan_ring_*way.tcl`, but nothing has run at 1.25 or 1.40. → A floorplan or PDN failure shows within minutes of the run. Fix it, or fall back to the next scale.
