@@ -79,4 +79,4 @@ An empty input SHALL keep the flow's default for that setting. Post-route timing
 #### Scenario: Manual dispatch pads standard cells
 
 - **WHEN** a user dispatches the P&R lane with a cell padding of N sites
-- **THEN** global placement and every legalization keep N free sites on each side of every standard cell, the stage logs record N, the gated legality checks after `dpl` and `cts` fail the stage on any padding violation, filler placement is not padded, and the run's exit status still follows the global-route gate
+- **THEN** global placement and every legalization keep N free sites on each side of every standard cell, the stage logs record N, the gated legality check after `dpl` fails the stage on any padding violation, a later legalization that cannot keep the padding legalizes again without it and records that in the stage status, the gated legality check after `cts` still fails the stage on any overlap, filler placement is not padded, and the run's exit status still follows the global-route gate

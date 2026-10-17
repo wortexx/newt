@@ -372,11 +372,17 @@ proc pnr_status {stage status {detail ""}} {
 # run_pnr.sh's placement report reads that line from pnr_dpl.log.
 # -----------------------------------------------------------------------
 proc pnr_detailed_placement {args} {
-    global pnr_dpl_legalizer pnr_dpl_max_displacement pnr_cell_pad_sites
+    global pnr_cell_pad_sites
     utl::report "Cell padding: $pnr_cell_pad_sites sites"
     if { $pnr_cell_pad_sites > 0 } {
         set_placement_padding -global -left $pnr_cell_pad_sites -right $pnr_cell_pad_sites
     }
+    detailed_placement {*}[pnr_detailed_placement_args {*}$args]
+}
+
+# detailed_placement's arguments for the configured legalizer and window.
+proc pnr_detailed_placement_args {args} {
+    global pnr_dpl_legalizer pnr_dpl_max_displacement
     if { $pnr_dpl_max_displacement ne {} } {
         utl::report "Legalizer: $pnr_dpl_legalizer, max displacement $pnr_dpl_max_displacement um"
         lappend args -max_displacement $pnr_dpl_max_displacement
@@ -386,7 +392,36 @@ proc pnr_detailed_placement {args} {
     if { $pnr_dpl_legalizer eq "diamond" } {
         lappend args -use_diamond_legalizer
     }
-    detailed_placement {*}$args
+    return $args
+}
+
+# -----------------------------------------------------------------------
+# pnr_legalize_with_pad_fallback: pnr_detailed_placement for the stages that
+# insert cells into an already padded placement (cts, grt_repair;
+# drc-clean-pnr design D8). With padding, cts's legalization of its clock
+# and long-wire buffers failed on 25 of 983,276 cells (DPL-0036, run
+# 39031099535), after dpl had legalized the same placement with padding.
+# On DPL-0036 only, and only with padding on, this clears the padding and
+# legalizes again, so the cells that could not fit padded are placed
+# abutting; DPL-0034 above it in the log lists them. Every other error,
+# and any error without padding, is raised as before, and the gated
+# check_placement afterwards still fails the stage on any overlap. dpl
+# keeps the plain call, so a padding failure there fails the stage.
+# pnr_cell_pad_fallbacks counts the fallbacks for the stage's status line.
+# -----------------------------------------------------------------------
+set pnr_cell_pad_fallbacks 0
+proc pnr_legalize_with_pad_fallback {args} {
+    global pnr_cell_pad_sites pnr_cell_pad_fallbacks
+    if { ![catch { pnr_detailed_placement {*}$args } err opts] } {
+        return
+    }
+    if { $pnr_cell_pad_sites == 0 || ![string match "*DPL-0036*" $err] } {
+        return -options $opts $err
+    }
+    incr pnr_cell_pad_fallbacks
+    utl::report "Cell padding fallback: legalization with $pnr_cell_pad_sites sites failed ($err); legalizing again without padding"
+    set_placement_padding -global -left 0 -right 0
+    detailed_placement {*}[pnr_detailed_placement_args {*}$args]
 }
 
 # -----------------------------------------------------------------------
