@@ -126,14 +126,14 @@ behaves exactly like a scheduled run:
   `common.tcl`, `0`, no padding. Both `gpl` passes plan for it
   (`-pad_left/-pad_right`), and every `detailed_placement` call (`dpl`,
   `cts`, `grt_repair`) keeps it (`set_placement_padding -global`), so the
-  gated legality check after `dpl` also fails on padding violations. `cts`
-  and `grt_repair` insert cells into the padded placement, so when their
-  legalization fails with `DPL-0036` they clear the padding and legalize
-  again (`Cell padding fallback:` in the log, `cell_pad_fallbacks=<n>` in
-  `pnr_status.log`). The cells `DPL-0034` lists then abut their neighbours,
-  and the gated check after `cts` still fails on any overlap. P2-P (run
-  39031099535) failed there on 25 of 983,276 cells before this fallback
-  existed. `final` clears the padding before filler placement. Each stage logs
+  gated legality checks after `dpl` and `cts` also fail on padding
+  violations. `final` clears the padding before filler placement.
+  **Not usable on this design yet** (change `drc-clean-pnr`): with one
+  site, `cts` could not legalize its inserted buffers (25 of 983,276 cells,
+  `DPL-0036`, run 39031099535). A fallback that re-legalized without
+  padding was tried and reverted, because the failed padded attempt had
+  already moved cells far: HPWL went from 110 M to 164 M µm, and detailed
+  routing saw 9.56 M violations (run 39058290679). Each stage logs
   `Cell padding: <n> sites`. Meant to free Metal2 tracks for pin access
   (change `drc-clean-pnr`, design D8). One site adds about 22 % to the cell
   area. It invalidates the `gpl2` checkpoint and everything after it.
