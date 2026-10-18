@@ -48,7 +48,7 @@ set err [catch {
 
     # legalize cts cells
     utl::report "Detailed placement"
-    pnr_legalize_with_pad_fallback
+    pnr_detailed_placement
     utl::report "Estimate parasitics"
     estimate_parasitics -placement
 
@@ -59,7 +59,7 @@ set err [catch {
     repair_timing -setup -skip_pin_swap -verbose -repair_tns 90
     # place inserted cells
     utl::report "Detailed placement"
-    pnr_legalize_with_pad_fallback
+    pnr_detailed_placement
 
     utl::report "Estimate parasitics"
     estimate_parasitics -placement
@@ -79,6 +79,6 @@ if { $err } {
     utl::report "ERROR in cts stage: $errMsg"
     exit 1
 } else {
-    pnr_status cts ok [expr {$pnr_cell_pad_fallbacks ? "cell_pad_fallbacks=$pnr_cell_pad_fallbacks" : ""}]
+    pnr_status cts ok
     exit 0
 }

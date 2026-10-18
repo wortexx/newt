@@ -138,6 +138,8 @@ P2-M (run `39006065323`, Metal2 hold-back 0.60 on P2's placement) cut violations
 
 The test resumes P2-P's `dpl` checkpoint, so placement through `dpl` is identical and padded.
 
+**Reverted 2026-10-18 after P2-P2 (run `39058290679`).** The fallback fired twice in `cts` and placed every cell. But a failed padded legalization does not leave cells where they were: the diamond search and rip-up move many of them far before giving up on the last few, and the unpadded retry legalizes from there. HPWL went from 110.5 M µm (P2) to 164.3 M µm, and detailed routing's iteration 0 reached 9.56 M violations. The user cancelled the run, dropped cell padding as a lever, and had the fallback reverted, so padding fails loudly in `cts` again. `cell_pad_sites` stays, default 0.
+
 ## Risks / Trade-offs
 
 - **[Die scales above 1.10 are untested.]** Macro placement and the power grid scale with the core in `floorplan_ring_*way.tcl`, but nothing has run at 1.25 or 1.40. → A floorplan or PDN failure shows within minutes of the run. Fix it, or fall back to the next scale.
