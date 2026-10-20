@@ -20,7 +20,7 @@ instructions for a cryptographic (SHA) coprocessor on CVA6 / Cheshire, targeting
 | Simulation is **Questa-only** (`iguana.mk` → `questa-2022.3 vsim`); no Verilator flow | **Critical-path blocker for RTL CI.** Must add Verilator. |
 | Dev machine has 31 GB RAM; synth peaks ~35 GB | Basilisk synth needs a >64 GB box or a swap file. |
 | Stock `chip.tcl` does not complete unattended | Still true, but **the specific failure modes did not reproduce**: across 10 real P&R runs `remove_buffers` **never crashed once** (the "~1/3 runs" figure is unsubstantiated in this environment — the retry was ultimately verified by deliberate fault injection, not by a real crash). `repair_timing` looping forever did reproduce, and post-route repair is now skipped entirely. The real unattended blockers turned out to be elsewhere: `repair_antennas` hanging ~14h single-threaded, and global route's congestion iterations. |
-| Basilisk WNS ≈ −2.5 ns vs 6 ns target | Design does not close timing in the open flow (known / accepted). **Caveat for any PPA number quoted from the CI lane**: with `grt_repair` skipped (Phase 5), measured WNS at `grt` is **−14.76**, not −2.5 — post-route repair is exactly what closes that gap. Restore a bounded `grt_repair`, or requote the baseline, before using lane output as thesis PPA data. **Resolved 2026-10-07 (`bounded-grt-repair-measurement`):** since the 10-03 placement fix, WNS at `grt` is −8.36 ns (reference) and −8.23 ns (both SHA-3 arms). A bounded `grt_repair`, resumed from the reference's `grt` checkpoint (run `37512872714`), timed out at 16 h in its incremental re-route (Phase 11). So the thesis quotes `grt` figures, labelled "before post-route repair", on both sides of the comparison. |
+| Basilisk WNS ≈ −2.5 ns vs 6 ns target | Design does not close timing in the open flow (known / accepted). **Caveat for any PPA number quoted from the CI lane**: with `grt_repair` skipped (Phase 5), measured WNS at `grt` is **−14.76**, not −2.5 — post-route repair is exactly what closes that gap. Restore a bounded `grt_repair`, or requote the baseline, before using lane output as thesis PPA data. **Resolved 2026-10-07 (`bounded-grt-repair-measurement`):** since the 10-03 placement fix, WNS at `grt` is −8.36 ns (reference) and −8.23 ns (both SHA-3 arms). A bounded `grt_repair`, resumed from the reference's `grt` checkpoint (run `37512872714`), timed out at 16 h in its incremental re-route (Phase 11). So the thesis quotes `grt` figures, labelled "before post-route repair", on both sides of the comparison. **Requoted 2026-10-16 from legal placements** (`requote-sha3-pnr-legal-placement`): −8.39 ns (reference, run `38772313345`) against −8.96 ns (both arms, run `38395368038`), on the enlarged die. With both arms, the critical path is now inside `keccak_cvxif`'s R = 6 round logic. |
 | CVA6 CV-X-IF present but disabled: `CVA6ConfigCvxifEn = 0`; Cheshire ties off `cvxif_req_o` / `cvxif_resp_i`, `cheshire_pkg CvxifEn : 0` | The integration seam already exists; needs enabling + un-tying. |
 
 ### ISA integration — decided 2026-10-01: SHA-3 via CV-X-IF (+ MMIO comparison arm)
@@ -808,8 +808,204 @@ from placements with overlapping cells, on both sides alike.
       `pnr_dpl_max_displacement` `1000 1000` are the defaults, so scheduled runs legalize.
       Lane figures now describe a 6777 × 5950 µm die; `die_scale=1.0` reproduces the taped-out
       floorplan, which cannot be legalized with both SHA-3 arms.
-- [ ] Requote the thesis P&R figures (reference and both arms) from legal placements at the same
-      `die_scale`. A separate decision; `sha3-evaluation.md` carries the caveat until then.
+- [x] Requote the thesis P&R figures (reference and both arms) from legal placements at the same
+      `die_scale`. **Done 2026-10-16** (`requote-sha3-pnr-legal-placement`): both arms = probe B
+      run `38395368038` (main's flow), reference = run `38772313345` (branch
+      `pnr-reference-no-arms`, SHA-3 hardware removed, never merged).
+      - `grt` WNS −8.96 / −8.39 ns, achieved period 19.96 ns.
+      - **With both arms, the SoC's critical path is inside `keccak_cvxif`'s round logic.**
+      - Uniform-activity power: the totals are dominated by a larger clock tree on the sparser
+        reference, so only the non-clock delta (+5.2 %) is attributed to the arms.
+      - The reference netlist is −0.43 % cells / −0.10 % area off the old pre-coprocessor
+        synthesis, all in the flattened top, following the Cheshire `newt.2` pin.
+
+      These are the **safety-net thesis figures** (user decision 2026-10-16). Work continues on a
+      DRC-clean P&R, after which both sides are re-run with the same generator.
+- [ ] *(follow-up)* **Choose R from placed timing.** The block-synthesis rule (largest R with
+      ≥ 20 % slack at 11.0 ns) picked R = 6, and R = 6 is the SoC's critical path after `grt`.
+      A both-arms P&R at R = 4 (or 3) would show whether the SHA-3 path drops below CVA6's.
+- [ ] *(next)* **DRC-clean P&R.** The user's goal from 2026-10-16. Chip area is not a hard
+      constraint, so a larger die is acceptable if it helps routing. Start from detailed routing's
+      715,558 violations (run `38473439796`, 87 % shorts, 44 % on Metal2) and `grt`'s remaining
+      overflow (74,776 edges with both arms; 155,290 on the reference).
+      Change `drc-clean-pnr`: a probe sweep over die scale and `gpl` density, compared on
+      detailed routing's violations after iterations 0 and 1. Go to a full route at ≤ 193 k after
+      iteration 0 (10 % of probe B's); promising at ≤ 50 k after iteration 1.
+
+      **Probe P2, 2026-10-16: run `38931700180`** (`0f916ba`, `die_scale=1.25`,
+      `gpl_density=0.50`, `stop_after=drt`, `drt_end_iter=1`). Every gated stage `ok`; 5 h 50 m
+      end to end, `drt` 2 h 17 m (peak 34.3 GB).
+
+      | | probe B (1.10, 0.65) | P2 (1.25, 0.50) | change |
+      |---|---:|---:|---:|
+      | violations after iteration 0 | 1,928,860 | **989,906** | −49 % |
+      | violations after iteration 1 | 1,314,060 | **442,669** | −66 % |
+      | time per iteration | 1 h 46 | 0 h 58 / 0 h 56 | |
+      | iteration 1: Short | 1,073,211 | 309,170 | −71 % |
+      | iteration 1: Metal Spacing | 239,970 | 133,215 | −44 % |
+      | iteration 1: Metal2 | 757,281 | 372,482 | −51 % |
+      | iteration 1: Metal3 | 152,394 | 13,654 | −91 % |
+      | iteration 1: Metal4 | 226,254 | 39,687 | −82 % |
+      | iteration 1: Metal5 | 165,460 | 14,796 | −91 % |
+      | iteration 1: TopMetal1 | 10,314 | 1,978 | −81 % |
+      | `grt` demand | 59.7 % | 43.6 % | |
+      | `grt` overflow (max H / V) | 74,776 (28 / 22) | 354 (8 / 7) | |
+      | utilization after `dpl` / `cts` | 56.3 % / — | 43.5 % / 45.3 % | |
+      | `gpl` pass 2 area (`GPL-1014`) | +34 % | +114 % | |
+      | WNS / TNS at `grt` | −8.96 ns / −103.6 k ns | −5.88 ns / −64.2 k ns | |
+
+      - **Misses the go threshold** (989,906 > 193 k), so per design D4 the next probe is **P3**
+        (`die_scale=1.40`, `gpl_density=0.45`), not P1.
+      - **The floorplan and power grid work at 1.25**; core area 40.29 M µm². `gpl` pass 2
+        converged without a revert; placement legal after `dpl` and `cts`; 0 cells in macro
+        margins, 4,573 in macro channels.
+      - **Spreading fixed the upper layers, not Metal2.** Metal3–Metal5 fell 82–91 %, but Metal2
+        only 51 %, and it now holds 84 % of what is left (372,482 of 442,669, of which 128,306
+        Metal2 spacing). Metal2 wire grew to 36.9 M µm against probe B's 31.7 M. That points at
+        pin access in the standard-cell rows (design D6's cell-padding lever) more than at global
+        capacity, which `grt` now reports nearly free of overflow.
+      - Timing improved, unlike the design's risk note expected: WNS −5.88 against −8.96 ns.
+      - Wire after iteration 1: 124.3 M µm (Metal2 36.9 M, Metal3 29.2 M, Metal4 35.0 M, Metal5
+        22.7 M, TopMetal1 0.43 M).
+
+      **Probe pick, 2026-10-17: none reaches the go threshold.** P2 is the best setting measured
+      (1.25, 0.50). P3 (1.40, 0.45) was **not run, by user decision**: more spreading mainly
+      relieves the upper layers, which P2 already left 82–91 % cleaner, while Metal2 is what
+      remains. The full route (Phase 2) is skipped; next is the Phase 3 decision below.
+
+      **Phase 3 levers, ranked by the P2 evidence** (Metal2 holds 84 % of the violations; `grt`
+      reports Metal2 at 61 % and Metal4/Metal5 at 39 % / 29 % of capacity, with 354 overflowing
+      edges). The capped DRC report cannot locate them: its 10,000 kept markers per type all fall
+      in a strip at the die's west edge, so it is a biased sample.
+      1. **Cell padding** (`set_placement_padding`, applied from `gpl` on so legalization keeps
+         it). Directly targets Metal2 pin access between abutting cells. P2 leaves the room: 43.5 %
+         utilization. Not the same as the earlier padding attempt, which padded only the SPI host
+         at legalization on the 1.10 die and failed in `cts` (`DPL-0036`). A flow edit
+         (`common.tcl`, `gpl.tcl`, `dpl.tcl`), a padding input, and a full run.
+      2. **Push global routing off Metal2.** Not in design D6; found with P2. `common.tcl`
+         derates Metal2–Metal3 by 0.30 for global routing, so `grt` plans 61 % use of a Metal2
+         that detailed routing cannot deliver while Metal4/Metal5 sit at 39 % / 29 %. A larger
+         Metal2 derate moves wires up. A one-line edit, and testable from P2's `cts` checkpoint
+         (`grt` onward, about 3 h).
+      3. **More signal capacity on TopMetal1/TopMetal2.** Low value now: the upper layers already
+         have slack.
+      4. **Lower `kperm` rounds per cycle.** A design change that moves the thesis design point;
+         P2's data does not single out the SHA-3 blocks.
+
+      Also possible without a lever: route P2's own layout to convergence (resume its `grt`
+      checkpoint, `drt_end_iter=64`). Its iterations take under 1 h, so the 24 h `drt` timeout
+      allows about 20, but probe B slowed sharply after iteration 3 (−11 %, −5 %).
+
+      **Lever 2 chosen (user, 2026-10-17; design D7).** `grt_metal2_adjust` (PR #75).
+      **Probe P2-M: run `39006065323`** (`dc7c8bd`, P2's checkpoints through `cts`, so the same
+      placement; `grt_metal2_adjust=0.60`, `drt_end_iter=1`). `grt` 1 h 58 m (P2: 36 m),
+      `drt` 2 h 18 m, peak 36.3 GB.
+
+      | | P2 (Metal2 0.30) | P2-M (Metal2 0.60) | change |
+      |---|---:|---:|---:|
+      | violations after iteration 0 | 989,906 | **932,994** | −6 % |
+      | violations after iteration 1 | 442,669 | **332,259** | −25 % |
+      | iteration 1: Short | 309,170 | 238,961 | −23 % |
+      | iteration 1: Metal Spacing | 133,215 | 93,100 | −30 % |
+      | iteration 1: Metal2 | 372,482 | 165,787 | −55 % |
+      | iteration 1: Metal3 | 13,654 | 16,744 | +23 % |
+      | iteration 1: Metal4 | 39,687 | 105,434 | +166 % |
+      | iteration 1: Metal5 | 14,796 | 40,355 | +173 % |
+      | `grt` use: Metal2 / M3 / M4 / M5 | 61 / 59 / 39 / 29 % | 69 / 65 / 55 / 37 % | |
+      | `grt` overflow | 354 | 2,529 | |
+      | wire: Metal2 / Metal4 / total (M µm) | 36.9 / 35.0 / 124.3 | 22.8 / 48.4 / 131.6 | |
+      | WNS / TNS at `grt` | −5.88 ns / −64.2 k ns | −11.02 ns / −107.5 k ns | |
+
+      (The Metal2 percentages are of different capacities: 0.60 leaves `grt` 4.76 M of Metal2
+      against 9.21 M.)
+
+      - **Misses the go threshold** (932,994 > 193 k after iteration 0).
+      - **The violations moved up, they did not go away.** Metal2's halved, but Metal4 and
+        Metal5 gained almost as many. After iteration 0 the total barely moved (−6 %).
+        Iteration 1 removed more of them (−64 % against P2's −55 %), so upper-layer
+        violations are easier for the router to repair than Metal2's.
+      - **Timing got much worse**: WNS −11.02 against −5.88 ns, from 6 % more wire and the
+        detours up the via stack.
+      - `grt` overflow rose 7×, but stays small (max H/V 4 / 4).
+
+      **Lever 1, cell padding (user, 2026-10-17; design D8).** D7's second value was skipped.
+      `cell_pad_sites` (PR #76) pads every standard cell from `gpl` through legalization.
+      **Probe P2-P: run `39031099535`** (`244957d`, P2's die and density, `cell_pad_sites=1`,
+      full run). **Failed in `cts` (`DPL-0036`)**:
+      - `gpl` pass 2 converged without a revert (`GPL-1014` +66 % against P2's +114 %).
+      - `dpl` legalized with padding and passed its padded legality check at 43.6 %; 5,093 cells
+        in macro channels (P2: 4,573).
+      - `cts` inserted its clock tree and 623 long-wire buffers (46.4 %). Its first legalization
+        then placed 983,251 cells and could not place 25, all in CVA6: ITLB tag registers, clock
+        buffers and repair buffers. The ±1000 µm search window did not help, so the dense
+        padded neighbourhoods had no padded slot left. The post-`dpl` density map shows sharper
+        clusters than P2's, with no single pocket.
+      - Fix chosen by the user (D8 amendment): `cts` and `grt_repair` fall back to unpadded
+        legalization on `DPL-0036` and count it in their status line. `dpl` stays strict.
+        Re-test from P2-P's `dpl` checkpoint.
+
+      **Probe P2-P2: run `39058290679`** (`89d11c6`, resumed P2-P's padded `dpl` checkpoint).
+      **Cancelled by user decision 2026-10-18** during detailed routing. Its numbers were already
+      far worse than P2's:
+      - `cts ok cell_pad_fallbacks=2`. Both padded legalizations failed (23 and 37 cells), and
+        both unpadded retries placed every cell.
+      - **The failed padded attempt wrecks the placement.** Before it ran, HPWL was about
+        122 M µm. The retry started from 162.0 M µm and `cts` ended at 164.3 M µm, against P2's
+        110.5 M µm (+49 %). The diamond search and rip-up move many cells far before giving up on
+        the last few, and the retry legalizes from where they were left.
+      - `grt`: Metal2 81 %, Metal3 85 %, about 1.6 M overflow (P2: 354). WNS −21.27 ns.
+      - `drt` iteration 0: **9,557,297 violations** in 6 h 08 m (P2: 989,906 in 58 m).
+      - Padding also costs wirelength by itself. P2-P's HPWL after `dpl` was 115.2 M µm, against
+        P2's 102.8 M µm (+12 %).
+
+      **Cell padding dropped (user, 2026-10-18).** `cell_pad_sites` stays in the flow, default 0.
+      Its `cts`/`grt_repair` fallback is known to wreck the placement when it fires. Best so far is
+      still P2-M: 332,259 violations after iteration 1.
+
+      **P2-M routed toward convergence: run `39111124087`** (2026-10-18/19; resumed P2-M's `grt`,
+      `drt_end_iter=64`, antenna repair off). **Nearly clean, but the 24 h `drt` timeout killed
+      it during iteration 42** (`drt failed exit=124`): no `drt` checkpoint, `final` skipped, no
+      DEF. Peak memory 36.8 GB.
+
+      | iteration | 0 | 1 | 2 | 3 | 4 | 8 | 12 | 16 | 20 | 24 | 28 | **32** | 36 | 41 |
+      |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+      | violations | 932,994 | 332,259 | 299,160 | 57,539 | 22,909 | 11,587 | 4,512 | 876 | 308 | 192 | 138 | **121** | 152 | 296 |
+
+      - **Iteration 3 is where it breaks open** (−81 %), and it is under 1,000 by iteration 16.
+        From about iteration 26 it hovers at 120–350 and does not reach 0. Iteration 42 was at
+        93 when it was killed.
+      - Iterations take 50–58 min up to iteration 3, 12–45 min up to 32, then 45–60 min.
+        Iteration 32 ends about 17 h 40 m into `drt`.
+      - **What is left is one hotspot.** At iteration 40, 112 of 140 violations are Metal5 shorts
+        in x 600–800, y 700–800 µm, at the top edge of the bottom-left I-cache SRAM stack. Almost
+        all are CVA6 nets, mostly the I-cache read data (`cl_rdata`) converging on the macro's
+        pins. The rest are scattered single violations.
+      - **No probe reached D3's go threshold, but routing nearly converges anyway:** iteration 0
+        badly predicts where the route ends. P2-M's iteration-1 drop (−64 %) and iteration 3
+        (−81 %) were the better signals.
+      - Lesson for the lane: a route that runs into `PNR_TIMEOUT_DRT` loses its checkpoint and
+        DEF. The iteration budget must end inside the timeout.
+
+      **First near-clean routed DEF: run `39244019401`** (2026-10-19/20; the same resume with
+      `drt_end_iter=32`). `drt ok`, `final ok`, and the `basilisk-pnr-def` artifact is published
+      (182 MB, 30-day retention).
+      - **121 DRC violations**, the router's count after iteration 32. 103 are Metal5 shorts, and
+        82 of them are in the I-cache SRAM hotspot (x 600–800, y 700–800 µm). Against the
+        715,558 this change started from (probe B), that is −99.98 %.
+      - **Detailed routing is deterministic.** All 33 counts match run `39111124087` exactly.
+      - `drt` 16 h 49 m, peak 37.5 GB; 131.6 M µm wire, 8.72 M vias. `final` placed 1,989,079
+        fillers, and its placement check passed.
+      - Settings: die scale 1.25 (core 40.29 M µm²), `gpl_density` 0.50, `grt_metal2_adjust`
+        0.60, 46 % utilization after `cts`, antenna repair off. WNS at `grt` −11.02 ns
+        (P2: −5.88 ns). Holding Metal2 back costs timing.
+      - **Not yet DRC-clean.** Open: the I-cache hotspot (a local fix at that SRAM pin edge), antenna
+        repair on this layout, and whether to adopt these settings as the lane's defaults. Each
+        changes every later run's figures, so each is its own task with a measured run.
+
+      **Next change: requote the thesis P&R figures on these settings.** Re-run the reference and
+      both SHA-3 arms with die scale 1.25, density 0.50 and Metal2 0.60, with the same generator.
+      The safety-net figures (`requote-sha3-pnr-legal-placement`, runs `38395368038` /
+      `38772313345`) stay the thesis figures until that change lands.
 
 **2026-10-11 finding: `DRT-0218` is not a placement problem.** Run `38094932339` placed legally
 and `drt` still aborted with `DRT-0218`, on one clock net (`clknet_12_3602__leaf…`). Probes on
