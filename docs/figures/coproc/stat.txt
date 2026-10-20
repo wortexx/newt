@@ -1,0 +1,131 @@
+
+7. Printing statistics.
+
+=== keccak_cvxif ===
+
+        +----------Local Count, excluding submodules.
+        | 
+       88 wires
+    17540 wire bits
+       32 public wires
+     7349 public wire bits
+        4 ports
+      498 port bits
+       82 cells
+        1   $add
+        8   $adffe
+        2   $and
+        9   $eq
+        1   $le
+       10   $logic_and
+        7   $logic_not
+        1   $logic_or
+        5   $lt
+       10   $mux
+        7   $ne
+        1   $neg
+        3   $not
+        1   $or
+        3   $pmux
+        4   $reduce_and
+        1   $reduce_bool
+        2   $reduce_or
+        2   $shift
+        3   $shiftx
+        1   $xor
+        2 submodules
+        1   $paramod$8cd07c13668c51bc55c5a6995890c7ade989d7d1\fifo_v3_059B3_F0CA0
+        1   keccak_round
+
+=== $paramod$8cd07c13668c51bc55c5a6995890c7ade989d7d1\fifo_v3_059B3_F0CA0 ===
+
+        +----------Local Count, excluding submodules.
+        | 
+       49 wires
+     2292 wire bits
+       19 public wires
+      824 public wire bits
+       11 ports
+      170 port bits
+       41 cells
+        2   $add
+        4   $adffe
+        2   $and
+        1   $eq
+        6   $logic_and
+        1   $logic_not
+        2   $mul
+        4   $mux
+        2   $ne
+        1   $neg
+        5   $not
+        1   $or
+        3   $reduce_and
+        3   $reduce_bool
+        2   $shift
+        1   $shiftx
+        1   $sub
+
+=== keccak_round ===
+
+        +----------Local Count, excluding submodules.
+        | 
+       78 wires
+    13184 wire bits
+        8 public wires
+     8704 public wire bits
+        3 ports
+     3264 port bits
+      155 cells
+       25   $and
+       25   $not
+       29   $or
+       76   $xor
+
+=== design hierarchy ===
+
+        +----------Count including submodules.
+        | 
+      278 keccak_cvxif
+       41 $paramod$8cd07c13668c51bc55c5a6995890c7ade989d7d1\fifo_v3_059B3_F0CA0
+      155 keccak_round
+
+        +----------Count including submodules.
+        | 
+      215 wires
+    33016 wire bits
+       59 public wires
+    16877 public wire bits
+       18 ports
+     3932 port bits
+        - memories
+        - memory bits
+        - processes
+      278 cells
+        3   $add
+       12   $adffe
+       29   $and
+       10   $eq
+        1   $le
+       16   $logic_and
+        8   $logic_not
+        1   $logic_or
+        5   $lt
+        2   $mul
+       14   $mux
+        9   $ne
+        2   $neg
+       33   $not
+       31   $or
+        3   $pmux
+        7   $reduce_and
+        4   $reduce_bool
+        2   $reduce_or
+        4   $shift
+        4   $shiftx
+        1   $sub
+       77   $xor
+        2 submodules
+        1   $paramod$8cd07c13668c51bc55c5a6995890c7ade989d7d1\fifo_v3_059B3_F0CA0
+        1   keccak_round
+

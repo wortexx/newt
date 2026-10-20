@@ -39,9 +39,13 @@ block's kept-hierarchy instance, and the per-instance synthesis spread.
 With --pnr RUN_DIR --pnr-ref REF_DIR (task 5.4) it adds the SoC P&R
 section from two P&R lane runs' `pnr-reports` artifacts (`gh run download
 <id> -n pnr-reports -D <dir>`): stages reached, WNS/TNS per stage, grt
-congestion and placement figures, against the pre-coprocessor reference.
-`grt` figures are labelled as taken before post-route repair, and a note
-says when `check_placement` after `cts` found overlapping cells.
+congestion and placement figures, and grt power under the lane's uniform
+activity, against the reference (the same SoC without the SHA-3 hardware).
+`grt` figures are labelled as taken before post-route repair. The script
+refuses the comparison, naming the run and the item, unless both runs passed
+the gated legality check after `dpl` and `cts` and report the same die
+(change requote-sha3-pnr-legal-placement), so runs from before change
+use-diamond-legalizer can no longer be compared.
 
 With --pnr-repair DIR --pnr-ref-repair DIR (change
 bounded-grt-repair-measurement), each the `pnr-reports` artifact of a run
@@ -436,6 +440,10 @@ def pnr_metrics(d):
     hpwl_dpl = re.search(r"DPL-0022\] HPWL after\s+([\d.]+)", dpl)
     hpwl_cts = re.findall(r"legalized HPWL\s+([\d.]+)", cts)
     return {
+        **pnr_placement_facts(rep, dpl, cts),
+        "grt_power_w": pnr_uniform_power(rep / "basilisk.grt.rpt"),
+        "clock_buffers": pnr_clock_buffers(cts),
+        "grt_worst_path": pnr_worst_path(rep / "basilisk.grt.rpt"),
         "status": status, "timing": timing,
         "grt_demand_pct": float(total[-1]) if total else None,
         "grt_metal3_pct": float(metal3[-1]) if metal3 else None,
@@ -445,8 +453,90 @@ def pnr_metrics(d):
         "hpwl_cts_um": float(hpwl_cts[-1]) if hpwl_cts else None,
         "grt_area_um2": pnr_design_area(rep / "pnr_grt.log", "grt"),
         "cts_overlaps": pnr_cts_overlaps(cts, rep / "basilisk_cts_check_placement.rpt"),
-        "cts_cells": pnr_legalized_cells(cts),
     }
+
+
+def pnr_placement_facts(rep, dpl_log, cts_log):
+    """Die line, legalizer and the stages whose gated check_placement passed
+    (change use-diamond-legalizer), from a P&R run's stage logs. Runs from
+    before that change have neither the die nor the legality lines."""
+    floorplan = rep / "pnr_floorplan.log"
+    die = re.search(r"^Die: (.+)$", floorplan.read_text(errors="replace"), re.M) \
+        if floorplan.exists() else None
+    legalizer = re.search(r"^Legalizer: (\S+?),", dpl_log, re.M)
+    return {
+        "die": die.group(1).strip() if die else None,
+        "legal": {s for s, log in (("dpl", dpl_log), ("cts", cts_log))
+                  if re.search(rf"^Placement legal after {s}$", log, re.M)},
+        "legalizer": legalizer.group(1) if legalizer else None,
+    }
+
+
+def pnr_uniform_power(rpt):
+    """Power (W) per report_power group (Sequential, Combinational, Clock,
+    Macro, Pad, Total) of grt's report under the lane's uniform activity
+    (change pin-soc-power-activity), or None when the report has no such
+    section, e.g. a run from before that change."""
+    if not rpt.exists():
+        return None
+    m = re.search(r"^activity: uniform .*?^Total\s+\S+\s+\S+\s+\S+\s+\S+[^\n]*\n",
+                  rpt.read_text(errors="replace"), re.M | re.S)
+    if not m:
+        return None
+    return {g: float(w) for g, w in
+            re.findall(r"^(\w+)\s+\S+\s+\S+\s+\S+\s+(\S+)\s+[\d.]+%$", m.group(0), re.M)}
+
+
+def pnr_worst_path(rpt):
+    """(startpoint, endpoint, slack) of the most negative path in grt's
+    `report_checks -path_delay max` section (one path per group), or None."""
+    if not rpt.exists():
+        return None
+    text = rpt.read_text(errors="replace")
+    m = re.search(r"report_checks -path_delay max\n(.*?)(?:^\S+ report_|\Z)", text, re.M | re.S)
+    if not m:
+        return None
+    paths = re.findall(r"^Startpoint: (\S+).*?^Endpoint: (\S+).*?^\s+(-?[\d.]+)\s+slack \(",
+                       m.group(1), re.M | re.S)
+    return min(((a, b, float(c)) for a, b, c in paths), key=lambda p: p[2], default=None)
+
+
+SHA3_INSTANCES = ("i_keccak_cvxif", "i_keccak_mmio")
+
+
+def sha3_instance(path):
+    """The SHA-3 instance a worst path starts or ends in, or None."""
+    return next((i for i in SHA3_INSTANCES if path and (i in path[0] or i in path[1])), None)
+
+
+def pnr_clock_buffers(cts_log):
+    """Clock buffers CTS created over all clock nets (CTS-0018), or None."""
+    n = re.findall(r"CTS-0018\]\s+Created (\d+) clock buffers", cts_log)
+    return sum(map(int, n)) if n else None
+
+
+def pnr_run_problems(m, name):
+    """What keeps one P&R run out of a comparison: a stage without a passed
+    legality check, overlapping cells, or no die line."""
+    errors = [f"{name}: no 'Placement legal after {s}'"
+              for s in ("dpl", "cts") if s not in m["legal"]]
+    if m["cts_overlaps"]:
+        errors.append(f"{name}: {m['cts_overlaps']:,} overlapping cells after cts")
+    if not m["die"]:
+        errors.append(f"{name}: no 'Die:' line in pnr_floorplan.log")
+    return errors
+
+
+def pnr_comparable(run, ref, run_id, ref_id):
+    """Why the two P&R runs cannot be compared, one line per item, or [] when
+    they can (sha3-evaluation spec: legal placement after dpl and cts on both
+    sides, on the same die)."""
+    errors = (pnr_run_problems(run, f"run {run_id or '?'} (with both arms)")
+              + pnr_run_problems(ref, f"run {ref_id or '?'} (reference)"))
+    if run["die"] and ref["die"] and run["die"] != ref["die"]:
+        errors.append(f"die mismatch: run {run_id or '?'} '{run['die']}' against run "
+                      f"{ref_id or '?'} '{ref['die']}'")
+    return errors
 
 
 def pnr_cts_overlaps(cts_log, rpt):
@@ -463,15 +553,6 @@ def pnr_cts_overlaps(cts_log, rpt):
         return None
     cats = json.loads(rpt.read_text())["DPL"]["category"]
     return len(cats.get("Overlap_failures", {}).get("violations", []))
-
-
-def pnr_legalized_cells(cts_log):
-    """Cells cts's last legalization placed (its DPL-0393 height
-    distribution), or None."""
-    blocks = cts_log.split("DPL-0392]")
-    if len(blocks) < 2:
-        return None
-    return sum(int(n) for n in re.findall(r"DPL-0393\].*: (\d+) cells", blocks[-1])) or None
 
 
 def pnr_design_area(log, when):
@@ -610,9 +691,11 @@ def pnr_section(run, ref, run_id, ref_id, period, repair=None, ref_repair=None,
         "## SoC place and route (task 5.4)",
         "",
         f"P&R lane run {run_id or '?'} (the SoC with both SHA-3 arms, `keccak_cvxif` and "
-        f"`keccak_mmio`, R = {soc_rounds_per_cycle()}) against run {ref_id or '?'} (the "
-        "pre-coprocessor tree, the clean reference; `docs/infra-plan.md` Phase 11). Same flow and "
-        "settings: taped-out die, `gpl` pass 2 timing-driven repair virtual, `stop_after=grt`. "
+        f"`keccak_mmio`, R = {soc_rounds_per_cycle()}) against run {ref_id or '?'} (the same "
+        "SoC without the SHA-3 hardware: CV-X-IF off, no Keccak instances, no external AXI "
+        "subordinate; the reference). Same flow and inputs on both sides: die "
+        f"{run['die']}, {run['legalizer'] or '?'} legalizer, placement legal after `dpl` and "
+        "`cts` (the flow's gated `check_placement`), `stop_after=grt`. "
         f"{stage} Corner: `tt` (`typ_1p20V_25C`). Constraint: {period:.1f} ns.",
         "",
         "| | reference | with both arms |",
@@ -647,48 +730,95 @@ def pnr_section(run, ref, run_id, ref_id, period, repair=None, ref_repair=None,
         f"{num(run['hpwl_cts_um'] and run['hpwl_cts_um'] / 1e6, '.1f')} |",
         "",
     ]
-    ach = pnr_achieved_period(run, period, repair if repaired else None)
-    if ach:
-        caveat = ("" if ach[3] else " It is a figure from before post-route repair, not the "
-                  "SoC's maximum frequency: post-route repair may close part of the gap from "
-                  "`cts` to `grt`.")
-        out += [f"Achieved period: {ach[0]:.2f} ns ({period:.1f} ns minus WNS {ach[2]:.2f} ns "
-                f"after {pnr_stage_label(ach[1], ach[3])}), used by the energy section."
-                f"{caveat} The critical path is outside the SHA-3 blocks: WNS barely moves "
-                "against the reference.", ""]
-    out += [
-        "**SoC power: not reported.** There is no workload SAIF for the whole SoC, and "
-        "OpenSTA's default activity, which these runs' `report_power` used, does not converge "
-        "on this SoC: it stops at its 50-pass cap and gives 0.997 / 9.18 / 0.610 W for the "
-        "synthesized reference / coprocessor-only / both-arms netlists (`docs/infra-plan.md` "
-        "Phase 17). Under one uniform activity on every net, comparative only and not workload "
-        "power, adding both arms costs +14.6 % (+6.1 % for the coprocessor alone); the lane "
-        "reports power that way from `pin-soc-power-activity` on. The SHA-3 blocks' power is "
-        "the activity-annotated block power in the sections above.",
+    out += pnr_period_text(pnr_achieved_period(run, period, repair if repaired else None),
+                           pnr_achieved_period(ref, period, ref_repair if repaired else None),
+                           period, run, ref)
+    out += pnr_power_text(run, ref)
+    out += pnr_caveat_text(run, ref)
+    return out
+
+
+def pnr_period_text(ach, ref_ach, period, run, ref):
+    """The achieved-period paragraph: the WNS move against the reference and
+    where each run's worst path lies, naming a SHA-3 instance when it is one."""
+    if not ach:
+        return []
+    caveat = ("" if ach[3] else " It is a figure from before post-route repair, not the "
+              "SoC's maximum frequency: post-route repair may close part of the gap from "
+              "`cts` to `grt`.")
+    where = ""
+    if ref_ach:
+        where = (f" WNS moves by {ach[2] - ref_ach[2]:+.2f} ns against the reference "
+                 f"({ref_ach[2]:.2f} ns).")
+    wp, rp = run.get("grt_worst_path"), ref.get("grt_worst_path")
+    if wp and ach[1] == "grt" and not ach[3]:
+        inst = sha3_instance(wp)
+        where += (f" **The SoC's critical path is inside the SHA-3 hardware (`{inst}`)**: "
+                  if inst else " The critical path is outside the SHA-3 blocks: ")
+        where += f"`{wp[0]}` to `{wp[1]}` ({wp[2]:.2f} ns)."
+        if rp:
+            where += f" The reference's runs from `{rp[0]}` to `{rp[1]}` ({rp[2]:.2f} ns)."
+    return [f"Achieved period: {ach[0]:.2f} ns ({period:.1f} ns minus WNS {ach[2]:.2f} ns "
+            f"after {pnr_stage_label(ach[1], ach[3])}), used by the energy section."
+            f"{caveat}{where}", ""]
+
+
+def pnr_caveat_text(run, ref):
+    """The caveats paragraph. When the reference is placed more sparsely on the
+    shared die and still has more grt demand, it says so as a placement effect."""
+    sparser = (ref["dpl_util_pct"] is not None and run["dpl_util_pct"] is not None
+               and ref["dpl_util_pct"] < run["dpl_util_pct"])
+    fell = (run["grt_demand_pct"] is not None and ref["grt_demand_pct"] is not None
+            and run["grt_demand_pct"] < ref["grt_demand_pct"])
+    congestion = ""
+    if sparser and fell:
+        congestion = (f" On the shared die the smaller reference is placed more sparsely "
+                      f"({ref['dpl_util_pct']:.1f} % against {run['dpl_util_pct']:.1f} % "
+                      "utilization), and its `grt` demand and wirelength come out higher than "
+                      "with both arms: a placement effect, not one of the arms.")
+    return [f"Caveats: one run each, and placement varies from run to run.{congestion} Area, "
+            "power and energy of the SHA-3 blocks themselves come from synthesis (per instance) "
+            "and from block-level gate-level power, not from this delta.", ""]
+
+
+def pnr_power_text(run, ref):
+    """The SoC power paragraph: both runs' grt power under the lane's uniform
+    activity, comparative only, or why it is not reported."""
+    text = ("There is no workload SAIF for the whole SoC, and OpenSTA's default activity does not "
+            "converge on it (`docs/infra-plan.md` Phase 17), so SoC workload power is not "
+            "reported. The SHA-3 blocks' power is the activity-annotated block power in the "
+            "sections above.")
+    p, q = run["grt_power_w"], ref["grt_power_w"]
+    if not (p and q and "Total" in p and "Total" in q and "Clock" in p and "Clock" in q):
+        return [text, ""]
+    # Summed from the groups, not Total - Clock: each group carries three
+    # significant figures, so the difference of two rounded totals is coarser.
+    rest_p, rest_q = (sum(w for g, w in m.items() if g not in ("Total", "Clock"))
+                      for m in (p, q))
+    bufs = ""
+    if run["clock_buffers"] and ref["clock_buffers"]:
+        bufs = (f" CTS inserted {ref['clock_buffers']:,} clock buffers in the reference and "
+                f"{run['clock_buffers']:,} with both arms.")
+    return [
+        ("**SoC power under uniform activity (comparative only, not workload power)**, after "
+         "`grt`: the lane's `report_power` with one uniform activity on every net (change "
+         "`pin-soc-power-activity`; three significant figures per group in the report)."),
         "",
-        "Caveats: one run each, and placement varies from run to run: congestion fell although "
-        "the netlist grew. Area, power and energy of the SHA-3 blocks themselves come from "
-        "synthesis (per instance) and from block-level gate-level power, not from this delta.",
+        "| | reference | with both arms | delta |",
+        "|---|---:|---:|---:|",
+        (f"| total (W) | {q['Total']:.3f} | {p['Total']:.3f} | "
+         f"{100 * (p['Total'] / q['Total'] - 1):+.1f} % |"),
+        (f"| clock network (W) | {q['Clock']:.3f} | {p['Clock']:.3f} | "
+         f"{100 * (p['Clock'] / q['Clock'] - 1):+.1f} % |"),
+        (f"| everything but the clock network (W) | {rest_q:.3f} | {rest_p:.3f} | "
+         f"{100 * (rest_p / rest_q - 1):+.1f} % |"),
+        "",
+        ("Only the non-clock delta is attributed to the SHA-3 arms. The clock network is "
+         "whatever tree CTS built for each placement, and both sides share one fixed die, so "
+         "the clock tree follows how densely each netlist is placed rather than the arms."
+         f"{bufs} " + text),
         "",
     ]
-    illegal = [(name, m) for name, m in (("reference", ref), ("with both arms", run))
-               if m.get("cts_overlaps")]
-    if illegal:
-        sides = "; ".join(
-            f"{name} {m['cts_overlaps']:,} overlapping cells"
-            + (f" of {m['cts_cells']:,} ({100 * m['cts_overlaps'] / m['cts_cells']:.1f} %)"
-               if m.get("cts_cells") else "")
-            for name, m in illegal)
-        out += [
-            "**Placement was not legal.** `check_placement` after `cts` failed in these runs "
-            f"({sides}). OpenROAD's negotiation legalizer did not converge and `cts` only "
-            "warned, so the `grt` figures above come from placements with overlapping cells, on "
-            "both sides alike. Detailed routing cannot run on such a placement (`DRT-0218`, run "
-            "37996272102). Change `use-diamond-legalizer` makes legality a gated check; requoting "
-            "these figures from legal placements is a separate decision.",
-            "",
-        ]
-    return out
 
 
 MMIO_WORKLOADS = [  # (power_<name>.json, implementation, regime)
@@ -871,6 +1001,11 @@ def main(argv=None):
     if (a.pnr_repair or a.pnr_ref_repair) and not a.pnr:
         sys.exit("sha3_ppa: --pnr-repair and --pnr-ref-repair need --pnr and --pnr-ref")
     pnr_run = pnr_metrics(a.pnr) if a.pnr else None
+    pnr_ref = pnr_metrics(a.pnr_ref) if a.pnr_ref else None
+    if pnr_run:
+        errors = pnr_comparable(pnr_run, pnr_ref, a.pnr_run_id, a.pnr_ref_run_id)
+        if errors:
+            sys.exit("sha3_ppa: the P&R runs are not comparable:\n  " + "\n  ".join(errors))
     repair = pnr_repair_metrics(a.pnr_repair) if a.pnr_repair else None
     ref_repair = pnr_repair_metrics(a.pnr_ref_repair) if a.pnr_ref_repair else None
     repaired = pnr_repair_done(repair, ref_repair)
@@ -887,7 +1022,7 @@ def main(argv=None):
     out += mmio_section(selected, next(m for m in rows if m["rounds_per_cycle"] == selected),
                         achieved)
     if pnr_run:
-        out += pnr_section(pnr_run, pnr_metrics(a.pnr_ref), a.pnr_run_id, a.pnr_ref_run_id,
+        out += pnr_section(pnr_run, pnr_ref, a.pnr_run_id, a.pnr_ref_run_id,
                            period, repair, ref_repair,
                            (a.pnr_repair_run_id, a.pnr_ref_repair_run_id))
     if a.soc:
