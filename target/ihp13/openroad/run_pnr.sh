@@ -26,6 +26,10 @@
 #   PNR_SKIP_ANTENNA_REPAIR Passed through to drt.tcl: skip repair_antennas
 #                           (hung ~14h unlogged on this over-capacity design
 #                           in run 34389061373; see drt.tcl's comment).
+#   PNR_ANTENNA_REPAIR_MODE Passed through to drt.tcl when repair runs:
+#                           `full` (jumpers and diodes) or `jumper`
+#                           (repair_antennas -jumper_only). Empty or unset:
+#                           full. Anything else fails drt before it loads.
 #   PNR_STAGE_TIMEOUT      Per-stage wall-clock timeout in seconds for any
 #                           stage without its own override below.
 #                           Default: 21600 (6h).
@@ -75,6 +79,12 @@
 #                           global routing holds back, in [0, 1). Empty or
 #                           unset: pnr_grt_metal2_adjust's default in
 #                           common.tcl (0.30); Metal3 stays at 0.30.
+#   PNR_GRT_SRAM_METAL5_ADJUST Passed through to every routing stage (grt,
+#                           grt_repair, drt): the share of Metal5's capacity
+#                           global routing holds back inside every SRAM's
+#                           footprint, in [0, 1). Empty or unset:
+#                           pnr_grt_sram_metal5_adjust's default in
+#                           common.tcl (0, no hold-back).
 #   PNR_CELL_PAD_SITES     Passed through to gpl and every legalization
 #                           (dpl, cts, grt_repair): free sites kept on each
 #                           side of every standard cell. Empty or unset:
@@ -362,6 +372,33 @@ report_drt_outcome() {
     cat "$out"
 }
 
+# Antenna outcome of the routed design (specs/pnr-flow "Detailed routing
+# reports the antenna checker's own counts"; drc-clean-sram-metal5-and-antenna
+# design D3). drt.tcl runs check_antennas after detailed_route; this reads the
+# last `ANT-0002 Found N net violations` and `ANT-0001 Found M pin
+# violations` from pnr_drt.log and appends `drt-antenna nets=<N> pins=<M>`
+# to pnr_status.log. Counts are reported only when drt saved its checkpoint,
+# i.e. produced a routed design; otherwise, or when the checker logged no
+# count, the row is `drt-antenna none`, never zero. The full listing is
+# <proj>_antenna.rpt. Never changes the exit status.
+report_antenna_outcome() {
+    local log="${REPORTS}/pnr_drt.log" nets pins
+    if [ ! -f "$(checkpoint_zip drt)" ]; then
+        echo "Antenna violations: none reported (drt saved no routed design)"
+        log_status drt-antenna none "no-routed-design"
+        return 0
+    fi
+    nets="$(sed -n 's/.*ANT-0002\] Found \([0-9]*\) net violations.*/\1/p' "$log" 2>/dev/null | tail -1)"
+    pins="$(sed -n 's/.*ANT-0001\] Found \([0-9]*\) pin violations.*/\1/p' "$log" 2>/dev/null | tail -1)"
+    if [ -z "$nets" ] || [ -z "$pins" ]; then
+        echo "Antenna violations: none reported (no ANT-0002/ANT-0001 count in ${log})"
+        log_status drt-antenna none "no-checker-count"
+        return 0
+    fi
+    log_status drt-antenna "nets=${nets}" "pins=${pins}"
+    echo "Antenna violations (checker's count): ${nets} nets, ${pins} pins (${PROJ_NAME}_antenna.rpt)"
+}
+
 past_gate=0
 overall_rc=0
 best_effort_broken=0
@@ -423,6 +460,7 @@ for stage in "${STAGES[@]}"; do
     [ "$stage" = "dpl" ] && report_placement_state
     [ "$stage" = "grt" ] && report_routes_outside_core
     [ "$stage" = "drt" ] && report_drt_outcome
+    [ "$stage" = "drt" ] && report_antenna_outcome
 
     if [ "$rc" -ne 0 ]; then
         echo "::error::stage '${stage}' failed after ${attempt} attempt(s), exit ${rc}"
