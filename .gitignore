@@ -79,3 +79,6 @@ hw/coproc/build/
 target/ihp13/yosys/block/
 sw/**/*.a
 sw/tests/BUILD_INFO
+
+# Core dumps QEMU writes when an emulated (linux/amd64 on arm64) tool aborts
+qemu_*.core
