@@ -998,14 +998,61 @@ from placements with overlapping cells, on both sides alike.
       - Settings: die scale 1.25 (core 40.29 M µm²), `gpl_density` 0.50, `grt_metal2_adjust`
         0.60, 46 % utilization after `cts`, antenna repair off. WNS at `grt` −11.02 ns
         (P2: −5.88 ns). Holding Metal2 back costs timing.
-      - **Not yet DRC-clean.** Open: the I-cache hotspot (a local fix at that SRAM pin edge), antenna
-        repair on this layout, and whether to adopt these settings as the lane's defaults. Each
-        changes every later run's figures, so each is its own task with a measured run.
+      - **Not yet DRC-clean.** Open: the I-cache hotspot (over the SRAM, not at its pin edge; see
+        the 2026-10-21 analysis below), antenna repair on this layout, and whether to adopt these
+        settings as the lane's defaults. Each changes every later run's figures, so each is its own
+        task with a measured run.
 
       **Next change: requote the thesis P&R figures on these settings.** Re-run the reference and
       both SHA-3 arms with die scale 1.25, density 0.50 and Metal2 0.60, with the same generator.
       The safety-net figures (`requote-sha3-pnr-legal-placement`, runs `38395368038` /
       `38772313345`) stay the thesis figures until that change lands.
+
+      **What is left of DRC, 2026-10-21.** Read-only analysis of run `39244019401`'s `drt` and
+      `grt` checkpoints (`newt-eda:dev` locally; `check_antennas` and odb Python probes). Three
+      separate items remain, and the router's 121 is the smallest:
+
+      | item | state on `39244019401` |
+      |---|---|
+      | router DRC | 121 violations, cause located (below) |
+      | antenna | **11,732 nets / 15,605 pins** violate; never repaired, never checked before |
+      | signoff DRC (KLayout, IHP deck) | never run; no metal fill (the LEF sets Metal5 density 35–60 %) |
+
+      *Router DRC.* All 121 sit over three bottom-row `RM_IHPSG13_1P_256x64` SRAMs, all R180:
+      I-cache way-3 `data_high` (388–1173, 693–812 µm; 82 shorts), I-cache `data_3_low`
+      (2152–2937, 545–663 µm) and D-cache bank `__1` (6217–7001, 545–663 µm).
+      - The SRAM blocks Metal1–Metal4, so Metal5 is the only vertical layer over it.
+        `sram_power` (`power_grid_stripes.tcl`) joins each TopMetal1 stripe to every Metal4 power
+        pin (one per 5.62 µm), which leaves 8 rows × 68 Metal5 via-stack pads over each macro, VDD
+        and VSS rows alternating. Each row alone leaves 72–82 % of Metal5 tracks free. Only
+        **43 %** (706 of 1,635) clear all eight, because VDD and VSS pads are offset in x.
+      - **The shorts are wrong-way jogs.** Wires dodge between rows on Metal5 against its
+        preferred direction, in the 5 µm gaps between a VDD row and the next VSS row. 1,085 such
+        segments over the hot macro, 1,313 over the second; they peak at y 718/786 and 634/568,
+        the gap heights and the heights of the shorts.
+      - **`grt` plans Metal5 the pads cannot hold.** Per 6.3 µm gcell column (about 13 Metal5
+        tracks, about 5 that clear every row), peak guide demand is median 7 / 11 / 5 and max
+        22 / 32 / 26 on the three macros. 74, 103 and 46 of 124 columns exceed the pad-free
+        count. (Guide counts include via access, so they are approximate.)
+      - Levers, by this evidence: (a) `set_global_routing_region_adjustment` on Metal5 over each
+        SRAM, about 0.5–0.6, so `grt` plans near the 43 %; (b) fewer or x-aligned PDN vias over
+        the macros (every other Metal4 pin, or VDD/VSS pads on common x), toward 70–80 % free;
+        needs `pdngen` support and an IR-drop argument; (c) floorplan (wider `channelY`, pins
+        facing free sides), which moves every figure. More iterations do not help: the count
+        plateaus at 120–350 from iteration 26.
+
+      *Antenna.* All violations are one rule: cumulative area ratio 200 with no diffusion
+      credit. Lowest violating layer per net: Metal4 8,637 (74 %), Metal5 1,976, Metal3 871,
+      Metal2 190, TopMetal1 58. Metal4 carries the most wire (47.8 M µm), so the Metal2 hold-back
+      (0.60) probably adds to it. Worst ratio per net against the limit: < 1.25× 3,841,
+      1.25–1.5× 2,324, 1.5–2× 2,517, 2–4× 2,496, ≥ 4× 554. 64 % are CVA6 nets, 23 % in the
+      flattened top. The build has `repair_antennas -jumper_only / -diode_only / -ratio_margin`
+      and the library has `sg13g2_antennanp`. The diode repair that hung (run `34389061373`)
+      was at 101 % `grt` demand; this layout is at 46 % utilization. `final` does not run
+      `check_antennas`, so the lane reports no antenna figure today.
+
+      Lever (a) and antenna repair both change routing, so one resume from `cts` that applies
+      both, measured against 121 router and 11,732 antenna violations, tests them together.
 
 **2026-10-11 finding: `DRT-0218` is not a placement problem.** Run `38094932339` placed legally
 and `drt` still aborted with `DRT-0218`, on one clock net (`clknet_12_3602__leaf…`). Probes on

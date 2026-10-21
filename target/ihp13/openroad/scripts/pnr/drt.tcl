@@ -34,6 +34,19 @@
 #
 # The P&R lane keeps the skip by default; its antenna_repair dispatch
 # input runs the repair on demand (drc-clean-pnr design D1, D5).
+#
+# PNR_ANTENNA_REPAIR_MODE picks the repair when it runs: `full` (default,
+# jumpers and diodes) or `jumper` (repair_antennas -jumper_only: no diode
+# cells, so no legalization of inserted cells, the step that stalled in run
+# 34389061373). Anything else fails the stage before loading the design
+# (drc-clean-sram-metal5-and-antenna design D2).
+#
+# After detailed_route, check_antennas counts the routed design's antenna
+# violations, whether or not repair ran, and writes
+# <proj>_antenna.rpt. run_pnr.sh's report_antenna_outcome takes the
+# counts from this stage's log (ANT-0002 nets, ANT-0001 pins); the check is
+# reporting only, so its failure is logged and the stage still ends ok
+# (design D3).
 
 source [file join [file dirname [info script]] common.tcl]
 
@@ -43,6 +56,14 @@ if { [info exists ::env(PNR_DRT_END_ITER)] } {
 }
 
 set skip_antenna [expr {[info exists ::env(PNR_SKIP_ANTENNA_REPAIR)] && $::env(PNR_SKIP_ANTENNA_REPAIR) eq "1"}]
+
+set antenna_mode full
+if { [info exists ::env(PNR_ANTENNA_REPAIR_MODE)] && [string trim $::env(PNR_ANTENNA_REPAIR_MODE)] ne "" } {
+    set antenna_mode [string trim $::env(PNR_ANTENNA_REPAIR_MODE)]
+}
+if { $antenna_mode ni {full jumper} } {
+    error "PNR_ANTENNA_REPAIR_MODE='$antenna_mode' is not a repair mode: use full or jumper"
+}
 
 set err [catch {
     pnr_load ${proj_name}.grt_repaired
@@ -61,7 +82,11 @@ set err [catch {
 
     if { $skip_antenna } {
         utl::report "PNR_SKIP_ANTENNA_REPAIR=1: skipping antenna repair"
+    } elseif { $antenna_mode eq "jumper" } {
+        utl::report "Antenna repair: jumpers only"
+        repair_antennas -jumper_only
     } else {
+        utl::report "Antenna repair: full"
         # Requires LEF cell with class 'CORE ANTENNACELL', otherwise you need to give a cell
         repair_antennas
     }
@@ -84,6 +109,11 @@ set err [catch {
                    -save_guide_updates \
                    -verbose 1
 
+    utl::report "Antenna check"
+    if { [catch {check_antennas -report_file ${report_dir}/${proj_name}_antenna.rpt} antErr] } {
+        utl::report "Antenna check failed (reporting only, stage unaffected): $antErr"
+    }
+
     save_checkpoint ${proj_name}.drt
     report_image "${proj_name}.drt" true false false true
     report_design_area
@@ -101,6 +131,6 @@ if { $err } {
     utl::report "ERROR in drt stage (best-effort, non-fatal to the flow): $errMsg"
     exit 1
 } else {
-    pnr_status drt ok "droute_end_iter=$droute_end_iter antenna=[expr {$skip_antenna ? "skipped" : "repaired"}]"
+    pnr_status drt ok "droute_end_iter=$droute_end_iter antenna=[expr {$skip_antenna ? "skipped" : $antenna_mode}]"
     exit 0
 }

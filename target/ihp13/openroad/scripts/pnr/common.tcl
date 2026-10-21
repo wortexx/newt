@@ -179,6 +179,26 @@ if { ![string is double -strict $pnr_grt_metal2_adjust] ||
     error "PNR_GRT_METAL2_ADJUST='$pnr_grt_metal2_adjust' is not an adjustment: use a number in \[0, 1)"
 }
 
+# Share of Metal5's capacity that global routing holds back inside every
+# SRAM's footprint (set_global_routing_region_adjustment in
+# pnr_apply_routing_layers below). The SRAMs block Metal1-Metal4 and their
+# power grid's via stacks leave 8 rows of Metal5 pads over each macro: on
+# run 39244019401 only 43 % of the Metal5 tracks there cleared every row,
+# yet grt planned up to 22-32 Metal5 nets per gcell column, and detailed
+# routing's wrong-way jogs between the pad rows were its last 121
+# violations (docs/infra-plan.md, "What is left of DRC, 2026-10-21").
+# 0 (the default) adds no region. PNR_GRT_SRAM_METAL5_ADJUST overrides it
+# (openspec/changes/drc-clean-sram-metal5-and-antenna design D1).
+if { [info exists ::env(PNR_GRT_SRAM_METAL5_ADJUST)] && [string trim $::env(PNR_GRT_SRAM_METAL5_ADJUST)] ne "" } {
+    set pnr_grt_sram_metal5_adjust [string trim $::env(PNR_GRT_SRAM_METAL5_ADJUST)]
+} else {
+    set pnr_grt_sram_metal5_adjust 0
+}
+if { ![string is double -strict $pnr_grt_sram_metal5_adjust] ||
+     $pnr_grt_sram_metal5_adjust < 0 || $pnr_grt_sram_metal5_adjust >= 1 } {
+    error "PNR_GRT_SRAM_METAL5_ADJUST='$pnr_grt_sram_metal5_adjust' is not an adjustment: use a number in \[0, 1)"
+}
+
 # Widest gap between a macro and the core edge that the floorplan blocks for
 # placement, in microns (block_macro_core_margins in floorplan_util.tcl). The
 # floorplan keeps macros floorPaddingX/Y off the core edge but never cut the
@@ -320,7 +340,9 @@ proc pnr_set_dont_use {} {
 # pnr_apply_routing_layers: the GRT layer config from chip.tcl's Global
 # Route section (reduce M2/M3/TopMetal1 routing resources, restrict signal
 # and clock routing to Metal2-TopMetal1), with Metal2's reduction from
-# pnr_grt_metal2_adjust (default 0.30, chip.tcl's value). Must be re-applied after every
+# pnr_grt_metal2_adjust (default 0.30, chip.tcl's value), plus the optional
+# Metal5 hold-back over the SRAMs (pnr_apply_sram_metal5_adjustment below).
+# Must be re-applied after every
 # load_checkpoint that precedes a global_route/detailed_route call in the
 # same process, or routing fails with DRT-0155 (guides on TopMetal2) -
 # docs/infra-plan.md Appendix B item 4, design D1. Cheap and idempotent;
@@ -332,7 +354,37 @@ proc pnr_apply_routing_layers {} {
     set_global_routing_layer_adjustment Metal3 0.30
     set_global_routing_layer_adjustment TopMetal1 0.20
     utl::report "Global routing layer adjustment: Metal2 $pnr_grt_metal2_adjust, Metal3 0.30, TopMetal1 0.20"
+    pnr_apply_sram_metal5_adjustment
     set_routing_layers -signal Metal2-TopMetal1 -clock Metal2-TopMetal1
+}
+
+# Metal5 hold-back over every SRAM (pnr_grt_sram_metal5_adjust, default 0 =
+# none). Unlike the layer adjustments above, region adjustments accumulate in
+# the global router and each one scales the capacity left by the ones before
+# it, so the regions are added only on the first call in a process to keep
+# this proc idempotent (design D1's task 1.1 check).
+set pnr_sram_metal5_regions_added 0
+proc pnr_apply_sram_metal5_adjustment {} {
+    global pnr_grt_sram_metal5_adjust pnr_sram_metal5_regions_added
+    if { $pnr_grt_sram_metal5_adjust == 0 } { return }
+    if { $pnr_sram_metal5_regions_added } {
+        utl::report "SRAM Metal5 adjustment: $pnr_grt_sram_metal5_adjust already applied in this process"
+        return
+    }
+    set block [ord::get_db_block]
+    set dbu [$block getDbUnitsPerMicron]
+    set n 0
+    foreach inst [$block getInsts] {
+        if { ![string match RM_IHP* [[$inst getMaster] getName]] } { continue }
+        set bbox [$inst getBBox]
+        set_global_routing_region_adjustment \
+            [list [expr {double([$bbox xMin]) / $dbu}] [expr {double([$bbox yMin]) / $dbu}] \
+                  [expr {double([$bbox xMax]) / $dbu}] [expr {double([$bbox yMax]) / $dbu}]] \
+            -layer Metal5 -adjustment $pnr_grt_sram_metal5_adjust
+        incr n
+    }
+    set pnr_sram_metal5_regions_added 1
+    utl::report "SRAM Metal5 adjustment: $pnr_grt_sram_metal5_adjust over $n regions"
 }
 
 # -----------------------------------------------------------------------

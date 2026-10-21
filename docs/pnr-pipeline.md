@@ -32,10 +32,11 @@ independent of this workflow — the backstop for a `stop` job that never ran.
 
 ### Manual dispatch inputs
 
-`workflow_dispatch` accepts thirteen optional inputs, all empty by default
+`workflow_dispatch` accepts fourteen optional inputs, all empty by default
 (`resume_from_run`, `resume_exclude`, `stop_after`, `gpl_density`,
 `gpl_keep_resize`, `die_scale`, `dpl_legalizer`, `dpl_max_displacement`,
-`skip_grt_repair`, `drt_end_iter`, `antenna_repair`, `grt_metal2_adjust`, `cell_pad_sites` — matching `pnr.yml`'s
+`skip_grt_repair`, `drt_end_iter`, `antenna_repair`, `grt_metal2_adjust`,
+`sram_metal5_adjust`, `cell_pad_sites` — matching `pnr.yml`'s
 `inputs:` keys exactly). With all of them empty, a dispatched run
 behaves exactly like a scheduled run:
 
@@ -105,11 +106,16 @@ behaves exactly like a scheduled run:
   stays best-effort. Its `pnr_status.log` line records the budget used.
 
 - `antenna_repair` — whether to run `repair_antennas` before detailed
-  routing. Feeds `PNR_SKIP_ANTENNA_REPAIR`. Empty means skip (`1`), as on
-  every scheduled and tag run, since repair hung for about 14h at 101 %
-  routing demand (run 34389061373, see `drt.tcl`); `1` runs it. Either way
-  `drt` stays best-effort, and its `pnr_status.log` line says
-  `antenna=repaired` or `antenna=skipped`.
+  routing, and how. Feeds `PNR_SKIP_ANTENNA_REPAIR` and
+  `PNR_ANTENNA_REPAIR_MODE`. Empty means skip, as on every scheduled and
+  tag run, since repair hung for about 14h at 101 % routing demand (run
+  34389061373, see `drt.tcl`). `1` runs the full repair (jumpers and
+  diodes). `jumper` runs `repair_antennas -jumper_only`, which inserts no
+  diode cells and so needs none of the legalization that stalled (change
+  `drc-clean-sram-metal5-and-antenna`, design D2). Any other value fails
+  the `start` job before the VM starts. Either way `drt` stays
+  best-effort, and its `pnr_status.log` line says `antenna=full`,
+  `antenna=jumper` or `antenna=skipped`.
 
 - `grt_metal2_adjust` — the share of Metal2's capacity that global routing
   holds back (`set_global_routing_layer_adjustment Metal2`), in [0, 1).
@@ -120,6 +126,20 @@ behaves exactly like a scheduled run:
   D7). Every routing stage logs `Global routing layer adjustment:` with the
   values used. It invalidates the `grt` checkpoint and everything after it,
   so with `resume_from_run` also exclude `grt grt_repaired drt`.
+
+- `sram_metal5_adjust` — the share of Metal5's capacity that global
+  routing holds back inside every SRAM's footprint
+  (`set_global_routing_region_adjustment` on Metal5, one region per
+  `RM_IHP*` instance), in [0, 1). Feeds `PNR_GRT_SRAM_METAL5_ADJUST`. Empty
+  means `pnr_grt_sram_metal5_adjust`'s default in `common.tcl`, `0`, no
+  hold-back. The SRAMs' power-grid via stacks leave 8 rows of Metal5 pads
+  over each macro, and only 43 % of the Metal5 tracks there clear them all.
+  Run 39244019401's last 121 detailed-routing violations were wrong-way
+  Metal5 jogs between those rows (change
+  `drc-clean-sram-metal5-and-antenna`, design D1). Every routing stage logs
+  `SRAM Metal5 adjustment: <v> over <n> regions`. No other layer's
+  adjustment changes. Like `grt_metal2_adjust`, it invalidates `grt` and
+  everything after it.
 
 - `cell_pad_sites` — free sites kept on each side of every standard cell.
   Feeds `PNR_CELL_PAD_SITES`. Empty means `pnr_cell_pad_sites`'s default in
@@ -191,7 +211,7 @@ doing anything else.
 | 5 | `cts` | `cts` | **Gate** | Clock tree synthesis. Lifts clock dont-touch (only stage that does — clock nets are protected everywhere else), repairs clock inverters and post-CTS wire length, legalizes, then `repair_timing -setup -repair_tns 90` to fix the setup violations CTS itself introduces. Both legalizations use the same legalizer as `dpl`, and the stage ends with the same **gated** `check_placement` (`basilisk_cts_check_placement.rpt`). Until `use-diamond-legalizer` this check was caught and non-fatal, and 10–13 k overlapping cells reached `grt` in every run, until `drt` aborted on them (`DRT-0218`, run 37996272102). |
 | 6 | `grt` | `grt` | **Gate — the actual gate** (`PNR_GATE` default) | Global route: `global_route -congestion_iterations 14 -allow_congestion -verbose`. This is the stage the whole flow is judged on — `run_pnr.sh` exits non-zero if this fails, regardless of the best-effort stages after it. The long pole by far: single-threaded, congestion-bound at ~63–65% utilization. `-congestion_iterations` was cut from `chip.tcl`'s original 80, to 20, to 14 across three real timeout failures — the last cut wasn't about average per-iteration cost but a specific finding: iterations 1–14 complete trivially, then iteration 15 itself triggers a clock-net NDR-relaxation cascade with no observed sign of ever terminating (10+ hours, no completion). See Notes. |
 | 7 | `grt_repair` | `grt_repaired` | Best-effort | Post-route timing repair using global-route-based parasitics: buffer insertion, incremental global route, `repair_timing -repair_tns 20 -max_buffer_percent 15` (bounded down from chip.tcl's original 100 — that looped effectively forever on this design). `PNR_SKIP_GRT_REPAIR=1` skips the work but still re-saves the checkpoint under the uniform name `drt.tcl` expects. **Skipped by default in `pnr.yml`** (the `skip_grt_repair` input, empty = skip; `0` runs it) — even with its `global_route` calls bounded the same way `grt.tcl`'s are, real data (`pnr-bringup-6`, and again run `37512872714` on the post-2026-10-03 placement, where the incremental re-route after `repair_design` fell into the `GRT-0273` NDR-relaxation cascade; `docs/infra-plan.md` Phase 11) shows it still doesn't converge within 16h (see Notes); skipping lets `drt`/`final` actually run and produce a DEF while grt_repair's own timeout/tuning is revisited separately. |
-| 8 | `drt` | `drt` | Best-effort | Bridges wrong-direction route guides first (`pnr_bridge_wrong_way_guides`, `PNR_BRIDGE_GUIDES=0` turns it off): every guide spanning more than one gcell against its layer's preferred direction is copied onto the adjacent preferred-direction layer, since detailed routing cannot traverse it and aborts with `DRT-0218` otherwise (change `bridge-wrong-way-route-guides`). Then antenna repair, then detailed routing (`detailed_route`, multi-threaded like `gpl`). `-droute_end_iter` (default 40, override via `PNR_DRT_END_ITER`; the lane uses 5) bounds the iteration budget — on the enlarged die each iteration takes about 3 h and violations barely fall after the second (3.12 M → 2.64 M → 2.58 M, run 38178131540), so this is deliberately capped rather than left open-ended. |
+| 8 | `drt` | `drt` | Best-effort | Bridges wrong-direction route guides first (`pnr_bridge_wrong_way_guides`, `PNR_BRIDGE_GUIDES=0` turns it off): every guide spanning more than one gcell against its layer's preferred direction is copied onto the adjacent preferred-direction layer, since detailed routing cannot traverse it and aborts with `DRT-0218` otherwise (change `bridge-wrong-way-route-guides`). Then antenna repair (`PNR_ANTENNA_REPAIR_MODE`: `full` or `jumper`), then detailed routing (`detailed_route`, multi-threaded like `gpl`), then `check_antennas` on the routed design (see **Antenna violations** below). `-droute_end_iter` (default 40, override via `PNR_DRT_END_ITER`; the lane uses 5) bounds the iteration budget — on the enlarged die each iteration takes about 3 h and violations barely fall after the second (3.12 M → 2.64 M → 2.58 M, run 38178131540), so this is deliberately capped rather than left open-ended. |
 | 9 | `final` | `final` | Best-effort | Filler cell placement, a non-fatal `check_placement`, then writes `out/<proj>.final.def` — the artifact the workflow uploads. |
 
 **Gate vs. best-effort**: stages 1–6 (`floorplan` through `grt`) must all
@@ -252,6 +272,21 @@ shows both. Never the DRC report file's entries: OpenROAD caps
 `basilisk_route_drc.rpt` at 10,000 markers per violation type, so run
 38473439796 listed 21,110 entries where the router counted 715,558. The
 report never changes the exit status.
+
+**Antenna violations** (`drt.tcl` and `run_pnr.sh`, after `drt`; change
+`drc-clean-sram-metal5-and-antenna`, design D3). After `detailed_route`
+and before its checkpoint, `drt.tcl` runs `check_antennas` on the routed
+design, whether or not antenna repair ran. The full listing goes to
+`reports/basilisk_antenna.rpt`, which was 103 MB on run 39244019401. The
+check runs inside its own `catch`, so a failing check is logged and `drt`
+still ends `ok`. `run_pnr.sh`'s `report_antenna_outcome` then reads the
+checker's own counts from `pnr_drt.log` (the last `ANT-0002 Found N net
+violations` and `ANT-0001 Found M pin violations`) and writes one
+`pnr_status.log` line, `drt-antenna nets=<N> pins=<M>`. It writes
+`drt-antenna none` instead when `drt` saved no routed design or the
+checker logged no count, and never writes a zero in that case. The step
+summary shows the row and names the report. The check adds a few minutes
+to `drt` and never changes the exit status.
 
 **Per-stage timeouts** (`run_pnr.sh`, override via `PNR_TIMEOUT_<STAGE>` or
 blanket `PNR_STAGE_TIMEOUT`): `floorplan` 1h, `pre_place` 30m, `gpl` 4h,
