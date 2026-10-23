@@ -1002,9 +1002,15 @@ from placements with overlapping cells, on both sides alike.
         the 2026-10-21 analysis below), antenna repair on this layout, and whether to adopt these
         settings as the lane's defaults. Each changes every later run's figures, so each is its own
         task with a measured run.
+      - **Update 2026-10-23 (`drc-clean-sram-metal5-and-antenna`, closed):** with the SRAM Metal5
+        hold-back (0.55) and jumper-only antenna repair, run `39906592139` reaches **8 router
+        violations**. Antennas are down to 8,627 nets, from 11,732. Full diode repair hangs. See
+        the outcome after the 2026-10-21 analysis below.
 
-      **Next change: requote the thesis P&R figures on these settings.** Re-run the reference and
-      both SHA-3 arms with die scale 1.25, density 0.50 and Metal2 0.60, with the same generator.
+      **Next change: adopt the routing settings as defaults, and requote the thesis P&R figures
+      on them.** Make die scale 1.25, density 0.50, Metal2 0.60, SRAM Metal5 0.55 and jumper-only
+      antenna repair the lane's defaults. Re-run the reference and both SHA-3 arms on them, with
+      the same generator.
       The safety-net figures (`requote-sha3-pnr-legal-placement`, runs `38395368038` /
       `38772313345`) stay the thesis figures until that change lands.
 
@@ -1053,6 +1059,95 @@ from placements with overlapping cells, on both sides alike.
 
       Lever (a) and antenna repair both change routing, so one resume from `cts` that applies
       both, measured against 121 router and 11,732 antenna violations, tests them together.
+
+      **Measured run, 2026-10-22: full antenna repair hung again (run `39696194006`).**
+      Change `drc-clean-sram-metal5-and-antenna`, design D4: resume from `39244019401`'s `cts`
+      (`cts` and earlier restored), Metal2 0.60, SRAM Metal5 hold-back 0.55,
+      `antenna_repair=1`, `drt_end_iter=28`. `grt` passed the gate, and the run is `success`.
+      `drt` hit its 24 h timeout (exit 124) before `detailed_route` started, so there is no
+      router count, no antenna count (`drt-antenna none no-routed-design`) and no DEF.
+
+      | | `39244019401` | `39696194006` |
+      |---|---:|---:|
+      | `grt` total overflow | 2,529 | **7,153** (Metal5 4,697, Metal4 991, Metal3 777) |
+      | `grt` Metal5 usage | | 27.7 % of the held-back capacity |
+      | WNS / TNS at `grt` | −11.02 ns / −107.5 k ns | −12.05 ns / −124.0 k ns |
+      | router count after iteration 28 | 138 | not reached |
+      | antenna nets / pins after `drt` | 11,732 / 15,605 (no repair) | not reached |
+
+      - **The hold-back applied as designed:** `grt` and `drt` both logged
+        `SRAM Metal5 adjustment: 0.55 over 32 regions`. Most of the extra overflow is Metal5:
+        `grt` still routes more nets over the SRAMs than the held-back 45 % allows, because
+        Metal1–Metal4 are blocked there. Whether that overflow costs detailed routing is unknown
+        until `drt` runs.
+      - **`repair_antennas` timeline:**
+        - 2 min: jumpers took `grt`'s antenna estimate from 12,495 to 4,967 (15,557 jumpers on
+          9,647 nets).
+        - 32 min: 18,902 diodes inserted. `repair_antennas` legalizes them with OpenROAD's
+          negotiation legalizer, not the flow's diamond one. It stopped after 1,400 iterations
+          with 9,663 violations (DPL-0701).
+        - Then nothing was logged for about 23 h, until the timeout.
+
+        This is run `34389061373`'s shape (non-converging diode legalization, then a silent
+        hang) at 46 % utilization instead of 101 % demand. So the hang is not specific to
+        congestion.
+      - The jumper step on its own returns: locally, `repair_antennas -jumper_only` on
+        `39244019401`'s `grt` returned in 33 min under emulation, with 15,088 jumpers on 9,462
+        nets and the estimate 12,339 → 4,885.
+      - D5 row: "`drt` times out". Next is a re-dispatch from this run's `grt` (uploaded) with
+        `antenna_repair=jumper`, the same other inputs and `drt_end_iter=28`. That also gives the
+        hold-back's first router count. Diode repair stays off until a change bounds or replaces
+        its legalization.
+
+      **Jumper-only retry, 2026-10-23: 8 router violations (run `39906592139`).** Resume from
+      `39696194006`'s `grt`, with the same inputs except `antenna_repair=jumper`. `drt ok
+      antenna=jumper`, `final ok`, and the DEF is published.
+      - Timing: `repair_antennas -jumper_only` took 4 min (15,557 jumpers on 9,647 nets, `grt`
+        estimate 12,495 → 4,967). `detailed_route` took 7 h 04 m for 29 iterations, against
+        16 h 49 m for the baseline's 33. All of `drt` took 7 h 28 m.
+
+      | | `39244019401` (no hold-back, no repair) | `39906592139` (Metal5 0.55, jumpers) |
+      |---|---:|---:|
+      | router count after iteration 28 | 138 | **8** (Metal5 5, Metal2 2, Metal4 1, all shorts) |
+      | violations inside an SRAM footprint | 121 (three macros) | 5 (two macros) |
+      | antenna nets / pins after `drt` | 11,732 / 15,605 | 8,627 / 11,287 (−26 % nets) |
+      | WNS at `grt` | −11.02 ns | −12.05 ns |
+
+      - Iterations 13–16 were at 155–120, and iteration 17 jumped to 350. The router then
+        converged to 8–10 from iteration 22.
+      - **The SRAM shorts are almost gone.** The hot I-cache way-3 macro, which had 82, is clean.
+        The 5 that remain are Metal5 shorts near the east edges of I-cache `data_3_low`
+        (x ≈ 2916 of 2152–2937) and D-cache bank `__1` (x ≈ 6988 of 6217–7001). The other 3
+        are in channels 8–34 µm from a macro. So the hold-back works, and its value is close.
+      - **Antennas: jumpers alone are not enough.** 74 % of the no-repair count is left. By
+        lowest violating layer:
+        - Metal4: 8,637 → 5,792
+        - Metal5: 1,976 → 2,192
+        - Metal3: 871 → 333
+        - TopMetal1: 58 → 227
+        - Metal2: 190 → 83
+
+        Jumpers move charge collection upward, so Metal5 and TopMetal1 rise. Global routing's
+        estimate after jumpers (4,967) undercounts the routed result. The antenna problem
+        needs diodes or `-ratio_margin`, and diode insertion hangs (run `39696194006`).
+      - D5 reading:
+        - Router: "SRAM shorts remain, fewer than before". D5's retry is Metal5 0.70, from
+          `cts`, about 22 h.
+        - Antennas: "well above 10 %". This needs a follow-up change on diode repair: bound it,
+          legalize the diodes with the flow's diamond legalizer, or use `-ratio_margin`.
+
+      **Outcome (change closed 2026-10-23).** The 0.70 retry was skipped, by user decision.
+      8 violations is near-clean. A larger hold-back would put more overflow into the channels,
+      already 7,153 at 0.55, and cost more timing. And the antenna leftover does not depend on
+      the Metal5 value. Next steps, in order:
+      1. **Adopt and requote.** One change makes Metal5 0.55 and jumper-only repair the lane's
+         defaults, together with die scale 1.25, density 0.50 and Metal2 0.60. The same change
+         requotes the thesis P&R figures on them (the "Next change" above).
+      2. **Antenna follow-up.** A change makes diode repair finish: bound it, legalize the diodes
+         with the flow's diamond legalizer, or use `-ratio_margin`. It is measured against
+         8,627 nets.
+      3. **PDN lever (b).** Use fewer or x-aligned via stacks over the SRAMs, but only if the
+         5 Metal5 shorts at the macros' east edges matter for signoff.
 
 **2026-10-11 finding: `DRT-0218` is not a placement problem.** Run `38094932339` placed legally
 and `drt` still aborted with `DRT-0218`, on one clock net (`clknet_12_3602__leaf…`). Probes on
