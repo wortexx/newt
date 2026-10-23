@@ -246,11 +246,12 @@ The manual dispatch SHALL accept these optional inputs, all empty by default:
 - the legalizer used by detailed placement and CTS, and its search window;
 - whether to skip post-route timing repair.
 - detailed routing's iteration budget;
-- whether to run antenna repair;
+- whether to run antenna repair, and in which mode: full repair, or jumper insertion only;
 - the share of Metal2's capacity that global routing holds back;
+- the share of Metal5's capacity that global routing holds back over the SRAMs;
 - the placement padding, in sites, on each side of every standard cell.
 
-An empty input SHALL keep the flow's default for that setting. Post-route timing repair SHALL be skipped by default and SHALL run only when the dispatch explicitly asks for it. Antenna repair SHALL likewise be skipped by default and SHALL run only when the dispatch explicitly asks for it. An empty iteration budget SHALL keep the lane's default budget. An empty Metal2 hold-back SHALL keep the flow's default. An empty cell padding SHALL keep the flow's default of no padding. With all inputs empty, a dispatched run SHALL behave exactly like a scheduled run. These inputs SHALL NOT change the flow's success gate: a run that stops before the gate stage is reached SHALL still exit non-zero, and post-route repair, antenna repair and detailed routing SHALL stay best-effort whether they are skipped, complete, fail or time out. Selecting a legalizer SHALL NOT bypass the flow's placement legality checks.
+An empty input SHALL keep the flow's default for that setting. Post-route timing repair SHALL be skipped by default and SHALL run only when the dispatch explicitly asks for it. Antenna repair SHALL likewise be skipped by default and SHALL run only when the dispatch explicitly asks for it. An antenna-repair value that names no known mode SHALL fail the run before P&R starts, rather than fall back to a default. An empty iteration budget SHALL keep the lane's default budget. An empty Metal2 hold-back SHALL keep the flow's default. An empty SRAM Metal5 hold-back SHALL keep the flow's default of no hold-back. An empty cell padding SHALL keep the flow's default of no padding. With all inputs empty, a dispatched run SHALL behave exactly like a scheduled run. These inputs SHALL NOT change the flow's success gate: a run that stops before the gate stage is reached SHALL still exit non-zero, and post-route repair, antenna repair and detailed routing SHALL stay best-effort whether they are skipped, complete, fail or time out. Selecting a legalizer SHALL NOT bypass the flow's placement legality checks.
 
 #### Scenario: Weekly run
 
@@ -299,13 +300,28 @@ An empty input SHALL keep the flow's default for that setting. Post-route timing
 
 #### Scenario: Manual dispatch runs antenna repair
 
-- **WHEN** a user dispatches the P&R lane asking for antenna repair
-- **THEN** the detailed-route stage runs antenna repair before routing, its status records that repair ran, and a failure or timeout in it does not change the run's exit status
+- **WHEN** a user dispatches the P&R lane asking for full antenna repair
+- **THEN** the detailed-route stage runs antenna repair, inserting jumpers and diodes, before routing, its status records that full repair ran, and a failure or timeout in it does not change the run's exit status
+
+#### Scenario: Manual dispatch runs jumper-only antenna repair
+
+- **WHEN** a user dispatches the P&R lane asking for jumper-only antenna repair
+- **THEN** the detailed-route stage runs antenna repair before routing without inserting diode cells, its status records that jumper-only repair ran, and a failure or timeout in it does not change the run's exit status
+
+#### Scenario: Manual dispatch names an unknown antenna-repair mode
+
+- **WHEN** a user dispatches the P&R lane with an antenna-repair value that is neither empty nor a known mode
+- **THEN** the run fails before P&R starts, with an error listing the accepted values
 
 #### Scenario: Manual dispatch sets global routing's Metal2 hold-back
 
 - **WHEN** a user dispatches the P&R lane with a Metal2 hold-back for global routing
 - **THEN** global routing and every later routing stage hold back that share of Metal2's capacity, the stage logs record the value used, Metal3 keeps the flow's default, and the run's exit status still follows the global-route gate
+
+#### Scenario: Manual dispatch sets the SRAM Metal5 hold-back
+
+- **WHEN** a user dispatches the P&R lane with an SRAM Metal5 hold-back
+- **THEN** global routing and every later routing stage hold back that share of Metal5's capacity inside every SRAM's footprint, the stage logs record the value used, no other layer's adjustment changes, and the run's exit status still follows the global-route gate
 
 #### Scenario: Manual dispatch pads standard cells
 
