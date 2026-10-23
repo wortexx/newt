@@ -31,9 +31,11 @@ Tags: **[edit]** plain editing, checked with cheap local validation (actionlint,
   - `grt.tcl` and `drt.tcl` logged the SRAM adjustment over 32 regions;
   - `drt ok antenna=full`, and `drt-violations` and `drt-antenna` rows are present;
   - `final ok` with the DEF artifact.
-- [ ] 4.2 **[edit]** Compare with run `39244019401` per D4: the router's count after iteration 28 (138), violations inside SRAM footprints (from `basilisk_route_drc.rpt`), antenna nets and pins (11,732 / 15,605), `grt` overflow (2,529), WNS at `grt` (−11.02 ns), and `repair_antennas` time and insertions. Record it in docs/infra-plan.md under the 2026-10-21 analysis. Then pick D5's row and ask the user before any follow-up dispatch.
-- [ ] 4.3 **[long-run]** *(only if 4.2 lands on a D5 retry row; ask the user first)* Dispatch the retry D5 names (Metal5 0.70, hold-back without antenna repair, or `antenna_repair=jumper`), from the checkpoint D5 names. Verify and record it as in 4.1–4.2.
+  - *Ran 2026-10-22 as run `39696194006`:* `cts` and earlier restored, SRAM adjustment logged over 32 regions in `grt` and `drt`. `drt` hit its 24 h timeout inside `repair_antennas` (diode legalization did not converge, then a silent hang), so `drt ok antenna=full` and `final ok` were not met. Reports are in `target/ihp13/openroad/out/ci-39696194006/`. The D5 retry is 4.3.
+- [x] 4.2 **[edit]** Compare with run `39244019401` per D4: the router's count after iteration 28 (138), violations inside SRAM footprints (from `basilisk_route_drc.rpt`), antenna nets and pins (11,732 / 15,605), `grt` overflow (2,529), WNS at `grt` (−11.02 ns), and `repair_antennas` time and insertions. Record it in docs/infra-plan.md under the 2026-10-21 analysis. Then pick D5's row and ask the user before any follow-up dispatch.
+- [x] 4.3 **[long-run]** *(only if 4.2 lands on a D5 retry row; ask the user first)* Dispatch the retry D5 names (Metal5 0.70, hold-back without antenna repair, or `antenna_repair=jumper`), from the checkpoint D5 names. Verify and record it as in 4.1–4.2.
+  - *Ran 2026-10-23 as run `39906592139`* (jumper-only, from `39696194006`'s `grt`): `drt ok antenna=jumper`, `final ok`, DEF published. 8 router violations after iteration 28 (5 inside two SRAMs), antenna 8,627 nets / 11,287 pins. Reports are in `target/ihp13/openroad/out/ci-39906592139/`, and the record is in docs/infra-plan.md.
 
 ## 5. Close-out
 
-- [ ] 5.1 **[edit]** Check that docs/infra-plan.md states the outcome and the next step: adopting the defaults together with the thesis requote, the PDN lever, or the antenna follow-up. Verify `openspec validate drc-clean-sram-metal5-and-antenna --strict` passes.
+- [x] 5.1 **[edit]** Check that docs/infra-plan.md states the outcome and the next step: adopting the defaults together with the thesis requote, the PDN lever, or the antenna follow-up. Verify `openspec validate drc-clean-sram-metal5-and-antenna --strict` passes.
