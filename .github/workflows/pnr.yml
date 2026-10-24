@@ -39,7 +39,7 @@ on:
         required: false
         default: ''
       gpl_density:
-        description: 'Global-placement starting target density for both gpl passes (empty = the default in scripts/pnr/common.tcl)'
+        description: 'Global-placement starting target density for both gpl passes (empty = the default in scripts/pnr/common.tcl, 0.50; 0.65 = the earlier default)'
         required: false
         default: ''
       gpl_keep_resize:
@@ -47,7 +47,7 @@ on:
         required: false
         default: ''
       die_scale:
-        description: 'Core width/height scale relative to the taped-out die (empty = the default in scripts/pnr/common.tcl, 1.10; 1.0 = the taped-out 6230 x 5478 um die)'
+        description: 'Core width/height scale relative to the taped-out die (empty = the default in scripts/pnr/common.tcl, 1.25; 1.10 = the earlier default; 1.0 = the taped-out 6230 x 5478 um die)'
         required: false
         default: ''
       dpl_legalizer:
@@ -63,19 +63,19 @@ on:
         required: false
         default: ''
       drt_end_iter:
-        description: 'Detailed-routing iteration budget, -droute_end_iter (empty = 5, as on scheduled runs; 64 = OpenROAD''s default; the 24h drt timeout still applies)'
+        description: 'Detailed-routing iteration budget, -droute_end_iter (empty = 28, as on scheduled runs; 64 = OpenROAD''s default; the 24h drt timeout still applies)'
         required: false
         default: ''
       antenna_repair:
-        description: 'Antenna repair before detailed routing (empty = skip, as on scheduled runs; 1 = full repair_antennas; jumper = repair_antennas -jumper_only, no diodes; best-effort; any other value fails the run)'
+        description: 'Antenna repair before detailed routing (empty or jumper = repair_antennas -jumper_only, no diodes, as on scheduled runs; 1 = full repair_antennas; skip = no repair; best-effort; any other value fails the run)'
         required: false
         default: ''
       grt_metal2_adjust:
-        description: 'Share of Metal2 capacity global routing holds back, 0 to <1 (empty = the default in scripts/pnr/common.tcl, 0.30; Metal3 stays 0.30)'
+        description: 'Share of Metal2 capacity global routing holds back, 0 to <1 (empty = the default in scripts/pnr/common.tcl, 0.60; 0.30 = the earlier default; Metal3 stays 0.30)'
         required: false
         default: ''
       sram_metal5_adjust:
-        description: 'Share of Metal5 capacity global routing holds back inside every SRAM footprint, 0 to <1 (empty = the default in scripts/pnr/common.tcl, 0 = no hold-back)'
+        description: 'Share of Metal5 capacity global routing holds back inside every SRAM footprint, 0 to <1 (empty = the default in scripts/pnr/common.tcl, 0.55; 0 = no hold-back, the earlier default)'
         required: false
         default: ''
       cell_pad_sites:
@@ -170,16 +170,18 @@ jobs:
       contents: read
     steps:
       # Fail an unknown antenna_repair value here, before the VM starts,
-      # rather than let the run fall back to skipping or full repair
-      # (drc-clean-sram-metal5-and-antenna design D2). drt.tcl rejects an
-      # unknown PNR_ANTENNA_REPAIR_MODE too, for local runs.
+      # rather than let the run fall back to jumper-only or full repair
+      # (drc-clean-sram-metal5-and-antenna design D2). The accepted values
+      # are empty, jumper, 1 and skip (adopt-drc-clean-defaults-and-requote
+      # D1). drt.tcl rejects an unknown PNR_ANTENNA_REPAIR_MODE too, for
+      # local runs.
       - name: Check the antenna_repair input
         env:
           ANTENNA_REPAIR: ${{ github.event.inputs.antenna_repair || '' }}
         run: |
           case "$ANTENNA_REPAIR" in
-            ''|1|jumper) echo "antenna_repair='${ANTENNA_REPAIR}'" ;;
-            *) echo "::error::antenna_repair='${ANTENNA_REPAIR}' is not accepted: use empty (skip), 1 (full repair) or jumper (jumper-only repair)"
+            ''|jumper|1|skip) echo "antenna_repair='${ANTENNA_REPAIR}'" ;;
+            *) echo "::error::antenna_repair='${ANTENNA_REPAIR}' is not accepted: use empty or jumper (jumper-only repair), 1 (full repair) or skip (no repair)"
                exit 1 ;;
           esac
 
@@ -604,23 +606,23 @@ jobs:
         # Antenna repair is manufacturing signoff, not PPA - skip it in CI
         # (see drt.tcl's comment for the -jumper_only middle ground).
         #
-        # The skip is now the antenna_repair dispatch input's default
-        # (drc-clean-pnr D1): empty keeps PNR_SKIP_ANTENNA_REPAIR=1, so
-        # scheduled, tag and input-less runs are unchanged, and 1 runs
-        # repair_antennas on demand. The hang above was at 101% demand;
-        # whether repair fits on a sparser, legal layout is what that change
-        # measures. Written as `!= '1' && '1' || '0'` so the expression never
+        # The skip became the antenna_repair dispatch input's default
+        # (drc-clean-pnr D1), and is now its `skip` value: only
+        # antenna_repair=skip sets PNR_SKIP_ANTENNA_REPAIR=1. Full repair
+        # hung the same way at 46% utilization (run 39696194006), so the
+        # default is jumper-only below (adopt-drc-clean-defaults-and-requote
+        # D1). Written as `== 'skip' && '1' || '0'` so the expression never
         # relies on the string '0' being truthy.
         #
-        # PNR_ANTENNA_REPAIR_MODE: antenna_repair=jumper runs
+        # PNR_ANTENNA_REPAIR_MODE: empty and antenna_repair=jumper run
         # repair_antennas -jumper_only (no diode cells, so none of the
-        # legalization that stalled above), 1 runs the full repair; any
-        # other value already failed the start job (drc-clean-sram-metal5-
-        # and-antenna D2). Empty still sets PNR_SKIP_ANTENNA_REPAIR=1, so the
-        # mode is then unused.
+        # legalization that stalled above): on the 1.25 die it took 4 min and
+        # the route reached 8 violations (run 39906592139). 1 runs the full
+        # repair; any other value already failed the start job (drc-clean-
+        # sram-metal5-and-antenna D2). With skip the mode is unused.
         #
-        # PNR_DRT_END_ITER=5 and PNR_TIMEOUT_DRT=86400 (24 h)
-        # (bridge-wrong-way-route-guides D4). Measured on the enlarged die (run
+        # PNR_DRT_END_ITER=28 and PNR_TIMEOUT_DRT=86400 (24 h). The budget was
+        # 5 (bridge-wrong-way-route-guides D4), measured on the 1.10 die (run
         # 38178131540): ~30 min of setup, then ~3 h per routing iteration, not
         # getting faster, with violations 3.12 M -> 2.64 M -> 2.58 M: the design
         # does not converge at this congestion, so more iterations buy almost
@@ -629,9 +631,13 @@ jobs:
         # hitting the timeout instead loses all of that. The 24 h timeout is
         # the margin; run_pnr.sh's 16 h default would be too tight. The job's
         # 48 h ceiling holds: a full run reaches drt in about 6 h. The budget
-        # is now the drt_end_iter dispatch input, empty = 5 (drc-clean-pnr
+        # is now the drt_end_iter dispatch input, empty = the default (drc-clean-pnr
         # D1), so a probe or a route-to-convergence run needs no commit; the
-        # timeout stays fixed.
+        # timeout stays fixed. On the 1.25 die with the Metal2 and SRAM Metal5
+        # hold-backs the router converges instead: 29 iterations (0-28) took
+        # 7 h 04 m and ended at 8 violations (run 39906592139), so the default
+        # is 28, well inside the timeout (adopt-drc-clean-defaults-and-requote
+        # D1).
         #
         # PROJ_NAME=basilisk: the "Synthesize" step above runs `make
         # synth-all` from the repo root, which includes iguana.mk - that's
@@ -659,8 +665,13 @@ jobs:
         #
         # PNR_GPL_DENSITY / PNR_GPL_KEEP_RESIZE / PNR_DIE_SCALE: the
         # gpl_density, gpl_keep_resize and die_scale dispatch inputs, empty by
-        # default (the scripts then use common.tcl's values), so trying another
+        # default (the scripts then use common.tcl's values: density 0.50, die
+        # 1.25 since adopt-drc-clean-defaults-and-requote D1), so trying another
         # value costs a dispatch, not a commit (raise-gpl-density-target D1, D5).
+        # A resume_from_run of a run made before that change mixes settings
+        # unless the dispatch sets its old values (1.10, 0.65, Metal2 0.30,
+        # SRAM Metal5 0, antenna_repair=skip, drt_end_iter=5): the synth-key
+        # guard does not catch it, since the netlist is the same.
         #
         # PNR_DPL_LEGALIZER: the dpl_legalizer dispatch input, empty by default
         # (common.tcl's diamond legalizer). negotiation selects OpenROAD's own
@@ -674,12 +685,12 @@ jobs:
         # Quoted, as it may hold "x y".
         #
         # PNR_GRT_METAL2_ADJUST: the grt_metal2_adjust dispatch input, empty by
-        # default (common.tcl's 0.30, chip.tcl's value). Applied by every stage
+        # default (common.tcl's 0.60; chip.tcl's was 0.30). Applied by every stage
         # that routes (grt, grt_repair, drt), so with resume_from_run exclude
         # grt and every later checkpoint (drc-clean-pnr D7).
         #
         # PNR_GRT_SRAM_METAL5_ADJUST: the sram_metal5_adjust dispatch input,
-        # empty by default (common.tcl's 0, no hold-back). Applied by the same
+        # empty by default (common.tcl's 0.55). Applied by the same
         # stages as the Metal2 one, so with resume_from_run exclude grt and
         # every later checkpoint (drc-clean-sram-metal5-and-antenna D1).
         #
@@ -687,7 +698,7 @@ jobs:
         # default (common.tcl's 0, no padding). Applied from gpl on, so with
         # resume_from_run exclude gpl2 and every later checkpoint
         # (drc-clean-pnr D8). dpl's and cts's gated legality checks cover it.
-        run: PNR_GPL_DENSITY=${{ github.event.inputs.gpl_density || '' }} PNR_GPL_KEEP_RESIZE=${{ github.event.inputs.gpl_keep_resize || '' }} PNR_DIE_SCALE=${{ github.event.inputs.die_scale || '' }} PNR_DPL_LEGALIZER=${{ github.event.inputs.dpl_legalizer || '' }} PNR_DPL_MAX_DISPLACEMENT="${{ github.event.inputs.dpl_max_displacement || '' }}" PNR_TIMEOUT_GRT=57600 PNR_TIMEOUT_GRT_REPAIR=57600 PNR_SKIP_GRT_REPAIR=${{ github.event.inputs.skip_grt_repair || '1' }} PNR_SKIP_ANTENNA_REPAIR=${{ (github.event.inputs.antenna_repair != '1' && github.event.inputs.antenna_repair != 'jumper') && '1' || '0' }} PNR_ANTENNA_REPAIR_MODE=${{ github.event.inputs.antenna_repair == 'jumper' && 'jumper' || 'full' }} PNR_DRT_END_ITER=${{ github.event.inputs.drt_end_iter || '5' }} PNR_TIMEOUT_DRT=86400 PNR_STOP_AFTER=${{ github.event.inputs.stop_after || '' }} PNR_GRT_METAL2_ADJUST=${{ github.event.inputs.grt_metal2_adjust || '' }} PNR_GRT_SRAM_METAL5_ADJUST=${{ github.event.inputs.sram_metal5_adjust || '' }} PNR_CELL_PAD_SITES=${{ github.event.inputs.cell_pad_sites || '' }} make -C target/ihp13/openroad -f openroad.mk run-pnr PROJ_NAME=basilisk
+        run: PNR_GPL_DENSITY=${{ github.event.inputs.gpl_density || '' }} PNR_GPL_KEEP_RESIZE=${{ github.event.inputs.gpl_keep_resize || '' }} PNR_DIE_SCALE=${{ github.event.inputs.die_scale || '' }} PNR_DPL_LEGALIZER=${{ github.event.inputs.dpl_legalizer || '' }} PNR_DPL_MAX_DISPLACEMENT="${{ github.event.inputs.dpl_max_displacement || '' }}" PNR_TIMEOUT_GRT=57600 PNR_TIMEOUT_GRT_REPAIR=57600 PNR_SKIP_GRT_REPAIR=${{ github.event.inputs.skip_grt_repair || '1' }} PNR_SKIP_ANTENNA_REPAIR=${{ github.event.inputs.antenna_repair == 'skip' && '1' || '0' }} PNR_ANTENNA_REPAIR_MODE=${{ github.event.inputs.antenna_repair == '1' && 'full' || 'jumper' }} PNR_DRT_END_ITER=${{ github.event.inputs.drt_end_iter || '28' }} PNR_TIMEOUT_DRT=86400 PNR_STOP_AFTER=${{ github.event.inputs.stop_after || '' }} PNR_GRT_METAL2_ADJUST=${{ github.event.inputs.grt_metal2_adjust || '' }} PNR_GRT_SRAM_METAL5_ADJUST=${{ github.event.inputs.sram_metal5_adjust || '' }} PNR_CELL_PAD_SITES=${{ github.event.inputs.cell_pad_sites || '' }} make -C target/ihp13/openroad -f openroad.mk run-pnr PROJ_NAME=basilisk
 
       # Move the checkpoints out of the shared workspace before this job
       # releases the runner. This is the whole fix for the collision that

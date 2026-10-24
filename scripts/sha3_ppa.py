@@ -45,7 +45,13 @@ activity, against the reference (the same SoC without the SHA-3 hardware).
 refuses the comparison, naming the run and the item, unless both runs passed
 the gated legality check after `dpl` and `cts` and report the same die
 (change requote-sha3-pnr-legal-placement), so runs from before change
-use-diamond-legalizer can no longer be compared.
+use-diamond-legalizer can no longer be compared. It also refuses two runs
+whose logged flow settings differ (gpl density, grt Metal2 and SRAM Metal5
+hold-backs, stop_after, and drt's budget and antenna mode when both routed),
+states those settings in the section, and gives each run's routed outcome:
+the router's final count and iterations and the antenna checker's counts, or
+that the run has no routed design (change
+adopt-drc-clean-defaults-and-requote, design D5).
 
 With --pnr-repair DIR --pnr-ref-repair DIR (change
 bounded-grt-repair-measurement), each the `pnr-reports` artifact of a run
@@ -453,7 +459,101 @@ def pnr_metrics(d):
         "hpwl_cts_um": float(hpwl_cts[-1]) if hpwl_cts else None,
         "grt_area_um2": pnr_design_area(rep / "pnr_grt.log", "grt"),
         "cts_overlaps": pnr_cts_overlaps(cts, rep / "basilisk_cts_check_placement.rpt"),
+        **pnr_flow_settings(d),
     }
+
+
+def pnr_status_rows(d):
+    """pnr_status.log as (stage, status, detail) rows, in order."""
+    rows = []
+    for line in (Path(d) / "save" / "pnr_status.log").read_text().splitlines():
+        f = line.split(maxsplit=2)
+        if len(f) >= 2:
+            rows.append((f[0], f[1], f[2] if len(f) > 2 else ""))
+    return rows
+
+
+# The settings two runs must share (sha3-evaluation spec: the same flow
+# inputs), in the order the flow sentence names them.
+PNR_SETTINGS = ["gpl density", "grt Metal2 hold-back", "SRAM Metal5 hold-back",
+                "stop after", "drt iteration budget", "antenna repair"]
+
+
+def pnr_flow_settings(d):
+    """The flow settings a P&R run logged (change
+    adopt-drc-clean-defaults-and-requote, design D5): gpl's target density,
+    grt's Metal2 and SRAM Metal5 hold-backs, the stage it stopped after, and
+    drt's iteration budget and antenna-repair mode from its status detail.
+    The routing lines are read from grt's log, else drt's, as both apply them.
+    A log that exists without a hold-back line means the flow's value of the
+    time: Metal2 was a fixed 0.30 before it was logged (change drc-clean-pnr),
+    and a zero Metal5 share logs nothing. A value is None when no log that
+    would carry it exists (its stage was restored), and the drt values are
+    None unless drt ended ok."""
+    d = Path(d)
+    rep = d / "reports"
+    rows = pnr_status_rows(d)
+
+    def logged(logs, pattern, unlogged):
+        texts = [(rep / f).read_text(errors="replace") for f in logs if (rep / f).exists()]
+        if not texts:
+            return None
+        m = next((m for m in (re.search(pattern, t, re.M) for t in texts) if m), None)
+        return m.group(1) if m else unlogged
+
+    routing_logs = ("pnr_grt.log", "pnr_drt.log")
+    drt_ok = [detail for stage, status, detail in rows if stage == "drt" and status == "ok"]
+    drt = dict(kv.split("=", 1) for kv in (drt_ok[-1] if drt_ok else "").split() if "=" in kv)
+    stop = [stage for stage, status, _ in rows if status == "stop-after"]
+    return {
+        "settings": {
+            "gpl density": logged(("pnr_gpl.log",),
+                                  r"^Global placement target density: (\S+)$", None),
+            "grt Metal2 hold-back": logged(
+                routing_logs, r"^Global routing layer adjustment: Metal2 ([^,\s]+),", "0.30"),
+            "SRAM Metal5 hold-back": logged(
+                routing_logs, r"^SRAM Metal5 adjustment: (\S+) over \d+ regions$", "0"),
+            "stop after": stop[-1] if stop else None,
+            "drt iteration budget": drt.get("droute_end_iter"),
+            "antenna repair": drt.get("antenna"),
+        },
+        **pnr_routed_outcome(rows),
+    }
+
+
+def pnr_routed_outcome(rows):
+    """Detailed routing's outcome from the status rows (sha3-evaluation spec:
+    the routed outcome of both runs): drt's last status and detail, the
+    router's final count and iteration count (`drt-violations final=<n>
+    iterations=<i>`), and the antenna checker's net and pin counts
+    (`drt-antenna nets=<n> pins=<m>`). The counts are None, never zero, when
+    there is no routed design: no `drt ok` row, since a drt that timed out
+    still logs the count it reached (run 39111124087), or a `none` row."""
+    drt = [(status, detail) for stage, status, detail in rows
+           if stage == "drt" and status != "stop-after"]
+    routed = any(status == "ok" for status, _ in drt)
+    viol = [(status, detail) for stage, status, detail in rows
+            if stage == "drt-violations" and status.startswith("final=")]
+    ant = [(status, detail) for stage, status, detail in rows
+           if stage == "drt-antenna" and status.startswith("nets=")]
+    iters = re.search(r"\biterations=(\d+)", viol[-1][1]) if viol else None
+    pins = re.search(r"\bpins=(\d+)", ant[-1][1]) if ant else None
+    return {
+        "drt_status": drt[-1] if drt else None,
+        "drt_violations": int(viol[-1][0][len("final="):]) if routed and viol else None,
+        "drt_iterations": int(iters.group(1)) if routed and iters else None,
+        "drt_antenna": (int(ant[-1][0][len("nets="):]), int(pins.group(1)))
+        if routed and ant and pins else None,
+    }
+
+
+def pnr_same_setting(a, b):
+    """Two logged setting values are the same, numerically where both are
+    numbers (0.6 and 0.60 agree)."""
+    try:
+        return float(a) == float(b)
+    except (TypeError, ValueError):
+        return a == b
 
 
 def pnr_placement_facts(rep, dpl_log, cts_log):
@@ -530,12 +630,22 @@ def pnr_run_problems(m, name):
 def pnr_comparable(run, ref, run_id, ref_id):
     """Why the two P&R runs cannot be compared, one line per item, or [] when
     they can (sha3-evaluation spec: legal placement after dpl and cts on both
-    sides, on the same die)."""
+    sides, on the same die, with the same flow inputs). The drt settings are
+    compared only when both runs' drt ended ok: a run whose drt failed keeps
+    its grt figures comparable (design D4), and says it has no routed design."""
     errors = (pnr_run_problems(run, f"run {run_id or '?'} (with both arms)")
               + pnr_run_problems(ref, f"run {ref_id or '?'} (reference)"))
     if run["die"] and ref["die"] and run["die"] != ref["die"]:
         errors.append(f"die mismatch: run {run_id or '?'} '{run['die']}' against run "
                       f"{ref_id or '?'} '{ref['die']}'")
+    drt_settings = ("drt iteration budget", "antenna repair")
+    for k in PNR_SETTINGS:
+        a, b = run["settings"][k], ref["settings"][k]
+        if k in drt_settings and (a is None or b is None):
+            continue
+        if not pnr_same_setting(a, b):
+            errors.append(f"{k} mismatch: run {run_id or '?'} {a or 'not logged'} against "
+                          f"run {ref_id or '?'} {b or 'not logged'}")
     return errors
 
 
@@ -655,23 +765,79 @@ def pnr_repair_text(repair, ref_repair, repair_ids):
                    "Phase 11).")
 
 
-def pnr_stage_text(latest, repaired, repair, ref_repair, repair_ids):
-    """The "Stage used" sentence of the P&R section, naming the repair status."""
+def pnr_stage_text(latest, repaired, repair, ref_repair, repair_ids, drt_ran=False):
+    """The "Stage used" sentence of the P&R section, naming the repair status.
+    With drt_ran, detailed routing ran on at least one side after the quoted
+    stage, and its outcome is in the table."""
+    stage = pnr_stage_head(latest, repaired, repair_ids,
+                           "ran after it, with its outcome in the table below" if drt_ran
+                           else "was not run")
+    if (repair or ref_repair) and not repaired:
+        stage += " " + pnr_repair_text(repair, ref_repair, repair_ids)
+    return stage
+
+
+def pnr_stage_head(latest, repaired, repair_ids, route):
+    """The "Stage used" sentence without the repair attempts; `route` says
+    whether detailed routing ran."""
     if repaired:
         stage = (f"**Stage used: grt_repair**, post-route timing repair resumed from each run's "
                  f"`grt` checkpoint (reference: run {(repair_ids or (None, None))[1] or '?'}; "
                  f"with both arms: run {(repair_ids or (None, None))[0] or '?'}; "
                  "`grt_repair.tcl`'s bounded repair, `-repair_tns 20 -max_buffer_percent 15`). "
-                 "Detailed routing is best-effort and was not run.")
+                 f"Detailed routing is best-effort and {route}.")
     elif latest == "grt":
         stage = ("**Stage used: grt, before post-route repair**: the lane's gate. `grt_repair` "
-                 "is skipped by default, and detailed routing is best-effort and was not run.")
+                 f"is skipped by default, and detailed routing is best-effort and {route}.")
     else:
         stage = (f"**Stage used: {latest or 'none'}**, the latest stage the run reached "
-                 "(detailed routing is best-effort and was not run).")
-    if (repair or ref_repair) and not repaired:
-        stage += " " + pnr_repair_text(repair, ref_repair, repair_ids)
+                 f"(detailed routing is best-effort and {route}).")
     return stage
+
+
+def pnr_settings_text(run):
+    """The flow-settings clause of the P&R section, from the run's logs
+    (design D5); pnr_comparable has checked that the reference logged the
+    same."""
+    st = run["settings"]
+    m5 = st["SRAM Metal5 hold-back"]
+    parts = [f"`gpl` target density {st['gpl density'] or 'not logged'}",
+             f"`grt` Metal2 hold-back {st['grt Metal2 hold-back'] or 'not logged'}",
+             "no SRAM Metal5 hold-back" if m5 is not None and float(m5) == 0
+             else f"SRAM Metal5 hold-back {m5 or 'not logged'}"]
+    antenna = {"jumper": "jumper-only antenna repair", "full": "full antenna repair",
+               "skipped": "no antenna repair"}
+    if st["drt iteration budget"]:
+        a = st["antenna repair"]
+        parts.append(f"detailed routing with a {st['drt iteration budget']}-iteration budget "
+                     f"(`droute_end_iter`) and {antenna.get(a, f'antenna repair {a}')}")
+    stop = st["stop after"]
+    parts.append(f"`stop_after={stop}`" if stop else "no `stop_after`, through `final`")
+    return ", ".join(parts)
+
+
+def pnr_routed_text(m):
+    """One run's detailed-routing outcome for the table: the router's count
+    with its iterations, or that there is no routed design."""
+    if m["drt_violations"] is None:
+        return pnr_no_route_text(m)
+    return f"{m['drt_violations']:,} after {m['drt_iterations'] or '?'} iterations"
+
+
+def pnr_no_route_text(m):
+    """Why a run has no routed design: drt never ran, or how it ended."""
+    st = m["drt_status"]
+    if not st:
+        return "no routed design (`drt` not run)"
+    return f"no routed design (`drt {' '.join(x for x in st if x)}`)"
+
+
+def pnr_antenna_text(m):
+    """One run's antenna-checker counts for the table, never a zero for a run
+    without them."""
+    if m["drt_antenna"] is None:
+        return "no antenna count"
+    return f"{m['drt_antenna'][0]:,} / {m['drt_antenna'][1]:,}"
 
 
 def pnr_section(run, ref, run_id, ref_id, period, repair=None, ref_repair=None,
@@ -686,7 +852,8 @@ def pnr_section(run, ref, run_id, ref_id, period, repair=None, ref_repair=None,
     def num(x, fmt):
         return format(x, fmt) if x is not None else "—"
 
-    stage = pnr_stage_text(latest, repaired, repair, ref_repair, repair_ids)
+    stage = pnr_stage_text(latest, repaired, repair, ref_repair, repair_ids,
+                           drt_ran=bool(run["drt_status"] or ref["drt_status"]))
     out = [
         "## SoC place and route (task 5.4)",
         "",
@@ -695,7 +862,7 @@ def pnr_section(run, ref, run_id, ref_id, period, repair=None, ref_repair=None,
         "SoC without the SHA-3 hardware: CV-X-IF off, no Keccak instances, no external AXI "
         "subordinate; the reference). Same flow and inputs on both sides: die "
         f"{run['die']}, {run['legalizer'] or '?'} legalizer, placement legal after `dpl` and "
-        "`cts` (the flow's gated `check_placement`), `stop_after=grt`. "
+        f"`cts` (the flow's gated `check_placement`), {pnr_settings_text(run)}. "
         f"{stage} Corner: `tt` (`typ_1p20V_25C`). Constraint: {period:.1f} ns.",
         "",
         "| | reference | with both arms |",
@@ -728,6 +895,9 @@ def pnr_section(run, ref, run_id, ref_id, period, repair=None, ref_repair=None,
         f"{num(ref['hpwl_cts_um'] and ref['hpwl_cts_um'] / 1e6, '.1f')} | "
         f"{num(run['hpwl_dpl_um'] and run['hpwl_dpl_um'] / 1e6, '.1f')} / "
         f"{num(run['hpwl_cts_um'] and run['hpwl_cts_um'] / 1e6, '.1f')} |",
+        f"| `drt` router violations | {pnr_routed_text(ref)} | {pnr_routed_text(run)} |",
+        f"| antenna violations after `drt` (nets / pins) | {pnr_antenna_text(ref)} | "
+        f"{pnr_antenna_text(run)} |",
         "",
     ]
     out += pnr_period_text(pnr_achieved_period(run, period, repair if repaired else None),

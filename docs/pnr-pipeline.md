@@ -44,7 +44,16 @@ behaves exactly like a scheduled run:
   before P&R starts (feeds `restore-checkpoints`, above). The `pnr` job's
   restore step refuses to resume if those checkpoints were built from a
   different netlist than the dispatched ref produces (the synth-key
-  identity guard).
+  identity guard). That guard checks only the netlist. Change
+  `adopt-drc-clean-defaults-and-requote` moved the flow's defaults (die
+  scale 1.10 → 1.25, `gpl_density` 0.65 → 0.50, `grt_metal2_adjust`
+  0.30 → 0.60, `sram_metal5_adjust` 0 → 0.55, `antenna_repair` skip →
+  jumper, `drt_end_iter` 5 → 28), and a checkpoint does not record the
+  values it was built with. So when resuming a run made before that change,
+  set the old values explicitly (`die_scale=1.10`, `gpl_density=0.65`,
+  `grt_metal2_adjust=0.30`, `sram_metal5_adjust=0`, `antenna_repair=skip`,
+  `drt_end_iter=5`), or the stages that run again mix settings with the
+  restored ones.
 - `resume_exclude` — space-separated checkpoint base names (no project
   prefix, no `.zip`) to leave out of that restore, so their stages run
   again. Feeds `PNR_RESUME_EXCLUDE`.
@@ -55,7 +64,9 @@ behaves exactly like a scheduled run:
   still exits non-zero.
 - `gpl_density` — the global-placement starting target density for both
   `gpl` passes, e.g. `0.70`. Feeds `PNR_GPL_DENSITY`. Empty means
-  `pnr_gpl_density`'s default in `scripts/pnr/common.tcl` (0.65).
+  `pnr_gpl_density`'s default in `scripts/pnr/common.tcl`, `0.50`
+  (`0.65`, the upstream value, before change
+  `adopt-drc-clean-defaults-and-requote`).
 - `gpl_keep_resize` — `gpl` pass 2's `-keep_resize_below_overflow`. Feeds
   `PNR_GPL_KEEP_RESIZE`. Empty means `pnr_gpl_keep_resize`'s default in
   `common.tcl` (0: the timing-driven iterations are virtual); `1.0` is
@@ -63,10 +74,13 @@ behaves exactly like a scheduled run:
 
 - `die_scale` — the core's width and height relative to the taped-out
   Basilisk die. Feeds `PNR_DIE_SCALE`. Empty means `pnr_die_scale`'s default
-  in `common.tcl`, `1.10`: a 6777 × 5950 µm die (+21 % core area), the default
-  since `use-diamond-legalizer` because the SoC with both SHA-3 arms cannot
-  be legalized after `cts` on the taped-out die. `1.0` is the taped-out
-  6230 × 5478 µm die. Lane figures are for the enlarged die, so compare runs
+  in `common.tcl`, `1.25` (core 40.29 M µm²), since change
+  `adopt-drc-clean-defaults-and-requote`: with `gpl_density` 0.50 and the
+  routing hold-backs below, that layout routes to 8 violations (run
+  39906592139). The earlier default, `1.10` (a 6777 × 5950 µm die, +21 %
+  core area, since `use-diamond-legalizer`), legalizes but does not route.
+  The SoC with both SHA-3 arms cannot be legalized after `cts` on the
+  taped-out die, `1.0` (6230 × 5478 µm). Lane figures are for the enlarged die, so compare runs
   only at the same setting. Changing it invalidates every checkpoint from
   `floorplan` on, so do not combine it with `resume_from_run`.
 
@@ -100,28 +114,33 @@ behaves exactly like a scheduled run:
 
 - `drt_end_iter` — detailed routing's iteration budget,
   `detailed_route -droute_end_iter`. Feeds `PNR_DRT_END_ITER`. Empty means
-  `5`, the budget on every scheduled and tag run; `64` is OpenROAD's own
-  default, for routing to convergence (change `drc-clean-pnr`). The stage's
+  `28`, the budget on every scheduled and tag run: 29 iterations took
+  7 h 04 m on run 39906592139 and ended at 8 violations (change
+  `adopt-drc-clean-defaults-and-requote`; it was `5` before). `64` is
+  OpenROAD's own default (change `drc-clean-pnr`). The stage's
   24h timeout (`PNR_TIMEOUT_DRT`) is fixed and still applies, and `drt`
   stays best-effort. Its `pnr_status.log` line records the budget used.
 
 - `antenna_repair` — whether to run `repair_antennas` before detailed
   routing, and how. Feeds `PNR_SKIP_ANTENNA_REPAIR` and
-  `PNR_ANTENNA_REPAIR_MODE`. Empty means skip, as on every scheduled and
-  tag run, since repair hung for about 14h at 101 % routing demand (run
-  34389061373, see `drt.tcl`). `1` runs the full repair (jumpers and
-  diodes). `jumper` runs `repair_antennas -jumper_only`, which inserts no
-  diode cells and so needs none of the legalization that stalled (change
-  `drc-clean-sram-metal5-and-antenna`, design D2). Any other value fails
-  the `start` job before the VM starts. Either way `drt` stays
+  `PNR_ANTENNA_REPAIR_MODE`. Empty or `jumper` runs
+  `repair_antennas -jumper_only`, as on every scheduled and tag run: it
+  inserts no diode cells and so needs none of the legalization that stalled
+  (change `drc-clean-sram-metal5-and-antenna`, design D2), and it took
+  4 min on run 39906592139. `1` runs the full repair (jumpers and diodes),
+  which hung at 101 % routing demand (run 34389061373) and again at 46 %
+  utilization (run 39696194006). `skip` runs no repair, the default before
+  change `adopt-drc-clean-defaults-and-requote`. Any other value fails the
+  `start` job before the VM starts. Either way `drt` stays
   best-effort, and its `pnr_status.log` line says `antenna=full`,
   `antenna=jumper` or `antenna=skipped`.
 
 - `grt_metal2_adjust` — the share of Metal2's capacity that global routing
   holds back (`set_global_routing_layer_adjustment Metal2`), in [0, 1).
   Feeds `PNR_GRT_METAL2_ADJUST`. Empty means `pnr_grt_metal2_adjust`'s
-  default in `common.tcl`, `0.30`, chip.tcl's value; Metal3 stays at 0.30.
-  A larger value moves global routes off Metal2, which held 84 % of the
+  default in `common.tcl`, `0.60` (`0.30`, chip.tcl's value, before change
+  `adopt-drc-clean-defaults-and-requote`); Metal3 stays at 0.30. A larger
+  value moves global routes off Metal2, which held 84 % of the
   detailed-routing violations on probe P2 (change `drc-clean-pnr`, design
   D7). Every routing stage logs `Global routing layer adjustment:` with the
   values used. It invalidates the `grt` checkpoint and everything after it,
@@ -131,11 +150,12 @@ behaves exactly like a scheduled run:
   routing holds back inside every SRAM's footprint
   (`set_global_routing_region_adjustment` on Metal5, one region per
   `RM_IHP*` instance), in [0, 1). Feeds `PNR_GRT_SRAM_METAL5_ADJUST`. Empty
-  means `pnr_grt_sram_metal5_adjust`'s default in `common.tcl`, `0`, no
-  hold-back. The SRAMs' power-grid via stacks leave 8 rows of Metal5 pads
+  means `pnr_grt_sram_metal5_adjust`'s default in `common.tcl`, `0.55`
+  (`0`, no hold-back, before change
+  `adopt-drc-clean-defaults-and-requote`); `0` turns it off. The SRAMs' power-grid via stacks leave 8 rows of Metal5 pads
   over each macro, and only 43 % of the Metal5 tracks there clear them all.
   Run 39244019401's last 121 detailed-routing violations were wrong-way
-  Metal5 jogs between those rows (change
+  Metal5 jogs between those rows; at 0.55 run 39906592139 left 5 (change
   `drc-clean-sram-metal5-and-antenna`, design D1). Every routing stage logs
   `SRAM Metal5 adjustment: <v> over <n> regions`. No other layer's
   adjustment changes. Like `grt_metal2_adjust`, it invalidates `grt` and
@@ -204,14 +224,14 @@ doing anything else.
 
 | # | Stage | Checkpoint | Gate? | What it does |
 |---|---|---|---|---|
-| 1 | `floorplan` | `power_grid` | **Gate** | Reads the synthesized netlist, links the design, reads SDC, runs `check_setup`/`report_checks` sanity checks, creates the floorplan (ring layout, 2-way or 4-way L1 cache depending on `L1CACHE_WAYS`; die scaled by `pnr_die_scale`, default 1.10, see `die_scale` above), then blocks placement in every gap between a macro and the core edge no wider than `pnr_macro_margin_max` (`scripts/pnr/common.tcl`, default 20 µm; `PNR_MACRO_MARGIN_MAX`, `0` turns it off). The floorplan keeps macros 8 µm (east/west) or 14 µm (south/north) off the core edge, and without the blocking the placer filled those margins with logic the macros wall in (6,308 cells and 9,313 nets routed outside the core in run 38094932339; change `keep-cells-out-of-macro-margins`). The log lists every blockage (`Macro margin blocked: …`) and the total. Then it builds the power grid (stripes/rings). Only stage that reads the netlist directly — everything after loads a checkpoint. Changing `PNR_MACRO_MARGIN_MAX`, or resuming a run with this blocking from checkpoints made before it, mixes floorplans: the restore's synth-key guard does not catch it, because the netlist is the same, so do not combine either with `resume_from_run` across that boundary. |
+| 1 | `floorplan` | `power_grid` | **Gate** | Reads the synthesized netlist, links the design, reads SDC, runs `check_setup`/`report_checks` sanity checks, creates the floorplan (ring layout, 2-way or 4-way L1 cache depending on `L1CACHE_WAYS`; die scaled by `pnr_die_scale`, default 1.25, see `die_scale` above), then blocks placement in every gap between a macro and the core edge no wider than `pnr_macro_margin_max` (`scripts/pnr/common.tcl`, default 20 µm; `PNR_MACRO_MARGIN_MAX`, `0` turns it off). The floorplan keeps macros 8 µm (east/west) or 14 µm (south/north) off the core edge, and without the blocking the placer filled those margins with logic the macros wall in (6,308 cells and 9,313 nets routed outside the core in run 38094932339; change `keep-cells-out-of-macro-margins`). The log lists every blockage (`Macro margin blocked: …`) and the total. Then it builds the power grid (stripes/rings). Only stage that reads the netlist directly — everything after loads a checkpoint. Changing `PNR_MACRO_MARGIN_MAX`, or resuming a run with this blocking from checkpoints made before it, mixes floorplans: the restore's synth-key guard does not catch it, because the netlist is the same, so do not combine either with `resume_from_run` across that boundary. |
 | 2 | `pre_place` | `pre_place` | **Gate** | Repairs tie-cell fanout, then `remove_buffers`. Deliberately its own tiny stage: `remove_buffers` is known to segfault roughly 1 run in 3, and isolating it means a retry only redoes this cheap step, not floorplan/power-grid. The only stage with a configured retry (1). |
-| 3 | `gpl` | `gpl2` | **Gate** | Global placement, two passes. Pass 1 (routability-driven) gives rough parasitics; `repair_design`/`repair_timing -repair_tns 70` clean up setup violations on that rough placement; pass 2 (routability + timing-driven) is the placement that actually carries forward. Both passes start from target density `pnr_gpl_density` (`scripts/pnr/common.tcl`, default 0.65; `PNR_GPL_DENSITY` / the `gpl_density` input override it). Pass 2's timing-driven iterations are virtual (`-keep_resize_below_overflow`, `pnr_gpl_keep_resize`, default 0; `PNR_GPL_KEEP_RESIZE` / the `gpl_keep_resize` input): they re-weight nets but insert no buffers. `gpl.tcl` logs both values. Both passes run routability mode with `-routability_inflation_ratio_coef 2.5 -routability_max_inflation_ratio 2.5`, so cells in congested regions are inflated enough to move; upstream's 1.2 added about 1 % area per routability iteration, and with the macro margins blocked it let the displaced cells pile into the SPI host corner and tripled `grt` overflow (change `keep-cells-out-of-macro-margins`, runs 38254112819 and 38395368038). Only stage besides `drt` that calls `set_thread_count` (up to 32 threads, capped by the VM's core count). |
+| 3 | `gpl` | `gpl2` | **Gate** | Global placement, two passes. Pass 1 (routability-driven) gives rough parasitics; `repair_design`/`repair_timing -repair_tns 70` clean up setup violations on that rough placement; pass 2 (routability + timing-driven) is the placement that actually carries forward. Both passes start from target density `pnr_gpl_density` (`scripts/pnr/common.tcl`, default 0.50; `PNR_GPL_DENSITY` / the `gpl_density` input override it). Pass 2's timing-driven iterations are virtual (`-keep_resize_below_overflow`, `pnr_gpl_keep_resize`, default 0; `PNR_GPL_KEEP_RESIZE` / the `gpl_keep_resize` input): they re-weight nets but insert no buffers. `gpl.tcl` logs both values. Both passes run routability mode with `-routability_inflation_ratio_coef 2.5 -routability_max_inflation_ratio 2.5`, so cells in congested regions are inflated enough to move; upstream's 1.2 added about 1 % area per routability iteration, and with the macro margins blocked it let the displaced cells pile into the SPI host corner and tripled `grt` overflow (change `keep-cells-out-of-macro-margins`, runs 38254112819 and 38395368038). Only stage besides `drt` that calls `set_thread_count` (up to 32 threads, capped by the VM's core count). |
 | 4 | `dpl` | `dpl` | **Gate** | Detailed (legalized) placement + mirror optimization. Single-threaded. Legalizes with `pnr_dpl_legalizer` (`scripts/pnr/common.tcl`, default `diamond`, OpenROAD's classic legalizer; `PNR_DPL_LEGALIZER=negotiation` selects OpenROAD's default, which leaves cells overlapping on this design). Ends with a **gated** `check_placement`: any overlap, padding or blocked-layer violation fails the stage before its checkpoint is saved, with the counts in `pnr_status.log` and the markers in `basilisk_dpl_check_placement.rpt`. Afterwards `run_pnr.sh` reports how `gpl` ended (below). |
 | 5 | `cts` | `cts` | **Gate** | Clock tree synthesis. Lifts clock dont-touch (only stage that does — clock nets are protected everywhere else), repairs clock inverters and post-CTS wire length, legalizes, then `repair_timing -setup -repair_tns 90` to fix the setup violations CTS itself introduces. Both legalizations use the same legalizer as `dpl`, and the stage ends with the same **gated** `check_placement` (`basilisk_cts_check_placement.rpt`). Until `use-diamond-legalizer` this check was caught and non-fatal, and 10–13 k overlapping cells reached `grt` in every run, until `drt` aborted on them (`DRT-0218`, run 37996272102). |
 | 6 | `grt` | `grt` | **Gate — the actual gate** (`PNR_GATE` default) | Global route: `global_route -congestion_iterations 14 -allow_congestion -verbose`. This is the stage the whole flow is judged on — `run_pnr.sh` exits non-zero if this fails, regardless of the best-effort stages after it. The long pole by far: single-threaded, congestion-bound at ~63–65% utilization. `-congestion_iterations` was cut from `chip.tcl`'s original 80, to 20, to 14 across three real timeout failures — the last cut wasn't about average per-iteration cost but a specific finding: iterations 1–14 complete trivially, then iteration 15 itself triggers a clock-net NDR-relaxation cascade with no observed sign of ever terminating (10+ hours, no completion). See Notes. |
 | 7 | `grt_repair` | `grt_repaired` | Best-effort | Post-route timing repair using global-route-based parasitics: buffer insertion, incremental global route, `repair_timing -repair_tns 20 -max_buffer_percent 15` (bounded down from chip.tcl's original 100 — that looped effectively forever on this design). `PNR_SKIP_GRT_REPAIR=1` skips the work but still re-saves the checkpoint under the uniform name `drt.tcl` expects. **Skipped by default in `pnr.yml`** (the `skip_grt_repair` input, empty = skip; `0` runs it) — even with its `global_route` calls bounded the same way `grt.tcl`'s are, real data (`pnr-bringup-6`, and again run `37512872714` on the post-2026-10-03 placement, where the incremental re-route after `repair_design` fell into the `GRT-0273` NDR-relaxation cascade; `docs/infra-plan.md` Phase 11) shows it still doesn't converge within 16h (see Notes); skipping lets `drt`/`final` actually run and produce a DEF while grt_repair's own timeout/tuning is revisited separately. |
-| 8 | `drt` | `drt` | Best-effort | Bridges wrong-direction route guides first (`pnr_bridge_wrong_way_guides`, `PNR_BRIDGE_GUIDES=0` turns it off): every guide spanning more than one gcell against its layer's preferred direction is copied onto the adjacent preferred-direction layer, since detailed routing cannot traverse it and aborts with `DRT-0218` otherwise (change `bridge-wrong-way-route-guides`). Then antenna repair (`PNR_ANTENNA_REPAIR_MODE`: `full` or `jumper`), then detailed routing (`detailed_route`, multi-threaded like `gpl`), then `check_antennas` on the routed design (see **Antenna violations** below). `-droute_end_iter` (default 40, override via `PNR_DRT_END_ITER`; the lane uses 5) bounds the iteration budget — on the enlarged die each iteration takes about 3 h and violations barely fall after the second (3.12 M → 2.64 M → 2.58 M, run 38178131540), so this is deliberately capped rather than left open-ended. |
+| 8 | `drt` | `drt` | Best-effort | Bridges wrong-direction route guides first (`pnr_bridge_wrong_way_guides`, `PNR_BRIDGE_GUIDES=0` turns it off): every guide spanning more than one gcell against its layer's preferred direction is copied onto the adjacent preferred-direction layer, since detailed routing cannot traverse it and aborts with `DRT-0218` otherwise (change `bridge-wrong-way-route-guides`). Then antenna repair (`PNR_ANTENNA_REPAIR_MODE`: `jumper`, the default, or `full`; `PNR_SKIP_ANTENNA_REPAIR=1` skips it), then detailed routing (`detailed_route`, multi-threaded like `gpl`), then `check_antennas` on the routed design (see **Antenna violations** below). `-droute_end_iter` (default 40, override via `PNR_DRT_END_ITER`; the lane uses 28) bounds the iteration budget, so the stage ends inside its 24 h timeout and keeps its checkpoint. On the 1.25 die with the routing hold-backs, 29 iterations took 7 h 04 m and converged to 8 violations (run 39906592139); on the earlier 1.10 die each iteration took about 3 h and violations barely fell (3.12 M → 2.64 M → 2.58 M, run 38178131540). |
 | 9 | `final` | `final` | Best-effort | Filler cell placement, a non-fatal `check_placement`, then writes `out/<proj>.final.def` — the artifact the workflow uploads. |
 
 **Gate vs. best-effort**: stages 1–6 (`floorplan` through `grt`) must all
@@ -292,7 +312,7 @@ to `drt` and never changes the exit status.
 blanket `PNR_STAGE_TIMEOUT`): `floorplan` 1h, `pre_place` 30m, `gpl` 4h,
 `dpl` 4h, `cts` 8h, `grt` 4h (in practice needed 8h+ — see Notes),
 `grt_repair` 6h, `drt` 16h (24h in `pnr.yml`, `PNR_TIMEOUT_DRT`, as margin over the
-lane's 5 routing iterations of about 3h each), `final` 1h.
+lane's 28-iteration budget, which took 7 h 28 m of `drt` on run 39906592139), `final` 1h.
 
 ## Notes from real bring-up (task 2.4)
 
