@@ -23,13 +23,16 @@
 #                           global route"). Must name a stage below.
 #   PNR_SKIP_GRT_REPAIR    Passed through to grt_repair.tcl (design D2).
 #   PNR_DRT_END_ITER       Passed through to drt.tcl's -droute_end_iter.
-#   PNR_SKIP_ANTENNA_REPAIR Passed through to drt.tcl: skip repair_antennas
-#                           (hung ~14h unlogged on this over-capacity design
-#                           in run 34389061373; see drt.tcl's comment).
+#                           Empty or unset: drt.tcl's 40; the P&R lane
+#                           passes 28.
+#   PNR_SKIP_ANTENNA_REPAIR Passed through to drt.tcl: "1" skips
+#                           repair_antennas (the P&R lane's
+#                           antenna_repair=skip). Unset: repair runs.
 #   PNR_ANTENNA_REPAIR_MODE Passed through to drt.tcl when repair runs:
-#                           `full` (jumpers and diodes) or `jumper`
-#                           (repair_antennas -jumper_only). Empty or unset:
-#                           full. Anything else fails drt before it loads.
+#                           `jumper` (repair_antennas -jumper_only) or
+#                           `full` (jumpers and diodes; hung in runs
+#                           34389061373 and 39696194006). Empty or unset:
+#                           jumper. Anything else fails drt before it loads.
 #   PNR_STAGE_TIMEOUT      Per-stage wall-clock timeout in seconds for any
 #                           stage without its own override below.
 #                           Default: 21600 (6h).
@@ -46,7 +49,8 @@
 #   PNR_GPL_DENSITY        Passed through to gpl.tcl: the global-placement
 #                           starting target density for both passes. Empty or
 #                           unset: pnr_gpl_density's default in
-#                           scripts/pnr/common.tcl.
+#                           scripts/pnr/common.tcl (0.50; 0.65 before
+#                           adopt-drc-clean-defaults-and-requote).
 #   PNR_GPL_KEEP_RESIZE    Passed through to gpl.tcl: pass 2's
 #                           -keep_resize_below_overflow. Empty or unset:
 #                           pnr_gpl_keep_resize's default in common.tcl (0,
@@ -55,8 +59,10 @@
 #   PNR_DIE_SCALE          Passed through to the floorplan: the core's width
 #                           and height relative to the taped-out die. Empty or
 #                           unset: pnr_die_scale's default in common.tcl
-#                           (1.10, a 6777 x 5950 um die); 1.0 is the
-#                           taped-out 6230 x 5478 um die.
+#                           (1.25); 1.10 (a 6777 x 5950 um die) was the
+#                           default before adopt-drc-clean-defaults-and-
+#                           requote; 1.0 is the taped-out 6230 x 5478 um
+#                           die.
 #   PNR_MACRO_MARGIN_MAX   Passed through to the floorplan: the widest gap
 #                           between a macro and the core edge, in microns,
 #                           that is blocked for placement. Empty or unset:
@@ -78,13 +84,15 @@
 #                           grt_repair, drt): the share of Metal2's capacity
 #                           global routing holds back, in [0, 1). Empty or
 #                           unset: pnr_grt_metal2_adjust's default in
-#                           common.tcl (0.30); Metal3 stays at 0.30.
+#                           common.tcl (0.60; 0.30 before adopt-drc-clean-
+#                           defaults-and-requote); Metal3 stays at 0.30.
 #   PNR_GRT_SRAM_METAL5_ADJUST Passed through to every routing stage (grt,
 #                           grt_repair, drt): the share of Metal5's capacity
 #                           global routing holds back inside every SRAM's
 #                           footprint, in [0, 1). Empty or unset:
 #                           pnr_grt_sram_metal5_adjust's default in
-#                           common.tcl (0, no hold-back).
+#                           common.tcl (0.55; 0, no hold-back, before
+#                           adopt-drc-clean-defaults-and-requote).
 #   PNR_CELL_PAD_SITES     Passed through to gpl and every legalization
 #                           (dpl, cts, grt_repair): free sites kept on each
 #                           side of every standard cell. Empty or unset:
@@ -98,6 +106,16 @@
 #                           (in order, honoring resume-skip) and exit 0
 #                           without invoking OpenROAD at all - the cheap
 #                           validation path (tasks.md 2.3) for CI/review.
+#
+# Resuming a checkpoint made before adopt-drc-clean-defaults-and-requote:
+# the defaults above moved (die 1.10 -> 1.25, density 0.65 -> 0.50, Metal2
+# 0.30 -> 0.60, SRAM Metal5 0 -> 0.55, antenna repair skipped -> jumper,
+# lane budget 5 -> 28), and nothing in a checkpoint records the values it
+# was built with. Set the old values explicitly (PNR_DIE_SCALE=1.10
+# PNR_GPL_DENSITY=0.65 PNR_GRT_METAL2_ADJUST=0.30
+# PNR_GRT_SRAM_METAL5_ADJUST=0 PNR_SKIP_ANTENNA_REPAIR=1, and
+# PNR_DRT_END_ITER=5 for the lane's old budget), or the resumed stages mix
+# settings with the restored ones.
 #
 # Exit status: 0 iff every stage up to and including PNR_GATE completed
 # (skipped-via-resume counts as completed). Non-zero otherwise. Stages

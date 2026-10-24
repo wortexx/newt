@@ -32,14 +32,20 @@
 # to try later is `repair_antennas -jumper_only` (layer-hopping jumpers,
 # no cell insertion/legalization/reroute).
 #
-# The P&R lane keeps the skip by default; its antenna_repair dispatch
-# input runs the repair on demand (drc-clean-pnr design D1, D5).
+# The P&R lane used to keep the skip by default (drc-clean-pnr design D1,
+# D5); it now runs jumper-only repair by default, and its antenna_repair
+# dispatch input `skip` sets PNR_SKIP_ANTENNA_REPAIR=1
+# (adopt-drc-clean-defaults-and-requote design D1).
 #
-# PNR_ANTENNA_REPAIR_MODE picks the repair when it runs: `full` (default,
-# jumpers and diodes) or `jumper` (repair_antennas -jumper_only: no diode
-# cells, so no legalization of inserted cells, the step that stalled in run
-# 34389061373). Anything else fails the stage before loading the design
-# (drc-clean-sram-metal5-and-antenna design D2).
+# PNR_ANTENNA_REPAIR_MODE picks the repair when it runs: `jumper` (default,
+# repair_antennas -jumper_only: no diode cells, so no legalization of
+# inserted cells, the step that stalled in run 34389061373) or `full`
+# (jumpers and diodes). Full repair hung again in run 39696194006, at 46 %
+# utilization, while jumper-only took 4 min and led to 8 router violations
+# in run 39906592139, so jumper is the default here as in the lane
+# (adopt-drc-clean-defaults-and-requote design D1). Anything else fails the
+# stage before loading the design (drc-clean-sram-metal5-and-antenna design
+# D2).
 #
 # After detailed_route, check_antennas counts the routed design's antenna
 # violations, whether or not repair ran, and writes
@@ -57,12 +63,12 @@ if { [info exists ::env(PNR_DRT_END_ITER)] } {
 
 set skip_antenna [expr {[info exists ::env(PNR_SKIP_ANTENNA_REPAIR)] && $::env(PNR_SKIP_ANTENNA_REPAIR) eq "1"}]
 
-set antenna_mode full
+set antenna_mode jumper
 if { [info exists ::env(PNR_ANTENNA_REPAIR_MODE)] && [string trim $::env(PNR_ANTENNA_REPAIR_MODE)] ne "" } {
     set antenna_mode [string trim $::env(PNR_ANTENNA_REPAIR_MODE)]
 }
 if { $antenna_mode ni {full jumper} } {
-    error "PNR_ANTENNA_REPAIR_MODE='$antenna_mode' is not a repair mode: use full or jumper"
+    error "PNR_ANTENNA_REPAIR_MODE='$antenna_mode' is not a repair mode: use jumper or full"
 }
 
 set err [catch {

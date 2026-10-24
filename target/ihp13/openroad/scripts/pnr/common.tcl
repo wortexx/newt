@@ -37,30 +37,38 @@ set threads 32
 # It is only the starting point: routability mode inflates it and
 # timing-driven mode resizes it during placement. 0.65 is the upstream value;
 # 0.72 was tried and made legalization worse (run 37037836332,
-# docs/infra-plan.md Phase 11). PNR_GPL_DENSITY overrides it for an
-# experiment without a commit (openspec/changes/raise-gpl-density-target
-# design D1).
+# docs/infra-plan.md Phase 11). Default 0.50: together with die scale 1.25,
+# probe P2 (run 38931700180) halved detailed routing's iteration-0
+# violations against 1.10 / 0.65 and cut grt overflow from 74,776 to 354,
+# and the chain it started (runs 39696194006, 39906592139) routed to 8
+# violations (openspec/changes/adopt-drc-clean-defaults-and-requote design
+# D1). PNR_GPL_DENSITY overrides it for an experiment without a commit
+# (openspec/changes/raise-gpl-density-target design D1).
 if { [info exists ::env(PNR_GPL_DENSITY)] && $::env(PNR_GPL_DENSITY) ne "" } {
     set pnr_gpl_density $::env(PNR_GPL_DENSITY)
 } else {
-    set pnr_gpl_density 0.65
+    set pnr_gpl_density 0.50
 }
 
 # Die scale for the floorplan (floorplan_ring_*way.tcl): the core's width and
 # height relative to the taped-out Basilisk die (6230 x 5478 um), pad and
-# power-ring margins unchanged. Default 1.10 (6777 x 5950 um die, core
-# +21 %), the user's call on 2026-10-12 (use-diamond-legalizer design D7):
-# on the taped-out die (1.0) the SoC with both SHA-3 arms reaches 71.3 %
+# power-ring margins unchanged. Default 1.25 (core 40.29 M um^2). On the
+# taped-out die (1.0) the SoC with both SHA-3 arms reaches 71.3 %
 # utilization after CTS, and the diamond legalizer leaves cells unplaced
-# there even with a 1000 um window (run 38087884024). At 1.10 dpl and cts
-# legalize, at 56-59 % utilization (run 38094932339). P&R figures are then
-# for the enlarged floorplan, not the taped-out chip, and a reference run
-# needs the same setting before any comparison. PNR_DIE_SCALE overrides it;
-# 1.0 is the taped-out die (docs/infra-plan.md Phase 11).
+# there even with a 1000 um window (run 38087884024). At 1.10, the user's
+# call on 2026-10-12 (use-diamond-legalizer design D7), dpl and cts legalize
+# at 56-59 % utilization (run 38094932339), but the layout does not route
+# (715,558 violations after iteration 5, run 38473439796). At 1.25 with
+# gpl density 0.50 it is 45 % after cts (probe P2, run 38931700180), and
+# that chain routed to 8 violations (run 39906592139;
+# openspec/changes/adopt-drc-clean-defaults-and-requote design D1). P&R
+# figures are then for the enlarged floorplan, not the taped-out chip, and a
+# reference run needs the same setting before any comparison. PNR_DIE_SCALE
+# overrides it; 1.0 is the taped-out die (docs/infra-plan.md Phase 11).
 if { [info exists ::env(PNR_DIE_SCALE)] && $::env(PNR_DIE_SCALE) ne "" } {
     set pnr_die_scale $::env(PNR_DIE_SCALE)
 } else {
-    set pnr_die_scale 1.10
+    set pnr_die_scale 1.25
 }
 
 # Overflow below which gpl's timing-driven iterations keep their
@@ -167,12 +175,16 @@ if { ![string is integer -strict $pnr_cell_pad_sites] || $pnr_cell_pad_sites < 0
 # 38931700180) grt then planned Metal2 at 61 % while Metal4/Metal5 sat at
 # 39 % / 29 %, and detailed routing left 84 % of its violations on Metal2,
 # where pin access already takes many of the tracks. A larger value moves
-# global routes up to the layers with room. Metal3 keeps 0.30.
+# global routes up to the layers with room. Metal3 keeps 0.30. Default
+# 0.60: from P2's checkpoints, probe P2-M (run 39006065323) cut the
+# violations after iteration 1 from 442,669 to 332,259, and its full route
+# reached 121 (run 39244019401), at a WNS cost of about 5 ns
+# (openspec/changes/adopt-drc-clean-defaults-and-requote design D1).
 # PNR_GRT_METAL2_ADJUST overrides it (openspec/changes/drc-clean-pnr design D7).
 if { [info exists ::env(PNR_GRT_METAL2_ADJUST)] && [string trim $::env(PNR_GRT_METAL2_ADJUST)] ne "" } {
     set pnr_grt_metal2_adjust [string trim $::env(PNR_GRT_METAL2_ADJUST)]
 } else {
-    set pnr_grt_metal2_adjust 0.30
+    set pnr_grt_metal2_adjust 0.60
 }
 if { ![string is double -strict $pnr_grt_metal2_adjust] ||
      $pnr_grt_metal2_adjust < 0 || $pnr_grt_metal2_adjust >= 1 } {
@@ -187,12 +199,16 @@ if { ![string is double -strict $pnr_grt_metal2_adjust] ||
 # yet grt planned up to 22-32 Metal5 nets per gcell column, and detailed
 # routing's wrong-way jogs between the pad rows were its last 121
 # violations (docs/infra-plan.md, "What is left of DRC, 2026-10-21").
-# 0 (the default) adds no region. PNR_GRT_SRAM_METAL5_ADJUST overrides it
+# Default 0.55: with it and jumper-only antenna repair, run 39906592139 cut
+# the router's count from 121 to 8 (5 inside an SRAM footprint), at
+# grt WNS -12.05 ns against -11.02 ns
+# (openspec/changes/adopt-drc-clean-defaults-and-requote design D1). 0 adds
+# no region. PNR_GRT_SRAM_METAL5_ADJUST overrides it
 # (openspec/changes/drc-clean-sram-metal5-and-antenna design D1).
 if { [info exists ::env(PNR_GRT_SRAM_METAL5_ADJUST)] && [string trim $::env(PNR_GRT_SRAM_METAL5_ADJUST)] ne "" } {
     set pnr_grt_sram_metal5_adjust [string trim $::env(PNR_GRT_SRAM_METAL5_ADJUST)]
 } else {
-    set pnr_grt_sram_metal5_adjust 0
+    set pnr_grt_sram_metal5_adjust 0.55
 }
 if { ![string is double -strict $pnr_grt_sram_metal5_adjust] ||
      $pnr_grt_sram_metal5_adjust < 0 || $pnr_grt_sram_metal5_adjust >= 1 } {
@@ -340,7 +356,7 @@ proc pnr_set_dont_use {} {
 # pnr_apply_routing_layers: the GRT layer config from chip.tcl's Global
 # Route section (reduce M2/M3/TopMetal1 routing resources, restrict signal
 # and clock routing to Metal2-TopMetal1), with Metal2's reduction from
-# pnr_grt_metal2_adjust (default 0.30, chip.tcl's value), plus the optional
+# pnr_grt_metal2_adjust (default 0.60; chip.tcl's was 0.30), plus the
 # Metal5 hold-back over the SRAMs (pnr_apply_sram_metal5_adjustment below).
 # Must be re-applied after every
 # load_checkpoint that precedes a global_route/detailed_route call in the
@@ -358,8 +374,8 @@ proc pnr_apply_routing_layers {} {
     set_routing_layers -signal Metal2-TopMetal1 -clock Metal2-TopMetal1
 }
 
-# Metal5 hold-back over every SRAM (pnr_grt_sram_metal5_adjust, default 0 =
-# none). Unlike the layer adjustments above, region adjustments accumulate in
+# Metal5 hold-back over every SRAM (pnr_grt_sram_metal5_adjust, default 0.55;
+# 0 = none). Unlike the layer adjustments above, region adjustments accumulate in
 # the global router and each one scales the capacity left by the ones before
 # it, so the regions are added only on the first call in a process to keep
 # this proc idempotent (design D1's task 1.1 check).
