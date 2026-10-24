@@ -39,7 +39,7 @@ Tags:
 
 ## 3. Land the defaults
 
-- [ ] 3.1 **[edit]** Open the PR with groups 1–2 and this change's artifacts. Verify `openspec validate adopt-drc-clean-defaults-and-requote --strict` passes and the fast lane is green. After the user merges, the runs in group 4 dispatch on that `main` commit.
+- [x] 3.1 **[edit]** Open the PR with groups 1–2 and this change's artifacts. Verify `openspec validate adopt-drc-clean-defaults-and-requote --strict` passes and the fast lane is green. After the user merges, the runs in group 4 dispatch on that `main` commit.
 
 ## 4. The requote pair (design D2, D3, D4)
 
