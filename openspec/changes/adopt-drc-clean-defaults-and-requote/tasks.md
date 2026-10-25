@@ -43,14 +43,14 @@ Tags:
 
 ## 4. The requote pair (design D2, D3, D4)
 
-- [ ] 4.1 **[long-run]** *(ask the user first)* Dispatch `pnr.yml` on `main` with no inputs. Save its `pnr-reports` under `target/ihp13/openroad/out/ci-<run>/`. Verify:
+- [x] 4.1 **[long-run]** *(ask the user first)* Dispatch `pnr.yml` on `main` with no inputs. Save its `pnr-reports` under `target/ihp13/openroad/out/ci-<run>/`. Verify:
   - every stage ran (none restored);
   - legal after `dpl` and `cts`;
   - `Die:` at core scale 1.25;
   - `SRAM Metal5 adjustment: 0.55 over 32 regions`;
   - `drt ok droute_end_iter=28 antenna=jumper`, a `drt-antenna` row, and `final ok` with the DEF.
-- [ ] 4.2 **[edit]** Compare 4.1 with the measured chain per D2: `grt` WNS and overflow, the router count after iteration 28, antenna counts, and `DPL-0009` after `cts`. Record it in `docs/infra-plan.md`. A router count above 1,000 or WNS more than 1 ns off the chain's −12.05 ns is a stop: report it and ask the user before 4.3.
-- [ ] 4.3 **[edit]** Rebase `pnr-reference-no-arms` onto 4.1's commit. Verify `git diff <commit> --stat` shows only the four reference files, and the branch still lints (`make ig-hw-cva6` and the fast lane's Verilator lint in the image, 0 `%Error`). Push it (force, since it is a never-merged measurement branch).
+- [x] 4.2 **[edit]** Compare 4.1 with the measured chain per D2: `grt` WNS and overflow, the router count after iteration 28, antenna counts, and `DPL-0009` after `cts`. Record it in `docs/infra-plan.md`. A router count above 1,000 or WNS more than 1 ns off the chain's −12.05 ns is a stop: report it and ask the user before 4.3.
+- [x] 4.3 **[edit]** Rebase `pnr-reference-no-arms` onto 4.1's commit. Verify `git diff <commit> --stat` shows only the four reference files, and the branch still lints (`make ig-hw-cva6` and the fast lane's Verilator lint in the image, 0 `%Error`). Push it (force, since it is a never-merged measurement branch).
 - [ ] 4.4 **[long-run]** *(ask the user first)* Dispatch `pnr.yml` on `pnr-reference-no-arms` with no inputs. Save its `pnr-reports`. Verify:
   - the same points as 4.1, with the same `Die:` line as 4.1;
   - its uploaded `synth-key.txt` equals run `38772313345`'s (`synth-c9179ea7…`).
