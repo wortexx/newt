@@ -2,7 +2,7 @@
 
 What actually runs, end to end, for the CI P&R lane (`docs/infra-plan.md`
 Phase 5; `openspec/changes/ci-pnr-lane`). Two levels: the GitHub Actions
-workflow that owns the VM and the artifacts, and the 9-stage OpenROAD flow
+workflow that owns the VM and the artifacts, and the 10-stage OpenROAD flow
 that workflow invokes on it.
 
 ## CI workflow level (`.github/workflows/pnr.yml`)
@@ -11,7 +11,7 @@ that workflow invokes on it.
 |---|---|---|
 | `start` | `ubuntu-latest` | OIDC login to Azure, starts the self-hosted VM (idempotent — no-op if already running). |
 | `restore-checkpoints` | self-hosted VM (no container) | Only does work when `PNR_RESUME_FROM_RUN` (repository variable) or the `resume_from_run` dispatch input names a previous run: downloads that run's checkpoints from Blob into `/home/newt/pnr-restore/<run_id>` — outside the workspace, which `actions/checkout` would `git clean -ffdx`. The `pnr` job's own restore step then honors the `resume_exclude` dispatch input to leave named checkpoints out, so their stages run again. Runs outside the job container because az CLI lives on the VM host, and design D8 gives the `pnr` job no Azure access. |
-| `pnr` | self-hosted VM | Checks out the repo, generates the hardware config, pickles RTL, runs `make synth-all` (cached — see below) then `make -C target/ihp13/openroad -f openroad.mk run-pnr PROJ_NAME=basilisk` (the 9-stage flow below), then moves the stage checkpoints and `synth-key.txt` out of the workspace into `/home/newt/pnr-export/<run_id>` (the export step — see the collision note below), builds a stage-status summary from `pnr_status.log`, uploads the final DEF and the reports/logs as workflow artifacts. |
+| `pnr` | self-hosted VM | Checks out the repo, generates the hardware config, pickles RTL, runs `make synth-all` (cached — see below) then `make -C target/ihp13/openroad -f openroad.mk run-pnr PROJ_NAME=basilisk` (the 10-stage flow below), then moves the stage checkpoints and `synth-key.txt` out of the workspace into `/home/newt/pnr-export/<run_id>` (the export step — see the collision note below), builds a stage-status summary from `pnr_status.log`, uploads the final DEF and the reports/logs as workflow artifacts. |
 | `upload-checkpoints` | self-hosted VM | Pushes `.zip` checkpoints from `/home/newt/pnr-export/<run_id>` — never from the workspace — to the `pnr-checkpoints` blob container (task 1.3) so a later run can resume without redoing synth+P&R from scratch, then removes that directory. Fails loudly when the `pnr` job succeeded but left no checkpoint to upload; a `pnr` job that failed before its first checkpoint, or never reached the export step, is reported and passed over. |
 | `stop` | `ubuntu-latest` | Checks whether the runner is still needed (busy, or another `pnr.yml`/`synth.yml` run queued) before deallocating the VM — the coexistence guard. |
 
@@ -56,7 +56,11 @@ behaves exactly like a scheduled run:
   restored ones.
 - `resume_exclude` — space-separated checkpoint base names (no project
   prefix, no `.zip`) to leave out of that restore, so their stages run
-  again. Feeds `PNR_RESUME_EXCLUDE`.
+  again. Feeds `PNR_RESUME_EXCLUDE`. The names are the Checkpoint column of
+  the stage table below, plus `ant_jumper` (the `ant` stage's intermediate
+  result). A restored checkpoint always skips its stage, so excluding one
+  stage means excluding every later one too, e.g.
+  `grt_repaired ant_jumper ant drt final`.
 - `stop_after` — a stage name (see the stage table below) after which the
   driver stops rather than continuing through `final`. Feeds
   `PNR_STOP_AFTER`. Does not change the gate (`PNR_GATE`, fixed at `grt`
@@ -92,7 +96,7 @@ behaves exactly like a scheduled run:
   before `use-diamond-legalizer`. Any other value fails the stage. Either way
   `dpl` and `cts` end with a gated legality check. Changing it invalidates
   the `dpl` checkpoint and everything after it, so with `resume_from_run`
-  also exclude `dpl cts grt grt_repaired`.
+  also exclude `dpl cts grt grt_repaired ant_jumper ant drt`.
 
 - `dpl_max_displacement` — the legalizer's search window, passed to every
   `detailed_placement` call as `-max_displacement`, in microns: one value
@@ -131,8 +135,11 @@ behaves exactly like a scheduled run:
   which hung at 101 % routing demand (run 34389061373) and again at 46 %
   utilization (run 39696194006). `skip` runs no repair, the default before
   change `adopt-drc-clean-defaults-and-requote`. Any other value fails the
-  `start` job before the VM starts. Either way `drt` stays
-  best-effort, and its `pnr_status.log` line says `antenna=full`,
+  `start` job before the VM starts. The repair runs in its own stage,
+  `ant`, with a 4 h timeout (`PNR_TIMEOUT_ANT`); if full repair fails or
+  times out after its jumper step, `drt` routes the jumper result (change
+  `finish-antenna-diode-repair`). Either way `ant` and `drt` stay
+  best-effort, and `ant`'s `pnr_status.log` line says `antenna=full`,
   `antenna=jumper` or `antenna=skipped`.
 
 - `grt_metal2_adjust` — the share of Metal2's capacity that global routing
@@ -144,7 +151,7 @@ behaves exactly like a scheduled run:
   detailed-routing violations on probe P2 (change `drc-clean-pnr`, design
   D7). Every routing stage logs `Global routing layer adjustment:` with the
   values used. It invalidates the `grt` checkpoint and everything after it,
-  so with `resume_from_run` also exclude `grt grt_repaired drt`.
+  so with `resume_from_run` also exclude `grt grt_repaired ant_jumper ant drt`.
 
 - `sram_metal5_adjust` — the share of Metal5's capacity that global
   routing holds back inside every SRAM's footprint
@@ -230,16 +237,17 @@ doing anything else.
 | 4 | `dpl` | `dpl` | **Gate** | Detailed (legalized) placement + mirror optimization. Single-threaded. Legalizes with `pnr_dpl_legalizer` (`scripts/pnr/common.tcl`, default `diamond`, OpenROAD's classic legalizer; `PNR_DPL_LEGALIZER=negotiation` selects OpenROAD's default, which leaves cells overlapping on this design). Ends with a **gated** `check_placement`: any overlap, padding or blocked-layer violation fails the stage before its checkpoint is saved, with the counts in `pnr_status.log` and the markers in `basilisk_dpl_check_placement.rpt`. Afterwards `run_pnr.sh` reports how `gpl` ended (below). |
 | 5 | `cts` | `cts` | **Gate** | Clock tree synthesis. Lifts clock dont-touch (only stage that does — clock nets are protected everywhere else), repairs clock inverters and post-CTS wire length, legalizes, then `repair_timing -setup -repair_tns 90` to fix the setup violations CTS itself introduces. Both legalizations use the same legalizer as `dpl`, and the stage ends with the same **gated** `check_placement` (`basilisk_cts_check_placement.rpt`). Until `use-diamond-legalizer` this check was caught and non-fatal, and 10–13 k overlapping cells reached `grt` in every run, until `drt` aborted on them (`DRT-0218`, run 37996272102). |
 | 6 | `grt` | `grt` | **Gate — the actual gate** (`PNR_GATE` default) | Global route: `global_route -congestion_iterations 14 -allow_congestion -verbose`. This is the stage the whole flow is judged on — `run_pnr.sh` exits non-zero if this fails, regardless of the best-effort stages after it. The long pole by far: single-threaded, congestion-bound at ~63–65% utilization. `-congestion_iterations` was cut from `chip.tcl`'s original 80, to 20, to 14 across three real timeout failures — the last cut wasn't about average per-iteration cost but a specific finding: iterations 1–14 complete trivially, then iteration 15 itself triggers a clock-net NDR-relaxation cascade with no observed sign of ever terminating (10+ hours, no completion). See Notes. |
-| 7 | `grt_repair` | `grt_repaired` | Best-effort | Post-route timing repair using global-route-based parasitics: buffer insertion, incremental global route, `repair_timing -repair_tns 20 -max_buffer_percent 15` (bounded down from chip.tcl's original 100 — that looped effectively forever on this design). `PNR_SKIP_GRT_REPAIR=1` skips the work but still re-saves the checkpoint under the uniform name `drt.tcl` expects. **Skipped by default in `pnr.yml`** (the `skip_grt_repair` input, empty = skip; `0` runs it) — even with its `global_route` calls bounded the same way `grt.tcl`'s are, real data (`pnr-bringup-6`, and again run `37512872714` on the post-2026-10-03 placement, where the incremental re-route after `repair_design` fell into the `GRT-0273` NDR-relaxation cascade; `docs/infra-plan.md` Phase 11) shows it still doesn't converge within 16h (see Notes); skipping lets `drt`/`final` actually run and produce a DEF while grt_repair's own timeout/tuning is revisited separately. |
-| 8 | `drt` | `drt` | Best-effort | Bridges wrong-direction route guides first (`pnr_bridge_wrong_way_guides`, `PNR_BRIDGE_GUIDES=0` turns it off): every guide spanning more than one gcell against its layer's preferred direction is copied onto the adjacent preferred-direction layer, since detailed routing cannot traverse it and aborts with `DRT-0218` otherwise (change `bridge-wrong-way-route-guides`). Then antenna repair (`PNR_ANTENNA_REPAIR_MODE`: `jumper`, the default, or `full`; `PNR_SKIP_ANTENNA_REPAIR=1` skips it), then detailed routing (`detailed_route`, multi-threaded like `gpl`), then `check_antennas` on the routed design (see **Antenna violations** below). `-droute_end_iter` (default 40, override via `PNR_DRT_END_ITER`; the lane uses 28) bounds the iteration budget, so the stage ends inside its 24 h timeout and keeps its checkpoint. On the 1.25 die with the routing hold-backs, 29 iterations took 7 h 04 m and converged to 8 violations (run 39906592139); on the earlier 1.10 die each iteration took about 3 h and violations barely fell (3.12 M → 2.64 M → 2.58 M, run 38178131540). |
-| 9 | `final` | `final` | Best-effort | Filler cell placement, a non-fatal `check_placement`, then writes `out/<proj>.final.def` — the artifact the workflow uploads. |
+| 7 | `grt_repair` | `grt_repaired` | Best-effort | Post-route timing repair using global-route-based parasitics: buffer insertion, incremental global route, `repair_timing -repair_tns 20 -max_buffer_percent 15` (bounded down from chip.tcl's original 100 — that looped effectively forever on this design). `PNR_SKIP_GRT_REPAIR=1` skips the work but still re-saves the checkpoint under the uniform name `ant.tcl` expects. **Skipped by default in `pnr.yml`** (the `skip_grt_repair` input, empty = skip; `0` runs it) — even with its `global_route` calls bounded the same way `grt.tcl`'s are, real data (`pnr-bringup-6`, and again run `37512872714` on the post-2026-10-03 placement, where the incremental re-route after `repair_design` fell into the `GRT-0273` NDR-relaxation cascade; `docs/infra-plan.md` Phase 11) shows it still doesn't converge within 16h (see Notes); skipping lets `drt`/`final` actually run and produce a DEF while grt_repair's own timeout/tuning is revisited separately. |
+| 8 | `ant` | `ant` (and `ant_jumper`) | Best-effort | Antenna repair on the global routes, in its own process so its timeout bounds it (change `finish-antenna-diode-repair`). `PNR_ANTENNA_REPAIR_MODE=jumper` (the default) runs `repair_antennas -jumper_only` and saves `ant_jumper`, then the same design as `ant`. `full` runs the same jumper step and saves `ant_jumper`, then one incremental `pnr_detailed_placement` call on the already-legal design, which makes the legalization inside `repair_antennas -diode_only` use the flow's legalizer (diamond by default; OpenROAD's legalizer choice is sticky within a process), then the diode step, and saves `ant`. `PNR_SKIP_ANTENNA_REPAIR=1` saves the design unchanged as `ant`. If the stage fails or times out after saving `ant_jumper`, `run_pnr.sh` logs `ant failed exit=<rc> attempts=<n> fallback=ant_jumper` and still runs `drt`; without `ant_jumper` the usual predecessor-failed rule applies. Full repair inside `drt` hung twice (runs 34389061373 and 39696194006), which is why it has its own stage. 4 h timeout. |
+| 9 | `drt` | `drt` | Best-effort | Loads `ant`, or `ant_jumper` when `ant` has no checkpoint, and records which in its status line (`input=ant` or `input=ant_jumper`). Bridges wrong-direction route guides first (`pnr_bridge_wrong_way_guides`, `PNR_BRIDGE_GUIDES=0` turns it off): every guide spanning more than one gcell against its layer's preferred direction is copied onto the adjacent preferred-direction layer, since detailed routing cannot traverse it and aborts with `DRT-0218` otherwise (change `bridge-wrong-way-route-guides`). Bridging runs after `ant`, so it sees the guides antenna repair rewrote. Then detailed routing (`detailed_route`, multi-threaded like `gpl`), then `check_antennas` on the routed design (see **Antenna violations** below). `-droute_end_iter` (default 40, override via `PNR_DRT_END_ITER`; the lane uses 28) bounds the iteration budget, so the stage ends inside its 24 h timeout and keeps its checkpoint. On the 1.25 die with the routing hold-backs, 29 iterations took 7 h 04 m and converged to 8 violations (run 39906592139); on the earlier 1.10 die each iteration took about 3 h and violations barely fell (3.12 M → 2.64 M → 2.58 M, run 38178131540). |
+| 10 | `final` | `final` | Best-effort | Filler cell placement, a non-fatal `check_placement`, then writes `out/<proj>.final.def` — the artifact the workflow uploads. |
 
 **Gate vs. best-effort**: stages 1–6 (`floorplan` through `grt`) must all
 succeed for `run_pnr.sh` to exit 0; `PNR_GATE` controls exactly where that
 line is (default `grt`, per `specs/pnr-flow`: "success is gated through
-global route"). Stages 7–9 run regardless and record their outcome in
+global route"). Stages 7–10 run regardless and record their outcome in
 `pnr_status.log`, but never flip the overall exit code — a bad
-`grt_repair`/`drt`/`final` doesn't fail CI. This matches the project's
+`grt_repair`/`ant`/`drt`/`final` doesn't fail CI. This matches the project's
 accepted reality that clean routing on this design is a stretch goal, not a
 requirement.
 
@@ -280,6 +288,20 @@ only what the current `grt` run logged (`Route guides written:`), prints
 `not computed (<reason>)` otherwise, takes about 15 s, and never changes the
 exit status.
 
+**Antenna repair** (`run_pnr.sh`, after `ant`, whatever its outcome;
+change `finish-antenna-diode-repair`, design D3). `report_ant_outcome`
+reads `pnr_ant.log.timestamped` (the copy that keeps its tail when a
+timeout kills the stage) and writes one `pnr_status.log` line,
+`ant-repair jumpers=<n> diodes=<m> legalizer=<l> left=<k>`: jumpers from
+`GRT-0302`, diodes from `GRT-0015`, the diode step's legalizer
+(`negotiation` if `DPL-1102` appears after the stage's `Antenna repair:
+diodes` line, `diamond` otherwise, `none` without a diode step) and the
+legalization violations left (the last `DPL-0701`, 0 without one). It
+writes `ant-repair none` when the stage logged no repair (skip, or a
+failure before the jumper step), and raises a `::warning::` when `ant`
+selected diamond but `DPL-1102` shows negotiation ran. The step summary
+shows the row. It never changes the exit status.
+
 **Detailed-route violations** (`run_pnr.sh`, after `drt`, whatever its
 outcome; change `drc-clean-pnr`). The router's own counts from
 `pnr_drt.log`: every `DRT-0199 Number of violations = N` line (one per
@@ -296,7 +318,8 @@ report never changes the exit status.
 **Antenna violations** (`drt.tcl` and `run_pnr.sh`, after `drt`; change
 `drc-clean-sram-metal5-and-antenna`, design D3). After `detailed_route`
 and before its checkpoint, `drt.tcl` runs `check_antennas` on the routed
-design, whether or not antenna repair ran. The full listing goes to
+design, whether or not antenna repair ran, and whichever of `ant` and
+`ant_jumper` it routed. The full listing goes to
 `reports/basilisk_antenna.rpt`, which was 103 MB on run 39244019401. The
 check runs inside its own `catch`, so a failing check is logged and `drt`
 still ends `ok`. `run_pnr.sh`'s `report_antenna_outcome` then reads the
@@ -311,7 +334,7 @@ to `drt` and never changes the exit status.
 **Per-stage timeouts** (`run_pnr.sh`, override via `PNR_TIMEOUT_<STAGE>` or
 blanket `PNR_STAGE_TIMEOUT`): `floorplan` 1h, `pre_place` 30m, `gpl` 4h,
 `dpl` 4h, `cts` 8h, `grt` 4h (in practice needed 8h+ — see Notes),
-`grt_repair` 6h, `drt` 16h (24h in `pnr.yml`, `PNR_TIMEOUT_DRT`, as margin over the
+`grt_repair` 6h, `ant` 4h (also 4h in `pnr.yml`, `PNR_TIMEOUT_ANT`), `drt` 16h (24h in `pnr.yml`, `PNR_TIMEOUT_DRT`, as margin over the
 lane's 28-iteration budget, which took 7 h 28 m of `drt` on run 39906592139), `final` 1h.
 
 ## Notes from real bring-up (task 2.4)

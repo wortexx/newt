@@ -2,7 +2,7 @@
 # Solderpad Hardware License, Version 0.51, see LICENSE for details.
 # SPDX-License-Identifier: SHL-0.51
 #
-# Stage 5/9: cts - clock tree synthesis + post-CTS setup repair, adapted
+# Stage 5/10: cts - clock tree synthesis + post-CTS setup repair, adapted
 # from ../chip.tcl's "CLOCK TREE SYNTHESIS" section
 # (openspec/changes/ci-pnr-lane/design.md D1).
 #

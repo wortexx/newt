@@ -2,7 +2,7 @@
 # Solderpad Hardware License, Version 0.51, see LICENSE for details.
 # SPDX-License-Identifier: SHL-0.51
 #
-# Stage 6/9: grt - global routing, adapted from ../chip.tcl's "GLOBAL
+# Stage 6/10: grt - global routing, adapted from ../chip.tcl's "GLOBAL
 # ROUTE" section (openspec/changes/ci-pnr-lane/design.md D1/D4).
 #
 # This is the last **gated** stage (design D4 / specs/pnr-flow: success is

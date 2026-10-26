@@ -25,18 +25,23 @@
 #   PNR_DRT_END_ITER       Passed through to drt.tcl's -droute_end_iter.
 #                           Empty or unset: drt.tcl's 40; the P&R lane
 #                           passes 28.
-#   PNR_SKIP_ANTENNA_REPAIR Passed through to drt.tcl: "1" skips
+#   PNR_SKIP_ANTENNA_REPAIR Passed through to ant.tcl: "1" skips
 #                           repair_antennas (the P&R lane's
 #                           antenna_repair=skip). Unset: repair runs.
-#   PNR_ANTENNA_REPAIR_MODE Passed through to drt.tcl when repair runs:
+#   PNR_ANTENNA_REPAIR_MODE Passed through to ant.tcl when repair runs:
 #                           `jumper` (repair_antennas -jumper_only) or
-#                           `full` (jumpers and diodes; hung in runs
-#                           34389061373 and 39696194006). Empty or unset:
-#                           jumper. Anything else fails drt before it loads.
+#                           `full` (jumpers, then diodes; full repair hung
+#                           in runs 34389061373 and 39696194006, which is
+#                           why it is now its own bounded stage). Empty or
+#                           unset: jumper. Anything else fails ant before it
+#                           loads.
 #   PNR_STAGE_TIMEOUT      Per-stage wall-clock timeout in seconds for any
 #                           stage without its own override below.
 #                           Default: 21600 (6h).
 #   PNR_TIMEOUT_<STAGE>    Per-stage override, e.g. PNR_TIMEOUT_DRT=57600.
+#                           ant's own default is 14400 (4h): it bounds a
+#                           diode repair that hangs (finish-antenna-diode-
+#                           repair design D1).
 #   PNR_STOP_AFTER         Stop once this stage completes, instead of
 #                           continuing through `final`. Must name a stage
 #                           below. Lets a run exercise one part of the flow
@@ -81,13 +86,13 @@
 #                           default in common.tcl (1000 1000); "openroad"
 #                           keeps OpenROAD's own window.
 #   PNR_GRT_METAL2_ADJUST  Passed through to every routing stage (grt,
-#                           grt_repair, drt): the share of Metal2's capacity
+#                           grt_repair, ant, drt): the share of Metal2's capacity
 #                           global routing holds back, in [0, 1). Empty or
 #                           unset: pnr_grt_metal2_adjust's default in
 #                           common.tcl (0.60; 0.30 before adopt-drc-clean-
 #                           defaults-and-requote); Metal3 stays at 0.30.
 #   PNR_GRT_SRAM_METAL5_ADJUST Passed through to every routing stage (grt,
-#                           grt_repair, drt): the share of Metal5's capacity
+#                           grt_repair, ant, drt): the share of Metal5's capacity
 #                           global routing holds back inside every SRAM's
 #                           footprint, in [0, 1). Empty or unset:
 #                           pnr_grt_sram_metal5_adjust's default in
@@ -117,9 +122,19 @@
 # PNR_DRT_END_ITER=5 for the lane's old budget), or the resumed stages mix
 # settings with the restored ones.
 #
+# Antenna repair (finish-antenna-diode-repair design D1): `ant` saves
+# `ant_jumper` before its diode step and `ant` when it completes. If `ant`
+# fails or times out after saving `ant_jumper`, the driver logs
+# `ant failed ... fallback=ant_jumper` and still runs drt, which then routes
+# the jumper result; without `ant_jumper` the usual predecessor-failed rule
+# applies. A stale `ant_jumper` (restored, or from an earlier attempt) is
+# removed before `ant` runs, so the fallback only ever routes this run's.
+# A checkpoint made before this change has no `ant`, so a resume from it
+# simply runs `ant` from `grt_repaired`.
+#
 # Exit status: 0 iff every stage up to and including PNR_GATE completed
 # (skipped-via-resume counts as completed). Non-zero otherwise. Stages
-# after the gate (grt_repair/drt/final by default) never affect this -
+# after the gate (grt_repair/ant/drt/final by default) never affect this -
 # their outcome is only recorded in the status log.
 
 set -uo pipefail
@@ -137,7 +152,7 @@ mkdir -p "${SAVE}" "${REPORTS}"
 # Ordered stage list, each stage's completion-marker checkpoint name (what
 # save_checkpoint in that stage's .tcl file ultimately produces - see each
 # script's header comment), and its retry budget.
-STAGES=(floorplan pre_place gpl dpl cts grt grt_repair drt final)
+STAGES=(floorplan pre_place gpl dpl cts grt grt_repair ant drt final)
 declare -A STAGE_CHECKPOINT=(
     [floorplan]=power_grid
     [pre_place]=pre_place
@@ -146,6 +161,7 @@ declare -A STAGE_CHECKPOINT=(
     [cts]=cts
     [grt]=grt
     [grt_repair]=grt_repaired
+    [ant]=ant
     [drt]=drt
     [final]=final
 )
@@ -153,11 +169,11 @@ declare -A STAGE_CHECKPOINT=(
 # docs/infra-plan.md Sec. 0); everything else defaults to no retry.
 declare -A STAGE_RETRIES=(
     [floorplan]=0 [pre_place]=1 [gpl]=0 [dpl]=0 [cts]=0
-    [grt]=0 [grt_repair]=0 [drt]=0 [final]=0
+    [grt]=0 [grt_repair]=0 [ant]=0 [drt]=0 [final]=0
 )
 declare -A STAGE_TIMEOUT_DEFAULT=(
     [floorplan]=3600 [pre_place]=1800 [gpl]=14400 [dpl]=14400 [cts]=28800
-    [grt]=14400 [grt_repair]=21600 [drt]=57600 [final]=3600
+    [grt]=14400 [grt_repair]=21600 [ant]=14400 [drt]=57600 [final]=3600
 )
 
 STOP_AFTER="${PNR_STOP_AFTER:-}"
@@ -417,6 +433,46 @@ report_antenna_outcome() {
     echo "Antenna violations (checker's count): ${nets} nets, ${pins} pins (${PROJ_NAME}_antenna.rpt)"
 }
 
+# Antenna-repair outcome (finish-antenna-diode-repair design D3). Reads
+# ant's log - the timestamped copy when it exists, since a timeout kill
+# loses the tail of openroad's own -log - and appends one row to
+# pnr_status.log: `ant-repair jumpers=<n> diodes=<m> legalizer=<l>
+# left=<k>`, from GRT-0302 (jumpers), GRT-0015 (diodes), the DPL lines
+# after ant.tcl's "Antenna repair: diodes" marker (negotiation if
+# DPL-1102 is among them, otherwise diamond; `none` without a diode step)
+# and the last DPL-0701 (violations the legalizer left, 0 without one).
+# `ant-repair none` when the stage logged no repair at all (skip, or a
+# failure before the jumper step). Warns when ant.tcl selected diamond for
+# the diode legalization but the negotiation legalizer ran anyway (design
+# D2's check; D5's fourth row). Never changes the exit status.
+report_ant_outcome() {
+    local log="${REPORTS}/pnr_ant.log" jumpers diodes legalizer left after
+    [ -f "${log}.timestamped" ] && log="${log}.timestamped"
+    jumpers="$(sed -n 's/.*GRT-0302\] Inserted \([0-9]*\) jumpers.*/\1/p' "$log" 2>/dev/null | tail -1)"
+    if [ -z "$jumpers" ] && ! grep -q 'Antenna repair: diodes' "$log" 2>/dev/null; then
+        echo "Antenna repair: none reported (no GRT-0302 line in ${log})"
+        log_status ant-repair none ""
+        return 0
+    fi
+    diodes="$(sed -n 's/.*GRT-0015\] Inserted \([0-9]*\) diodes.*/\1/p' "$log" 2>/dev/null | tail -1)"
+    after="$(sed -n '/Antenna repair: diodes/,$p' "$log" 2>/dev/null)"
+    if [ -z "$after" ]; then
+        legalizer=none
+    elif grep -q 'DPL-1102' <<< "$after"; then
+        legalizer=negotiation
+    elif grep -q 'DPL-' <<< "$after"; then
+        legalizer=diamond
+    else
+        legalizer=unknown
+    fi
+    left="$(sed -n 's/.*DPL-0701\].*Violations remain: *\([0-9]*\).*/\1/p' <<< "$after" | tail -1)"
+    log_status ant-repair "jumpers=${jumpers:-0}" "diodes=${diodes:-0} legalizer=${legalizer} left=${left:-0}"
+    echo "Antenna repair: ${jumpers:-0} jumpers, ${diodes:-0} diodes, diode legalizer ${legalizer}, ${left:-0} legalization violations left"
+    if [ "$legalizer" = "negotiation" ] && grep -q 'Diode legalization: diamond' "$log" 2>/dev/null; then
+        echo "::warning::ant selected the diamond legalizer for the diode step, but repair_antennas legalized with negotiation (DPL-1102): the sticky legalizer flag did not reach it. See openspec/changes/finish-antenna-diode-repair design D2/D5."
+    fi
+}
+
 past_gate=0
 overall_rc=0
 best_effort_broken=0
@@ -454,6 +510,9 @@ for stage in "${STAGES[@]}"; do
         continue
     fi
 
+    # The fallback below must only route this run's jumper result.
+    [ "$stage" = "ant" ] && rm -f "${SAVE}/${PROJ_NAME}.ant_jumper.zip"
+
     attempt=0
     max_attempts=$(( STAGE_RETRIES[$stage] + 1 ))
     rc=1
@@ -477,10 +536,20 @@ for stage in "${STAGES[@]}"; do
 
     [ "$stage" = "dpl" ] && report_placement_state
     [ "$stage" = "grt" ] && report_routes_outside_core
+    [ "$stage" = "ant" ] && report_ant_outcome
     [ "$stage" = "drt" ] && report_drt_outcome
     [ "$stage" = "drt" ] && report_antenna_outcome
 
     if [ "$rc" -ne 0 ]; then
+        if [ "$stage" = "ant" ] && [ "$past_gate" -eq 1 ] \
+            && [ -f "${SAVE}/${PROJ_NAME}.ant_jumper.zip" ]; then
+            # Diode repair failed or hung after the jumper result was saved:
+            # drt routes that instead (design D1), so nothing downstream is
+            # skipped.
+            echo "::warning::stage 'ant' failed after ${attempt} attempt(s), exit ${rc}; drt routes the jumper-repaired design (ant_jumper)"
+            log_status "$stage" failed "exit=${rc} attempts=${attempt} fallback=ant_jumper"
+            continue
+        fi
         echo "::error::stage '${stage}' failed after ${attempt} attempt(s), exit ${rc}"
         log_status "$stage" failed "exit=${rc} attempts=${attempt}"
         if [ "$past_gate" -eq 0 ]; then

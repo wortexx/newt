@@ -31,7 +31,7 @@ on:
         required: false
         default: ''
       resume_exclude:
-        description: 'Space-separated checkpoint base names to leave out of that restore, so their stages run again (empty = exclude nothing)'
+        description: 'Space-separated checkpoint base names to leave out of that restore, so their stages run again, e.g. grt_repaired ant_jumper ant drt final (empty = exclude nothing)'
         required: false
         default: ''
       stop_after:
@@ -173,7 +173,7 @@ jobs:
       # rather than let the run fall back to jumper-only or full repair
       # (drc-clean-sram-metal5-and-antenna design D2). The accepted values
       # are empty, jumper, 1 and skip (adopt-drc-clean-defaults-and-requote
-      # D1). drt.tcl rejects an unknown PNR_ANTENNA_REPAIR_MODE too, for
+      # D1). ant.tcl rejects an unknown PNR_ANTENNA_REPAIR_MODE too, for
       # local runs.
       - name: Check the antenna_repair input
         env:
@@ -604,7 +604,7 @@ jobs:
         # violations after 1h26), then a single-threaded post-insertion
         # reroute hung ~14h with zero log output until timeout (exit 124).
         # Antenna repair is manufacturing signoff, not PPA - skip it in CI
-        # (see drt.tcl's comment for the -jumper_only middle ground).
+        # (see ant.tcl's comment for the -jumper_only middle ground).
         #
         # The skip became the antenna_repair dispatch input's default
         # (drc-clean-pnr D1), and is now its `skip` value: only
@@ -620,6 +620,17 @@ jobs:
         # the route reached 8 violations (run 39906592139). 1 runs the full
         # repair; any other value already failed the start job (drc-clean-
         # sram-metal5-and-antenna D2). With skip the mode is unused.
+        #
+        # PNR_TIMEOUT_ANT=14400 (4 h): antenna repair is its own stage, ant,
+        # between grt_repair and drt, so a diode repair that hangs costs this
+        # timeout instead of the routed design (finish-antenna-diode-repair
+        # D1). Jumpers took 4 min and the diode legalization 32 min in run
+        # 39696194006, so 4 h leaves room for a reroute several times longer.
+        # If ant fails after saving its jumper result, drt routes that
+        # (`ant failed ... fallback=ant_jumper`), and the `ant-repair` row in
+        # the stage table gives jumpers, diodes, the diode legalizer and the
+        # legalization violations left. The job's 48 h ceiling still holds:
+        # ~6 h through cts, plus grt, 4 h ant and 24 h drt.
         #
         # PNR_DRT_END_ITER=28 and PNR_TIMEOUT_DRT=86400 (24 h). The budget was
         # 5 (bridge-wrong-way-route-guides D4), measured on the 1.10 die (run
@@ -698,7 +709,7 @@ jobs:
         # default (common.tcl's 0, no padding). Applied from gpl on, so with
         # resume_from_run exclude gpl2 and every later checkpoint
         # (drc-clean-pnr D8). dpl's and cts's gated legality checks cover it.
-        run: PNR_GPL_DENSITY=${{ github.event.inputs.gpl_density || '' }} PNR_GPL_KEEP_RESIZE=${{ github.event.inputs.gpl_keep_resize || '' }} PNR_DIE_SCALE=${{ github.event.inputs.die_scale || '' }} PNR_DPL_LEGALIZER=${{ github.event.inputs.dpl_legalizer || '' }} PNR_DPL_MAX_DISPLACEMENT="${{ github.event.inputs.dpl_max_displacement || '' }}" PNR_TIMEOUT_GRT=57600 PNR_TIMEOUT_GRT_REPAIR=57600 PNR_SKIP_GRT_REPAIR=${{ github.event.inputs.skip_grt_repair || '1' }} PNR_SKIP_ANTENNA_REPAIR=${{ github.event.inputs.antenna_repair == 'skip' && '1' || '0' }} PNR_ANTENNA_REPAIR_MODE=${{ github.event.inputs.antenna_repair == '1' && 'full' || 'jumper' }} PNR_DRT_END_ITER=${{ github.event.inputs.drt_end_iter || '28' }} PNR_TIMEOUT_DRT=86400 PNR_STOP_AFTER=${{ github.event.inputs.stop_after || '' }} PNR_GRT_METAL2_ADJUST=${{ github.event.inputs.grt_metal2_adjust || '' }} PNR_GRT_SRAM_METAL5_ADJUST=${{ github.event.inputs.sram_metal5_adjust || '' }} PNR_CELL_PAD_SITES=${{ github.event.inputs.cell_pad_sites || '' }} make -C target/ihp13/openroad -f openroad.mk run-pnr PROJ_NAME=basilisk
+        run: PNR_GPL_DENSITY=${{ github.event.inputs.gpl_density || '' }} PNR_GPL_KEEP_RESIZE=${{ github.event.inputs.gpl_keep_resize || '' }} PNR_DIE_SCALE=${{ github.event.inputs.die_scale || '' }} PNR_DPL_LEGALIZER=${{ github.event.inputs.dpl_legalizer || '' }} PNR_DPL_MAX_DISPLACEMENT="${{ github.event.inputs.dpl_max_displacement || '' }}" PNR_TIMEOUT_GRT=57600 PNR_TIMEOUT_GRT_REPAIR=57600 PNR_SKIP_GRT_REPAIR=${{ github.event.inputs.skip_grt_repair || '1' }} PNR_TIMEOUT_ANT=14400 PNR_SKIP_ANTENNA_REPAIR=${{ github.event.inputs.antenna_repair == 'skip' && '1' || '0' }} PNR_ANTENNA_REPAIR_MODE=${{ github.event.inputs.antenna_repair == '1' && 'full' || 'jumper' }} PNR_DRT_END_ITER=${{ github.event.inputs.drt_end_iter || '28' }} PNR_TIMEOUT_DRT=86400 PNR_STOP_AFTER=${{ github.event.inputs.stop_after || '' }} PNR_GRT_METAL2_ADJUST=${{ github.event.inputs.grt_metal2_adjust || '' }} PNR_GRT_SRAM_METAL5_ADJUST=${{ github.event.inputs.sram_metal5_adjust || '' }} PNR_CELL_PAD_SITES=${{ github.event.inputs.cell_pad_sites || '' }} make -C target/ihp13/openroad -f openroad.mk run-pnr PROJ_NAME=basilisk
 
       # Move the checkpoints out of the shared workspace before this job
       # releases the runner. This is the whole fix for the collision that
@@ -809,7 +820,9 @@ jobs:
             # The antenna checker's counts on the routed design
             # (drc-clean-sram-metal5-and-antenna design D3): run_pnr.sh's
             # report_antenna_outcome puts a `drt-antenna` row in the table
-            # above; the full listing is in the pnr-reports artifact.
+            # above; the full listing is in the pnr-reports artifact. The
+            # repair itself has its own `ant-repair` row there, from
+            # report_ant_outcome (finish-antenna-diode-repair design D3).
             ANTENNA_RPT=target/ihp13/openroad/reports/basilisk_antenna.rpt
             if [ -f "$ANTENNA_RPT" ]; then
               echo

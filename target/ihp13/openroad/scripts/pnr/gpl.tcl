@@ -2,7 +2,7 @@
 # Solderpad Hardware License, Version 0.51, see LICENSE for details.
 # SPDX-License-Identifier: SHL-0.51
 #
-# Stage 3/9: gpl - global placement (two passes) + pre-placement setup
+# Stage 3/10: gpl - global placement (two passes) + pre-placement setup
 # repair, adapted from ../chip.tcl's "GLOBAL PLACEMENT" section
 # (openspec/changes/ci-pnr-lane/design.md D1).
 #
