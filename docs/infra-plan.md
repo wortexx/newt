@@ -20,7 +20,7 @@ instructions for a cryptographic (SHA) coprocessor on CVA6 / Cheshire, targeting
 | Simulation is **Questa-only** (`iguana.mk` → `questa-2022.3 vsim`); no Verilator flow | **Critical-path blocker for RTL CI.** Must add Verilator. |
 | Dev machine has 31 GB RAM; synth peaks ~35 GB | Basilisk synth needs a >64 GB box or a swap file. |
 | Stock `chip.tcl` does not complete unattended | Still true, but **the specific failure modes did not reproduce**: across 10 real P&R runs `remove_buffers` **never crashed once** (the "~1/3 runs" figure is unsubstantiated in this environment — the retry was ultimately verified by deliberate fault injection, not by a real crash). `repair_timing` looping forever did reproduce, and post-route repair is now skipped entirely. The real unattended blockers turned out to be elsewhere: `repair_antennas` hanging ~14h single-threaded, and global route's congestion iterations. |
-| Basilisk WNS ≈ −2.5 ns vs 6 ns target | Design does not close timing in the open flow (known / accepted). **Caveat for any PPA number quoted from the CI lane**: with `grt_repair` skipped (Phase 5), measured WNS at `grt` is **−14.76**, not −2.5 — post-route repair is exactly what closes that gap. Restore a bounded `grt_repair`, or requote the baseline, before using lane output as thesis PPA data. **Resolved 2026-10-07 (`bounded-grt-repair-measurement`):** since the 10-03 placement fix, WNS at `grt` is −8.36 ns (reference) and −8.23 ns (both SHA-3 arms). A bounded `grt_repair`, resumed from the reference's `grt` checkpoint (run `37512872714`), timed out at 16 h in its incremental re-route (Phase 11). So the thesis quotes `grt` figures, labelled "before post-route repair", on both sides of the comparison. **Requoted 2026-10-16 from legal placements** (`requote-sha3-pnr-legal-placement`): −8.39 ns (reference, run `38772313345`) against −8.96 ns (both arms, run `38395368038`), on the enlarged die. With both arms, the critical path is now inside `keccak_cvxif`'s R = 6 round logic. |
+| Basilisk WNS ≈ −2.5 ns vs 6 ns target | Design does not close timing in the open flow (known / accepted). **Caveat for any PPA number quoted from the CI lane**: with `grt_repair` skipped (Phase 5), measured WNS at `grt` is **−14.76**, not −2.5 — post-route repair is exactly what closes that gap. Restore a bounded `grt_repair`, or requote the baseline, before using lane output as thesis PPA data. **Resolved 2026-10-07 (`bounded-grt-repair-measurement`):** since the 10-03 placement fix, WNS at `grt` is −8.36 ns (reference) and −8.23 ns (both SHA-3 arms). A bounded `grt_repair`, resumed from the reference's `grt` checkpoint (run `37512872714`), timed out at 16 h in its incremental re-route (Phase 11). So the thesis quotes `grt` figures, labelled "before post-route repair", on both sides of the comparison. **Requoted 2026-10-16 from legal placements** (`requote-sha3-pnr-legal-placement`): −8.39 ns (reference, run `38772313345`) against −8.96 ns (both arms, run `38395368038`), on the enlarged die. With both arms, the critical path is now inside `keccak_cvxif`'s R = 6 round logic. **Requoted 2026-10-26 on the routable defaults** (`adopt-drc-clean-defaults-and-requote`, die scale 1.25): −10.24 ns (reference, run `40177828976`) against −12.05 ns (both arms, run `40081935481`), both detailed-routed (8 and 70 router violations). The worst path is in CVA6 on both sides. |
 | CVA6 CV-X-IF present but disabled: `CVA6ConfigCvxifEn = 0`; Cheshire ties off `cvxif_req_o` / `cvxif_resp_i`, `cheshire_pkg CvxifEn : 0` | The integration seam already exists; needs enabling + un-tying. |
 
 ### ISA integration — decided 2026-10-01: SHA-3 via CV-X-IF (+ MMIO comparison arm)
@@ -1007,12 +1007,16 @@ from placements with overlapping cells, on both sides alike.
         violations**. Antennas are down to 8,627 nets, from 11,732. Full diode repair hangs. See
         the outcome after the 2026-10-21 analysis below.
 
-      **Next change: adopt the routing settings as defaults, and requote the thesis P&R figures
-      on them.** Make die scale 1.25, density 0.50, Metal2 0.60, SRAM Metal5 0.55 and jumper-only
-      antenna repair the lane's defaults. Re-run the reference and both SHA-3 arms on them, with
-      the same generator.
-      The safety-net figures (`requote-sha3-pnr-legal-placement`, runs `38395368038` /
-      `38772313345`) stay the thesis figures until that change lands.
+      - [x] **Adopt the routing settings as defaults, and requote the thesis P&R figures on
+        them** (change `adopt-drc-clean-defaults-and-requote`, done 2026-10-26). Die scale 1.25,
+        density 0.50, Metal2 0.60, SRAM Metal5 0.55, jumper-only antenna repair and a
+        28-iteration `drt` budget are the lane's defaults since `6e576f2` (#85). Requoted from
+        two input-less runs on them: run `40081935481` (both arms, `main`) and run `40177828976`
+        (reference, `pnr-reference-no-arms` rebased onto `6e576f2`, same synth key as
+        `38772313345`). WNS at `grt` −12.05 against −10.24 ns, achieved period 23.05 ns; router
+        8 against 70 violations, antennas 8,627 against 8,299 nets. The worst path is in CVA6 on
+        both sides. The safety-net pair (`38395368038` / `38772313345`) is kept as an
+        earlier-settings note in `docs/results/sha3-evaluation.md`.
 
       **What is left of DRC, 2026-10-21.** Read-only analysis of run `39244019401`'s `drt` and
       `grt` checkpoints (`newt-eda:dev` locally; `check_antennas` and odb Python probes). Three
@@ -1148,6 +1152,29 @@ from placements with overlapping cells, on both sides alike.
          8,627 nets.
       3. **PDN lever (b).** Use fewer or x-aligned via stacks over the SRAMs, but only if the
          5 Metal5 shorts at the macros' east edges matter for signoff.
+
+      **Defaults reproduce the chain, 2026-10-25: run `40081935481`** (change
+      `adopt-drc-clean-defaults-and-requote`, design D2). One input-less dispatch on `main`
+      (`6e576f2`, the new defaults), every stage run from synthesis, none restored. `pnr`
+      11 h 56 m; `drt ok droute_end_iter=28 antenna=jumper`, `final ok`, DEF published. Against
+      the measured chain (`38931700180` → `39696194006` → `39906592139`):
+
+      | | chain | `40081935481` |
+      |---|---:|---:|
+      | die | 7598.0 × 6658.0 µm (1.25) | 7598.0 × 6658.0 µm (1.25) |
+      | utilization after `dpl` / `cts` (`DPL-0009`) | 43.5 % / 45.3 % | 43.5 % / 45.3 % |
+      | `grt` total overflow | 7,153 | 7,153 (Metal5 4,697, Metal4 991, Metal3 777) |
+      | WNS / TNS at `grt` | −12.05 ns / −124.0 k ns | −12.05 ns / −124,005.65 ns |
+      | router count after iteration 28 | 8 | 8 |
+      | antenna nets / pins after `drt` | 8,627 / 11,287 | 8,627 / 11,287 |
+
+      - **Identical.** The router's whole 29-iteration trajectory matches `39906592139` count for
+        count, and the `grt` congestion report matches `39696194006` layer for layer. So global
+        placement is deterministic too, from the netlist, and the defaults are the chain's
+        settings. (Design D2 quoted 45.6 % after `cts`; P2's own log, like this run's, says
+        45.3 %.)
+      - Neither stop condition (router count above 1,000, WNS more than 1 ns off) applies. This
+        run is the requote's both-arms side.
 
 **2026-10-11 finding: `DRT-0218` is not a placement problem.** Run `38094932339` placed legally
 and `drt` still aborted with `DRT-0218`, on one clock net (`clknet_12_3602__leaf…`). Probes on

@@ -149,10 +149,13 @@ the state never leaving the coprocessor.
 (≥ 2.2 ns) at 11.0 ns. Every R qualifies. Measured effect: SHA3-256 `kperm`
 costs 135 cycles/block at R = 6, against 155 at R = 1 (−13 %), for 3.5× the
 block area. Area × cycles favours R = 1. That was offered as an alternative
-and not chosen. **After place and route, the rule does not hold: the R = 6
-round datapath is the SoC's critical path** (Timing, below). Block synthesis
-has no wires, so its 3.19 ns of slack did not survive placement on the full
-SoC. Choosing R from placed timing is future work.
+and not chosen. **After place and route, the rule is not confirmed.** On the
+earlier, unroutable 1.10 die the R = 6 round datapath was the SoC's critical
+path, so block synthesis's 3.19 ns of slack (no wires) did not survive
+placement there. On the current routable layout the worst path is in CVA6
+instead (Timing, below), and the reports keep only the worst path, so the
+round logic's own slack after placement is not measured. Choosing R from
+placed timing is future work.
 
 ## Area
 
@@ -190,36 +193,65 @@ The block-synthesis figures come from one consistent flow.
 | stage | corner | figure |
 |---|---|---|
 | block synthesis | `typ_1p20V_25C` | `keccak_cvxif` 7.67 ns, `keccak_mmio` 7.46 ns critical path (11.0 ns constraint) |
-| SoC P&R, post-global-route (`grt`), before post-route repair | `tt` | WNS −8.96 ns with both arms, against −8.39 ns for the reference (run 38395368038 vs 38772313345) |
+| SoC P&R, post-global-route (`grt`), before post-route repair | `tt` | WNS −12.05 ns with both arms, against −10.24 ns for the reference (run 40081935481 vs 40177828976) |
+| SoC P&R, detailed routing (`drt`, 28-iteration budget) | — | router violations 8 with both arms, 70 for the reference; antenna violations 8,627 / 8,299 nets |
 
-The P&R lane stops at `grt` by design, since detailed routing is best-effort.
-So `grt` is the latest stage available, and the figures are quoted from it.
-These figures are from before post-route timing repair, which the lane skips
+Both runs go through detailed routing and `final`, so both have a routed
+layout. The timing figures are still quoted at `grt`, the lane's gate:
+detailed routing is best-effort, and the lane does not re-time the routed
+design. They are from before post-route timing repair, which the lane skips
 by default. A bounded repair was attempted on the reference (run
 37512872714). It timed out at its 16 h limit: the incremental re-route after
 the repair fell into a congestion cascade and never finished
 (`docs/infra-plan.md` Phase 11). So no figure after repair exists for either
 side, and the comparison stays at `grt` on both.
 Both runs place legally (the gated `check_placement` passes after `dpl` and
-`cts`) on the same enlarged die, 6777 × 5950 µm (core scale 1.10), with the
-same flow (`docs/results/sha3-ppa.md`, P&R section). The reference is the same
+`cts`) on the same enlarged die, 7598 × 6658 µm (core scale 1.25), with the
+same flow revision (`6e576f2`, the reference rebased onto it) and the same
+inputs: the lane's defaults since change
+`adopt-drc-clean-defaults-and-requote`, `gpl` density 0.50, Metal2 hold-back
+0.60, SRAM Metal5 hold-back 0.55, jumper-only antenna repair and a
+28-iteration routing budget (`docs/results/sha3-ppa.md`, P&R section). The reference is the same
 SoC without the SHA-3 hardware: CV-X-IF off, no Keccak instances, no external
 AXI subordinate (branch `pnr-reference-no-arms`, never merged). Its synthesized
 netlist differs from the earlier pre-coprocessor synthesis (run 36447894410)
 by −0.43 % cells, −0.10 % area and −0.02 % flip-flops. CVA6 is identical, and
 the difference sits in the flattened top. It follows the Cheshire fork pin
 (`newt.2`, which the SoC with the arms also uses, against `newt.1`), not
-the hardware.
+the hardware. The reference run's synthesis inputs hash to the same synth
+key as that earlier reference run's (`synth-c9179ea7…`), so the netlist and
+this comparison carry over.
 
-**With both arms, the SoC's critical path is inside the coprocessor.** The
-worst path after `grt` runs within `i_keccak_cvxif`'s R = 6 round datapath
-(`state_i_26` → `state_i_541`, −8.96 ns). In the reference, it is in CVA6's
-write-through D-cache (−8.39 ns). Adding the arms costs 0.57 ns, about 3 % of
-the achieved period. The open flow does not close timing on this SoC either
-way. The achieved period with both arms, 11.0 + 8.96 = **19.96 ns** (19.39 ns
-for the reference), is used for energy below. It is a figure from before
-repair, not the SoC's maximum frequency: after `cts` the same run is at
-−3.36 ns.
+**The worst path is in CVA6 on both sides.** With both arms, it runs from
+CVA6's controller (`controller_i.v_i`) into a write-through D-cache data SRAM
+cut (−12.05 ns). In the reference, it runs from the D-cache write buffer into
+the performance counters (−10.24 ns). No SHA-3 path is the worst at `dpl`,
+`cts` or `grt` in either run. Adding the arms costs 1.81 ns, about 8 % of the
+achieved period, so it is an indirect cost: a larger netlist placed on the
+same die (43.5 % against 38.8 % utilization). With one run per side it is not
+split further. The open flow does not close timing on this SoC either way.
+The achieved period with both arms, 11.0 + 12.05 = **23.05 ns** (21.24 ns for
+the reference), is used for energy below. It is a figure from before repair,
+not the SoC's maximum frequency: after `cts` the same run is at −3.85 ns.
+
+**Routed outcome.** Both runs complete detailed routing and `final`. Within
+the 28-iteration budget, the router ends at 8 violations with both arms and
+at 70 for the reference, which was still falling (107 → 70 over the last
+iteration). Jumper-only antenna repair leaves 8,627 nets / 11,287 pins with
+both arms and 8,299 / 10,970 for the reference. Neither layout is
+signoff-clean (Limitations).
+
+**Earlier flow settings (2026-10-20 to 2026-10-25).** Before this requote,
+the P&R figures came from runs 38395368038 (both arms) and 38772313345
+(reference), change `requote-sha3-pnr-legal-placement`. Their settings were
+die scale 1.10 (6777 × 5950 µm), `gpl` density 0.65, Metal2 hold-back 0.30,
+no SRAM Metal5 hold-back, and `stop_after=grt`. Those runs placed legally and
+were like for like, so they are not superseded for illegality. They gave WNS
+−8.96 against −8.39 ns, an achieved period of 19.96 ns, and a critical path
+inside `i_keccak_cvxif`'s round datapath. The settings changed because that
+layout does not route (715,558 violations after iteration 5, run
+38473439796). The routable layout costs about 3 ns of achieved period, and
+with it every energy-per-byte figure at that period.
 
 **Superseded (2026-10-16).** Until this requote, the P&R figures came from
 runs 37162759719 (both arms) and 37108127061 (reference): WNS −8.23 against
@@ -239,7 +271,7 @@ switching activity annotated into OpenSTA from SAIF. Every run annotates
 an ideal clock and no clock tree. Each workload is SHA3-256 absorb, paced at
 the cycles per block measured on the SoC for that implementation and cache
 regime. Only the block is counted: **the CPU, caches, iDMA and interconnect
-are excluded from every figure.** Energy per byte is at the achieved 19.96 ns
+are excluded from every figure.** Energy per byte is at the achieved 23.05 ns
 (from `grt`, before post-route repair). Only leakage scales with the period,
 so the figures at 11.0 ns differ by < 0.2 %.
 
@@ -247,12 +279,12 @@ so the figures at 11.0 ns differ by < 0.2 %.
 |---|---|---:|---:|---:|
 | `kperm` (coprocessor) | cached | 135 | 12.91 | **141.1** |
 | `shatr` (coprocessor) | cached | 232 | 14.18 | 266.3 |
-| `mmio-cpu` (accelerator) | cached | 265 | 10.84 | 232.6 |
+| `mmio-cpu` (accelerator) | cached | 265 | 10.84 | 232.7 |
 | `mmio-dma` (accelerator) | cached | 255 | 11.00 | 227.1 |
-| `kperm` | uncached | 281 | 10.19 | 231.8 |
-| `shatr` | uncached | 377 | 11.67 | 356.1 |
-| `mmio-cpu` | uncached | 304 | 10.45 | 257.2 |
-| `mmio-dma` | uncached | 253 | 11.02 | **225.8** |
+| `kperm` | uncached | 281 | 10.19 | 231.9 |
+| `shatr` | uncached | 377 | 11.67 | 356.3 |
+| `mmio-cpu` | uncached | 304 | 10.45 | 257.3 |
+| `mmio-dma` | uncached | 253 | 11.02 | **225.9** |
 
 Idle: coprocessor 9.73 mW, accelerator 9.88 mW.
 
@@ -280,12 +312,12 @@ the always-on cost of carrying the ISE close to zero. It is future work.
 **SoC workload power is not reported.** There is no workload activity for the
 whole SoC, and OpenSTA's default activity, which the evaluation spec excludes
 anyway, does not converge on this SoC (infra-plan Phase 17). Under one uniform
-activity on every net, comparative only, the SoC with both arms draws 1.06 W
-against the reference's 1.25 W after `grt`. That total is dominated by the
+activity on every net, comparative only, the SoC with both arms draws 1.04 W
+against the reference's 1.31 W after `grt`. That total is dominated by the
 clock tree, not the arms. On the shared die, the smaller reference is placed
-more sparsely (50.4 % against 56.3 % utilization), and CTS gives it 20,842
-clock buffers against 15,180, for 0.611 W of clock power against 0.397 W.
-Without the clock network, adding both arms costs **+5.2 %** (0.633 → 0.667 W).
+more sparsely (38.8 % against 43.5 % utilization), and CTS gives it 20,230
+clock buffers against 14,695, for 0.690 W of clock power against 0.373 W.
+Without the clock network, adding both arms costs **+8.5 %** (0.617 → 0.670 W).
 
 ## ISE vs MMIO crossover (SHA3-256)
 
@@ -317,8 +349,8 @@ stores and a launch, plus polling STATUS. That costs more than the ISE's
 misses, while the iDMA streams from the SPM at about the same cost as before.
 The DMA arm then overtakes `kperm` beyond ~8.5 KB.
 
-In accelerator-only energy, `mmio-dma` uncached (225.8 pJ/B) and `kperm`
-uncached (231.8 pJ/B) are level. Cached, `kperm` uses 38–39 % less energy
+In accelerator-only energy, `mmio-dma` uncached (225.9 pJ/B) and `kperm`
+uncached (231.9 pJ/B) are level. Cached, `kperm` uses 38–39 % less energy
 than either MMIO mode. The CPU's share of energy is excluded and differs between
 the arms: the CPU drives every `kxor`, but only polls during an iDMA copy.
 
@@ -356,13 +388,22 @@ scoreboard), which this work rules out by design. It is listed as future work
 - **Provenance.** The cycle figures come from Xcelium run P, a bundle built
   from a clean checkout (`newt-xrun-b1fa596`, task 9.1). The earlier
   dirty-tree runs (`0dee23f-dirty`, `6be5346-dirty`) gave identical figures.
-- **Single runs.** Each P&R and SoC synthesis figure is one run. Placement and
-  ABC mapping vary from run to run (see the area spread above).
-- **No signoff layout.** P&R figures are from global routing on legal
-  placements. Detailed routing on the SoC with both arms still ends with about
-  716 k DRC violations (infra-plan Phase 11), and post-route timing repair
-  does not complete. So the comparison is like for like through the real flow,
-  not a routed, timing-closed chip.
+- **Single runs.** Each P&R and SoC synthesis figure is one run. P&R is
+  deterministic for a given netlist: run 40081935481 reproduced run
+  38931700180's placement and routing exactly, from the same synth key. But
+  any netlist change re-places the whole SoC, so the P&R deltas between the
+  two sides include placement differences as well as the arms. ABC mapping
+  moves whenever the RTL changes (see the area spread above). Whether
+  synthesis repeats exactly on identical inputs was not checked: the synth
+  cache serves a repeat instead of re-running it.
+- **No signoff layout.** Timing and power are quoted from global routing on
+  legal placements. Both sides are detailed-routed, but not clean: the router
+  ends at 8 violations with both arms and 70 for the reference, and
+  jumper-only antenna repair leaves 8,627 and 8,299 violating nets, since
+  diode repair does not finish (infra-plan, run 39696194006). Signoff DRC
+  and metal fill were never run, and post-route timing repair does not
+  complete. So the comparison is like for like through the real flow, on a
+  near-clean routed layout, not a signoff-clean, timing-closed chip.
 - **Energy coverage.** Energy is block-only, at the typical corner, with no
   clock tree. The CPU and SoC power are not measured (no SoC workload
   activity; default activity does not converge, infra-plan Phase 17).
@@ -382,5 +423,5 @@ scoreboard), which this work rules out by design. It is listed as future work
 | Isolated area of each new block | Area (per-instance lines, selectors, SoC delta with the noise band) |
 | Rounds-per-cycle design-space sweep | Design space: rounds per cycle |
 | Timing and power with a stated measurement stage | Timing; power and energy (stage, corner, workload, annotated activity; the unavailable SoC power is named with its reason) |
-| SoC P&R comparison from legal, like-for-like placements | Timing (legality, shared die and flow, the reference netlist's deviation, the superseded pair) |
+| SoC P&R comparison from legal, like-for-like placements | Timing (legality, shared die and flow, the reference netlist's deviation, the routed outcome, the earlier-settings and superseded pairs) |
 | Measured ISE-versus-MMIO crossover | ISE vs MMIO crossover (bracketed points; "none" stated with the range) |
