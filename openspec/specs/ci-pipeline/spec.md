@@ -246,12 +246,12 @@ The manual dispatch SHALL accept these optional inputs, all empty by default:
 - the legalizer used by detailed placement and CTS, and its search window;
 - whether to skip post-route timing repair.
 - detailed routing's iteration budget;
-- whether to run antenna repair, and in which mode: full repair, or jumper insertion only;
+- which antenna repair runs before detailed routing: jumper insertion only, full repair, or none;
 - the share of Metal2's capacity that global routing holds back;
 - the share of Metal5's capacity that global routing holds back over the SRAMs;
 - the placement padding, in sites, on each side of every standard cell.
 
-An empty input SHALL keep the flow's default for that setting. Post-route timing repair SHALL be skipped by default and SHALL run only when the dispatch explicitly asks for it. Antenna repair SHALL likewise be skipped by default and SHALL run only when the dispatch explicitly asks for it. An antenna-repair value that names no known mode SHALL fail the run before P&R starts, rather than fall back to a default. An empty iteration budget SHALL keep the lane's default budget. An empty Metal2 hold-back SHALL keep the flow's default. An empty SRAM Metal5 hold-back SHALL keep the flow's default of no hold-back. An empty cell padding SHALL keep the flow's default of no padding. With all inputs empty, a dispatched run SHALL behave exactly like a scheduled run. These inputs SHALL NOT change the flow's success gate: a run that stops before the gate stage is reached SHALL still exit non-zero, and post-route repair, antenna repair and detailed routing SHALL stay best-effort whether they are skipped, complete, fail or time out. Selecting a legalizer SHALL NOT bypass the flow's placement legality checks.
+An empty input SHALL keep the flow's default for that setting. Post-route timing repair SHALL be skipped by default and SHALL run only when the dispatch explicitly asks for it. Antenna repair SHALL run in jumper-only mode by default. Full repair SHALL run only when the dispatch explicitly asks for it, and the dispatch SHALL be able to skip antenna repair. An antenna-repair value that names no known mode SHALL fail the run before P&R starts, rather than fall back to a default. An empty iteration budget SHALL keep the lane's default budget. An empty Metal2 hold-back SHALL keep the flow's default. An empty SRAM Metal5 hold-back SHALL keep the flow's default. An empty cell padding SHALL keep the flow's default of no padding. With all inputs empty, a dispatched run SHALL behave exactly like a scheduled run. These inputs SHALL NOT change the flow's success gate: a run that stops before the gate stage is reached SHALL still exit non-zero, and post-route repair, antenna repair and detailed routing SHALL stay best-effort whether they are skipped, complete, fail or time out. Selecting a legalizer SHALL NOT bypass the flow's placement legality checks.
 
 #### Scenario: Weekly run
 
@@ -271,7 +271,7 @@ An empty input SHALL keep the flow's default for that setting. Post-route timing
 #### Scenario: Manual dispatch with no inputs
 
 - **WHEN** a user dispatches the P&R lane without setting any input
-- **THEN** the lane runs the full flow from synthesis through detailed route exactly as a scheduled run would, with the default legalizer and with post-route timing repair skipped
+- **THEN** the lane runs the full flow from synthesis through detailed route exactly as a scheduled run would, with the default legalizer, with post-route timing repair skipped, and with jumper-only antenna repair before detailed routing
 
 #### Scenario: Manual dispatch re-runs one slice of the flow
 
@@ -307,6 +307,11 @@ An empty input SHALL keep the flow's default for that setting. Post-route timing
 
 - **WHEN** a user dispatches the P&R lane asking for jumper-only antenna repair
 - **THEN** the detailed-route stage runs antenna repair before routing without inserting diode cells, its status records that jumper-only repair ran, and a failure or timeout in it does not change the run's exit status
+
+#### Scenario: Manual dispatch skips antenna repair
+
+- **WHEN** a user dispatches the P&R lane asking for no antenna repair
+- **THEN** the detailed-route stage routes without running antenna repair, and its status records that repair was skipped
 
 #### Scenario: Manual dispatch names an unknown antenna-repair mode
 
