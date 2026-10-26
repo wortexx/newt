@@ -74,4 +74,4 @@ Tags:
 
 ## 6. Integration check
 
-- [ ] 6.1 **[edit]** Run `openspec validate adopt-drc-clean-defaults-and-requote --strict`. Open the results PR: `scripts/`, `docs/` and this change's directory only. The reference branch is not part of it and stays unmerged. Verify the fast lane is green.
+- [x] 6.1 **[edit]** Run `openspec validate adopt-drc-clean-defaults-and-requote --strict`. Open the results PR: `scripts/`, `docs/` and this change's directory only. The reference branch is not part of it and stays unmerged. Verify the fast lane is green.
