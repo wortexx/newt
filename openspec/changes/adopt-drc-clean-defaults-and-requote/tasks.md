@@ -51,7 +51,7 @@ Tags:
   - `drt ok droute_end_iter=28 antenna=jumper`, a `drt-antenna` row, and `final ok` with the DEF.
 - [x] 4.2 **[edit]** Compare 4.1 with the measured chain per D2: `grt` WNS and overflow, the router count after iteration 28, antenna counts, and `DPL-0009` after `cts`. Record it in `docs/infra-plan.md`. A router count above 1,000 or WNS more than 1 ns off the chain's −12.05 ns is a stop: report it and ask the user before 4.3.
 - [x] 4.3 **[edit]** Rebase `pnr-reference-no-arms` onto 4.1's commit. Verify `git diff <commit> --stat` shows only the four reference files, and the branch still lints (`make ig-hw-cva6` and the fast lane's Verilator lint in the image, 0 `%Error`). Push it (force, since it is a never-merged measurement branch).
-- [ ] 4.4 **[long-run]** *(ask the user first)* Dispatch `pnr.yml` on `pnr-reference-no-arms` with no inputs. Save its `pnr-reports`. Verify:
+- [x] 4.4 **[long-run]** *(ask the user first)* Dispatch `pnr.yml` on `pnr-reference-no-arms` with no inputs. Save its `pnr-reports`. Verify:
   - the same points as 4.1, with the same `Die:` line as 4.1;
   - its uploaded `synth-key.txt` equals run `38772313345`'s (`synth-c9179ea7…`).
 
@@ -59,10 +59,10 @@ Tags:
 
 ## 5. Results docs (design D6)
 
-- [ ] 5.1 **[edit]** Regenerate `docs/results/sha3-ppa.md` with `--pnr <4.1 dir> --pnr-ref <4.4 dir>` and the page's other inputs unchanged. Verify with `git diff`:
+- [x] 5.1 **[edit]** Regenerate `docs/results/sha3-ppa.md` with `--pnr <4.1 dir> --pnr-ref <4.4 dir>` and the page's other inputs unchanged. Verify with `git diff`:
   - only the P&R section, the achieved-period column and the energy sentences change;
   - every number in the P&R section traces to one of the two artifacts.
-- [ ] 5.2 **[edit]** Update `docs/results/sha3-evaluation.md`:
+- [x] 5.2 **[edit]** Update `docs/results/sha3-evaluation.md`:
   - the timing row and prose, with the new WNS pair, run IDs, settings and routed outcome;
   - the achieved period and the energy figures, copied from 5.1;
   - the worst-path attribution, re-checked from the new reports;
@@ -70,7 +70,7 @@ Tags:
   - the "No signoff layout" limitation updated with the routed and antenna counts.
 
   Verify: `grep -n '19.96\|8.96\|8.39\|38395368038\|38772313345' docs/results/` hits only the earlier-settings note, and the superseded illegal-placement note is unchanged.
-- [ ] 5.3 **[edit]** In `docs/infra-plan.md`, tick the "Next change" item with both run IDs, and update the §0 "Basilisk WNS" row. Verify both run IDs appear and the item reads `- [x]`.
+- [x] 5.3 **[edit]** In `docs/infra-plan.md`, tick the "Next change" item with both run IDs, and update the §0 "Basilisk WNS" row. Verify both run IDs appear and the item reads `- [x]`.
 
 ## 6. Integration check
 

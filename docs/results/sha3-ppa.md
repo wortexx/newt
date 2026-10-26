@@ -41,14 +41,14 @@ Caveats: there is no clock tree, so a real clock network adds power on top of th
 
 Stage: block synthesis netlist, gate-level simulation (Verilator) + OpenSTA. Corner: `typ_1p20V_25C`. Activity: annotated from the SAIF of each workload below (not default activity); every run annotates all pins (100.0 % minimum) and passes its gate-level functional check. Coprocessor only: the CPU's energy is not in these figures.
 
-Each workload is SHA3-256 absorb paced like the SoC: per block, 17 `kxor`, then one `kperm` or 24 `shatr`, over the measured cycles per block of that implementation and cache regime (*cached*: message in the D-cache, `docs/results/sha3-ise.md`; *uncached*: message evicted, `docs/results/sha3-mmio-uncached.md`). Energy per block = average power × cycles per block × clock period; per byte, divided by the 136-byte rate. At another period, switching and internal energy per cycle stay, and leakage scales with the period. Achieved period: 19.96 ns (11.0 ns constraint minus WNS -8.96 ns after `grt`, before post-route repair, tt, SoC P&R run 38395368038; see the P&R section).
+Each workload is SHA3-256 absorb paced like the SoC: per block, 17 `kxor`, then one `kperm` or 24 `shatr`, over the measured cycles per block of that implementation and cache regime (*cached*: message in the D-cache, `docs/results/sha3-ise.md`; *uncached*: message evicted, `docs/results/sha3-mmio-uncached.md`). Energy per block = average power × cycles per block × clock period; per byte, divided by the 136-byte rate. At another period, switching and internal energy per cycle stay, and leakage scales with the period. Achieved period: 23.05 ns (11.0 ns constraint minus WNS -12.05 ns after `grt`, before post-route repair, tt, SoC P&R run 40081935481; see the P&R section).
 
 | implementation | regime | cycles/block (workload / measured) | power @ 11.0 ns (mW) | energy/block @ 11.0 ns (nJ) | energy/byte @ 11.0 ns (pJ/B) | energy/byte @ achieved period |
 |---|---|---:|---:|---:|---:|---:|
-| ise-kperm | cached | 135 / 135 | 12.91 | 19.18 | 141.0 | 141.1 pJ/B @ 19.96 ns |
-| ise-shatr | cached | 232 / 232 | 14.18 | 36.19 | 266.1 | 266.3 pJ/B @ 19.96 ns |
-| ise-kperm | uncached | 281 / 280 | 10.19 | 31.50 | 231.6 | 231.8 pJ/B @ 19.96 ns |
-| ise-shatr | uncached | 377 / 377 | 11.67 | 48.40 | 355.8 | 356.1 pJ/B @ 19.96 ns |
+| ise-kperm | cached | 135 / 135 | 12.91 | 19.18 | 141.0 | 141.1 pJ/B @ 23.05 ns |
+| ise-shatr | cached | 232 / 232 | 14.18 | 36.19 | 266.1 | 266.3 pJ/B @ 23.05 ns |
+| ise-kperm | uncached | 281 / 280 | 10.19 | 31.50 | 231.6 | 231.9 pJ/B @ 23.05 ns |
+| ise-shatr | uncached | 377 / 377 | 11.67 | 48.40 | 355.8 | 356.3 pJ/B @ 23.05 ns |
 
 **Idle coprocessor: 9.73 mW** (internal 9.71, switching 0.005, leakage 0.012). Its flip-flops are not clock-gated, so the block draws this whenever the SoC is clocked, whatever runs. The software baselines' own energy is CPU energy, which this flow does not measure (it would need a gate-level CVA6 simulation); what the coprocessor adds to them is this idle power over their cycles:
 
@@ -73,41 +73,43 @@ Power: block synthesis netlist, gate-level simulation (Verilator) + OpenSTA, `ty
 
 | implementation | regime | cycles/block (workload / measured) | power @ 11.0 ns (mW) | energy/block @ 11.0 ns (nJ) | energy/byte @ 11.0 ns (pJ/B) | energy/byte @ achieved period |
 |---|---|---:|---:|---:|---:|---:|
-| mmio-cpu | cached | 265 / 265 | 10.84 | 31.60 | 232.4 | 232.6 pJ/B @ 19.96 ns |
-| mmio-dma | cached | 255 / 255 | 11.00 | 30.85 | 226.9 | 227.1 pJ/B @ 19.96 ns |
-| mmio-cpu | uncached | 304 / 304 | 10.45 | 34.95 | 257.0 | 257.2 pJ/B @ 19.96 ns |
-| mmio-dma | uncached | 253 / 253 | 11.02 | 30.68 | 225.6 | 225.8 pJ/B @ 19.96 ns |
+| mmio-cpu | cached | 265 / 265 | 10.84 | 31.60 | 232.4 | 232.7 pJ/B @ 23.05 ns |
+| mmio-dma | cached | 255 / 255 | 11.00 | 30.85 | 226.9 | 227.1 pJ/B @ 23.05 ns |
+| mmio-cpu | uncached | 304 / 304 | 10.45 | 34.95 | 257.0 | 257.3 pJ/B @ 23.05 ns |
+| mmio-dma | uncached | 253 / 253 | 11.02 | 30.68 | 225.6 | 225.9 pJ/B @ 23.05 ns |
 
 **Idle accelerator: 9.88 mW** (internal 9.87, switching 0.003, leakage 0.013); like the coprocessor, its state flip-flops are not clock-gated.
 
 ## SoC place and route (task 5.4)
 
-P&R lane run 38395368038 (the SoC with both SHA-3 arms, `keccak_cvxif` and `keccak_mmio`, R = 6) against run 38772313345 (the same SoC without the SHA-3 hardware: CV-X-IF off, no Keccak instances, no external AXI subordinate; the reference). Same flow and inputs on both sides: die 6777.0 x 5950.0 um (core scale 1.10 of the taped-out 6230.0 x 5478.0), diamond legalizer, placement legal after `dpl` and `cts` (the flow's gated `check_placement`), `stop_after=grt`. **Stage used: grt, before post-route repair**: the lane's gate. `grt_repair` is skipped by default, and detailed routing is best-effort and was not run. Corner: `tt` (`typ_1p20V_25C`). Constraint: 11.0 ns.
+P&R lane run 40081935481 (the SoC with both SHA-3 arms, `keccak_cvxif` and `keccak_mmio`, R = 6) against run 40177828976 (the same SoC without the SHA-3 hardware: CV-X-IF off, no Keccak instances, no external AXI subordinate; the reference). Same flow and inputs on both sides: die 7598.0 x 6658.0 um (core scale 1.25 of the taped-out 6230.0 x 5478.0), diamond legalizer, placement legal after `dpl` and `cts` (the flow's gated `check_placement`), `gpl` target density 0.50, `grt` Metal2 hold-back 0.60, SRAM Metal5 hold-back 0.55, detailed routing with a 28-iteration budget (`droute_end_iter`) and jumper-only antenna repair, no `stop_after`, through `final`. **Stage used: grt, before post-route repair**: the lane's gate. `grt_repair` is skipped by default, and detailed routing is best-effort and ran after it, with its outcome in the table below. Corner: `tt` (`typ_1p20V_25C`). Constraint: 11.0 ns.
 
 | | reference | with both arms |
 |---|---:|---:|
-| WNS / TNS after `dpl` (ns) | -0.87 / -88 | -0.87 / -250 |
-| WNS / TNS after `cts` (ns) | -2.11 / -13,908 | -3.36 / -38,450 |
-| WNS / TNS after `grt`, before post-route repair (ns) | -8.39 / -59,960 | -8.96 / -103,573 |
-| `grt` total demand | 67.06 % | 59.69 % |
-| `grt` Metal3 demand | 77.54 % | 73.62 % |
-| `grt` wirelength (µm) | 165,215,326 | 149,646,193 |
-| utilization entering `dpl` (`DPL-0009`) | 50.4 % | 56.3 % |
-| HPWL after `dpl` / after `cts` (M µm) | 99.1 / 119.7 | 93.5 / 108.0 |
+| WNS / TNS after `dpl` (ns) | -0.81 / -234 | -0.87 / -159 |
+| WNS / TNS after `cts` (ns) | -2.47 / -19,314 | -3.85 / -38,923 |
+| WNS / TNS after `grt`, before post-route repair (ns) | -10.24 / -57,614 | -12.05 / -124,006 |
+| `grt` total demand | 43.86 % | 47.31 % |
+| `grt` Metal3 demand | 59.73 % | 65.14 % |
+| `grt` wirelength (µm) | 140,593,055 | 152,563,036 |
+| utilization entering `dpl` (`DPL-0009`) | 38.8 % | 43.5 % |
+| HPWL after `dpl` / after `cts` (M µm) | 82.9 / 101.5 | 102.3 / 110.5 |
+| `drt` router violations | 70 after 29 iterations | 8 after 29 iterations |
+| antenna violations after `drt` (nets / pins) | 8,299 / 10,970 | 8,627 / 11,287 |
 
-Achieved period: 19.96 ns (11.0 ns minus WNS -8.96 ns after `grt`, before post-route repair), used by the energy section. It is a figure from before post-route repair, not the SoC's maximum frequency: post-route repair may close part of the gap from `cts` to `grt`. WNS moves by -0.57 ns against the reference (-8.39 ns). **The SoC's critical path is inside the SHA-3 hardware (`i_keccak_cvxif`)**: `i_iguana_soc.i_keccak_cvxif/gen_rounds.__0.i_keccak_round.state_i_26__reg` to `i_iguana_soc.i_keccak_cvxif/gen_rounds.__0.i_keccak_round.state_i_541__reg` (-8.96 ns). The reference's runs from `i_iguana_soc.i_cheshire_soc.gen_cva6_cores.__0.i_core_cva6/gen_cache_wt.i_cache_subsystem.i_wt_dcache.i_wt_dcache_wbuffer.tx_stat_q_26__reg` to `i_iguana_soc.i_cheshire_soc.gen_cva6_cores.__0.i_core_cva6/gen_cache_wt.i_cache_subsystem.i_wt_dcache.i_wt_dcache_missunit.mshr_q_2__reg` (-8.39 ns).
+Achieved period: 23.05 ns (11.0 ns minus WNS -12.05 ns after `grt`, before post-route repair), used by the energy section. It is a figure from before post-route repair, not the SoC's maximum frequency: post-route repair may close part of the gap from `cts` to `grt`. WNS moves by -1.81 ns against the reference (-10.24 ns). The critical path is outside the SHA-3 blocks: `i_iguana_soc.i_cheshire_soc.gen_cva6_cores.__0.i_core_cva6/controller_i.v_i_reg` to `i_iguana_soc.i_cheshire_soc.gen_cva6_cores.__0.i_core_cva6/gen_cache_wt.i_cache_subsystem.i_wt_dcache.i_wt_dcache_mem.gen_data_banks.__1.i_data_sram.i_tc_sram.genblk2.genblk1.genblk1.genblk1.genblk1.genblk1.genblk1.gen_256x256xBx1.gen_cuts.__2.i_cut` (-12.05 ns). The reference's runs from `i_iguana_soc.i_cheshire_soc.gen_cva6_cores.__0.i_core_cva6/gen_cache_wt.i_cache_subsystem.i_wt_dcache.i_wt_dcache_wbuffer.tx_stat_q_13__reg` to `i_iguana_soc.i_cheshire_soc.gen_cva6_cores.__0.i_core_cva6/gen_perf_counter.perf_counters_i.generic_counter_q_445__reg` (-10.24 ns).
 
 **SoC power under uniform activity (comparative only, not workload power)**, after `grt`: the lane's `report_power` with one uniform activity on every net (change `pin-soc-power-activity`; three significant figures per group in the report).
 
 | | reference | with both arms | delta |
 |---|---:|---:|---:|
-| total (W) | 1.250 | 1.060 | -15.2 % |
-| clock network (W) | 0.611 | 0.397 | -35.0 % |
-| everything but the clock network (W) | 0.633 | 0.667 | +5.2 % |
+| total (W) | 1.310 | 1.040 | -20.6 % |
+| clock network (W) | 0.690 | 0.373 | -45.9 % |
+| everything but the clock network (W) | 0.617 | 0.670 | +8.5 % |
 
-Only the non-clock delta is attributed to the SHA-3 arms. The clock network is whatever tree CTS built for each placement, and both sides share one fixed die, so the clock tree follows how densely each netlist is placed rather than the arms. CTS inserted 20,842 clock buffers in the reference and 15,180 with both arms. There is no workload SAIF for the whole SoC, and OpenSTA's default activity does not converge on it (`docs/infra-plan.md` Phase 17), so SoC workload power is not reported. The SHA-3 blocks' power is the activity-annotated block power in the sections above.
+Only the non-clock delta is attributed to the SHA-3 arms. The clock network is whatever tree CTS built for each placement, and both sides share one fixed die, so the clock tree follows how densely each netlist is placed rather than the arms. CTS inserted 20,230 clock buffers in the reference and 14,695 with both arms. There is no workload SAIF for the whole SoC, and OpenSTA's default activity does not converge on it (`docs/infra-plan.md` Phase 17), so SoC workload power is not reported. The SHA-3 blocks' power is the activity-annotated block power in the sections above.
 
-Caveats: one run each, and placement varies from run to run. On the shared die the smaller reference is placed more sparsely (50.4 % against 56.3 % utilization), and its `grt` demand and wirelength come out higher than with both arms: a placement effect, not one of the arms. Area, power and energy of the SHA-3 blocks themselves come from synthesis (per instance) and from block-level gate-level power, not from this delta.
+Caveats: one run each, and placement varies from run to run. Area, power and energy of the SHA-3 blocks themselves come from synthesis (per instance) and from block-level gate-level power, not from this delta.
 
 ## SoC synthesis (task 5.3)
 
