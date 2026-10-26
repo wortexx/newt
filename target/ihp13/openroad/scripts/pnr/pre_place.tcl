@@ -2,7 +2,7 @@
 # Solderpad Hardware License, Version 0.51, see LICENSE for details.
 # SPDX-License-Identifier: SHL-0.51
 #
-# Stage 2/9: pre_place - tie-fanout repair + remove_buffers, adapted from
+# Stage 2/10: pre_place - tie-fanout repair + remove_buffers, adapted from
 # ../chip.tcl's "Initial Repair Netlist" section
 # (openspec/changes/ci-pnr-lane/design.md D1/D2).
 #

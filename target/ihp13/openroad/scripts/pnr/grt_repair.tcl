@@ -2,13 +2,13 @@
 # Solderpad Hardware License, Version 0.51, see LICENSE for details.
 # SPDX-License-Identifier: SHL-0.51
 #
-# Stage 7/9: grt_repair - post-route timing repair, adapted from
+# Stage 7/10: grt_repair - post-route timing repair, adapted from
 # ../chip.tcl's "REPAIR ROUTED TIMING" (`use_routing_repairs`) section
 # (openspec/changes/ci-pnr-lane/design.md D2/D4).
 #
 # Best-effort: this stage runs after the gate (grt.tcl) and its failure or
 # a `PNR_SKIP_GRT_REPAIR=1` skip never changes the overall flow's exit
-# status - only drt.tcl's choice of which checkpoint to resume from.
+# status - only ant.tcl's choice of which checkpoint to resume from.
 #
 # Bounded per design D2 / docs/infra-plan.md Phase 5: every repair_timing
 # call here uses `-repair_tns 20 -max_buffer_percent 15` instead of
@@ -16,7 +16,7 @@
 # forever on this design (WNS ~ -2.5 ns, does not close timing). If
 # `PNR_SKIP_GRT_REPAIR=1` is set, this script does no repair work at all
 # and simply re-saves the grt checkpoint under the grt_repaired name so
-# drt.tcl has a single, uniform checkpoint name to load regardless of
+# ant.tcl has a single, uniform checkpoint name to load regardless of
 # whether this stage ran for real.
 #
 # Every global_route call below is bounded the same way grt.tcl's gate-

@@ -2,7 +2,7 @@
 # Solderpad Hardware License, Version 0.51, see LICENSE for details.
 # SPDX-License-Identifier: SHL-0.51
 #
-# Stage 1/9: floorplan (incl. power grid) - adapted from ../chip.tcl's
+# Stage 1/10: floorplan (incl. power grid) - adapted from ../chip.tcl's
 # read-design-through-power-grid section for the staged unattended flow
 # (openspec/changes/ci-pnr-lane/design.md D1). First stage: no predecessor
 # checkpoint, reads the netlist directly.

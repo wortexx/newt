@@ -2,8 +2,8 @@
 # Solderpad Hardware License, Version 0.51, see LICENSE for details.
 # SPDX-License-Identifier: SHL-0.51
 #
-# Stage 8/9: drt - antenna repair + detailed routing, adapted from
-# ../chip.tcl's tail section (openspec/changes/ci-pnr-lane/design.md D1/D4).
+# Stage 9/10: drt - detailed routing, adapted from ../chip.tcl's tail
+# section (openspec/changes/ci-pnr-lane/design.md D1/D4).
 #
 # Best-effort per spec (specs/pnr-flow: "Success is gated through global
 # route; detailed route is best-effort"): this design is known
@@ -11,41 +11,21 @@
 # manual run needed manual stopping after 700k -> 516k DRC violations over
 # 2 iterations without converging. `-droute_end_iter` bounds the iteration
 # budget so this stage terminates on its own; run_pnr.sh's per-stage
-# timeout is the backstop if it still runs long. Always loads
-# grt_repaired.tcl's checkpoint - grt_repair.tcl produces that name whether
-# or not it actually ran a repair (see its PNR_SKIP_GRT_REPAIR branch), so
-# this script never needs to know which case happened.
+# timeout is the backstop if it still runs long.
 #
 # PNR_DRT_END_ITER overrides the iteration budget (default matches
 # chip.tcl's original 40; lower it for a bounded CI run per design D4 -
 # the exact value is tuned during task 2.4's real bring-up).
 #
-# PNR_SKIP_ANTENNA_REPAIR=1 skips repair_antennas entirely. Run
-# 34389061373 (pnr-bringup-7, 2026-09-10) never reached detailed_route:
-# repair_antennas inserted 47,980 diodes into a design whose global-route
-# demand is 101% of capacity (Metal3 at 115%), the diode legalization did
-# not converge (20,728 violations left after 1h26), and the subsequent
-# post-insertion incremental reroute then hung single-threaded and silent
-# for ~14h until the stage's 16h timeout killed it - so `final` was
-# skipped and no DEF was produced. Antenna repair is a manufacturing
-# signoff concern, not a PPA one, so CI skips it; a cheaper middle ground
-# to try later is `repair_antennas -jumper_only` (layer-hopping jumpers,
-# no cell insertion/legalization/reroute).
-#
-# The P&R lane used to keep the skip by default (drc-clean-pnr design D1,
-# D5); it now runs jumper-only repair by default, and its antenna_repair
-# dispatch input `skip` sets PNR_SKIP_ANTENNA_REPAIR=1
-# (adopt-drc-clean-defaults-and-requote design D1).
-#
-# PNR_ANTENNA_REPAIR_MODE picks the repair when it runs: `jumper` (default,
-# repair_antennas -jumper_only: no diode cells, so no legalization of
-# inserted cells, the step that stalled in run 34389061373) or `full`
-# (jumpers and diodes). Full repair hung again in run 39696194006, at 46 %
-# utilization, while jumper-only took 4 min and led to 8 router violations
-# in run 39906592139, so jumper is the default here as in the lane
-# (adopt-drc-clean-defaults-and-requote design D1). Anything else fails the
-# stage before loading the design (drc-clean-sram-metal5-and-antenna design
-# D2).
+# Loads ant.tcl's result: `ant` if it exists, otherwise `ant_jumper`, the
+# jumper-repaired design ant.tcl saves before its diode step. Antenna repair
+# used to run here and hung twice inside repair_antennas' diode step, which
+# cost the routed design both times (runs 34389061373 and 39696194006); it
+# is now its own bounded stage, and run_pnr.sh only lets this stage run
+# without `ant` when `ant_jumper` exists
+# (openspec/changes/finish-antenna-diode-repair design D1). The status
+# detail records which one was routed (`input=ant|ant_jumper`). The repair
+# mode itself (PNR_ANTENNA_REPAIR_MODE, PNR_SKIP_ANTENNA_REPAIR) is ant.tcl's.
 #
 # After detailed_route, check_antennas counts the routed design's antenna
 # violations, whether or not repair ran, and writes
@@ -61,18 +41,15 @@ if { [info exists ::env(PNR_DRT_END_ITER)] } {
     set droute_end_iter $::env(PNR_DRT_END_ITER)
 }
 
-set skip_antenna [expr {[info exists ::env(PNR_SKIP_ANTENNA_REPAIR)] && $::env(PNR_SKIP_ANTENNA_REPAIR) eq "1"}]
-
-set antenna_mode jumper
-if { [info exists ::env(PNR_ANTENNA_REPAIR_MODE)] && [string trim $::env(PNR_ANTENNA_REPAIR_MODE)] ne "" } {
-    set antenna_mode [string trim $::env(PNR_ANTENNA_REPAIR_MODE)]
-}
-if { $antenna_mode ni {full jumper} } {
-    error "PNR_ANTENNA_REPAIR_MODE='$antenna_mode' is not a repair mode: use jumper or full"
+if { [file exists ${save_dir}/${proj_name}.ant.zip] } {
+    set drt_input ant
+} else {
+    set drt_input ant_jumper
 }
 
 set err [catch {
-    pnr_load ${proj_name}.grt_repaired
+    utl::report "Detailed route input: $drt_input"
+    pnr_load ${proj_name}.$drt_input
 
     pnr_set_pad_dont_touch
     pnr_set_dont_use
@@ -84,17 +61,6 @@ set err [catch {
         pnr_bridge_wrong_way_guides
     } else {
         utl::report "Guide bridging off (PNR_BRIDGE_GUIDES=0)"
-    }
-
-    if { $skip_antenna } {
-        utl::report "PNR_SKIP_ANTENNA_REPAIR=1: skipping antenna repair"
-    } elseif { $antenna_mode eq "jumper" } {
-        utl::report "Antenna repair: jumpers only"
-        repair_antennas -jumper_only
-    } else {
-        utl::report "Antenna repair: full"
-        # Requires LEF cell with class 'CORE ANTENNACELL', otherwise you need to give a cell
-        repair_antennas
     }
 
     utl::report "Detailed route"
@@ -137,6 +103,6 @@ if { $err } {
     utl::report "ERROR in drt stage (best-effort, non-fatal to the flow): $errMsg"
     exit 1
 } else {
-    pnr_status drt ok "droute_end_iter=$droute_end_iter antenna=[expr {$skip_antenna ? "skipped" : $antenna_mode}]"
+    pnr_status drt ok "droute_end_iter=$droute_end_iter input=$drt_input"
     exit 0
 }

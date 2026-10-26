@@ -2,7 +2,7 @@
 # Solderpad Hardware License, Version 0.51, see LICENSE for details.
 # SPDX-License-Identifier: SHL-0.51
 #
-# Stage 9/9: final - filler placement + DEF export, adapted from
+# Stage 10/10: final - filler placement + DEF export, adapted from
 # ../chip.tcl's tail (openspec/changes/ci-pnr-lane/design.md D1/D4).
 #
 # Best-effort, same as drt.tcl: this stage's outcome never changes the

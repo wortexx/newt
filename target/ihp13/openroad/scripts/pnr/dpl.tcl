@@ -2,7 +2,7 @@
 # Solderpad Hardware License, Version 0.51, see LICENSE for details.
 # SPDX-License-Identifier: SHL-0.51
 #
-# Stage 4/9: dpl - detailed placement + mirror optimization, adapted from
+# Stage 4/10: dpl - detailed placement + mirror optimization, adapted from
 # ../chip.tcl's "DETAILED PLACEMENT" section
 # (openspec/changes/ci-pnr-lane/design.md D1).
 #
