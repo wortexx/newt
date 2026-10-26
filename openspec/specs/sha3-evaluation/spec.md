@@ -120,7 +120,8 @@ Every SoC place-and-route figure compared between the reference SoC and the SoC 
 - the run identifiers;
 - the commit;
 - the die size;
-- that placement was legal.
+- that placement was legal;
+- the detailed-routing outcome: the router's final violation count and its iteration count, the antenna checker's violating net and pin counts, or that the run produced no routed design.
 
 Figures quoted earlier from placements that failed the legality check SHALL NOT be used as current results. They MAY be kept only when they are labelled as superseded, together with the reason.
 
@@ -143,3 +144,13 @@ Figures quoted earlier from placements that failed the legality check SHALL NOT 
 
 - **WHEN** the evaluation summary keeps a figure from the earlier illegal-placement runs
 - **THEN** that figure is marked as superseded, together with its runs and the reason (overlapping cells), and is not used to derive any current figure such as the achieved period
+
+#### Scenario: Routed outcome is stated for both runs
+
+- **WHEN** the SoC P&R section is generated from two runs that both completed detailed routing
+- **THEN** it gives each run's final router violation count, iteration count and antenna net and pin counts, taken from the run's own status, next to the `grt` figures
+
+#### Scenario: A run without a routed design
+
+- **WHEN** one of the two runs produced no routed design
+- **THEN** the section says so for that run instead of giving a violation or antenna count, and does not show a count of zero for it
