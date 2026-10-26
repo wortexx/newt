@@ -935,7 +935,11 @@ def pnr_period_text(ach, ref_ach, period, run, ref):
 
 def pnr_caveat_text(run, ref):
     """The caveats paragraph. When the reference is placed more sparsely on the
-    shared die and still has more grt demand, it says so as a placement effect."""
+    shared die and still has more grt demand, it says so as a placement effect.
+    P&R is deterministic for a given netlist: runs 38931700180 and 40081935481
+    share a synth key and match in every figure, through all 29 router counts
+    (adopt-drc-clean-defaults-and-requote, task 4.2). So the run IDs are cited
+    as text, and the caveat is the netlist change, not run-to-run noise."""
     sparser = (ref["dpl_util_pct"] is not None and run["dpl_util_pct"] is not None
                and ref["dpl_util_pct"] < run["dpl_util_pct"])
     fell = (run["grt_demand_pct"] is not None and ref["grt_demand_pct"] is not None
@@ -946,7 +950,10 @@ def pnr_caveat_text(run, ref):
                       f"({ref['dpl_util_pct']:.1f} % against {run['dpl_util_pct']:.1f} % "
                       "utilization), and its `grt` demand and wirelength come out higher than "
                       "with both arms: a placement effect, not one of the arms.")
-    return [f"Caveats: one run each, and placement varies from run to run.{congestion} Area, "
+    return ["Caveats: one run each. P&R is deterministic for a given netlist (run "
+             "40081935481 reproduced run 38931700180's placement and routing exactly), but any "
+             "netlist change re-places the whole SoC, so a delta between the two sides includes "
+             f"placement differences as well as the arms.{congestion} Area, "
             "power and energy of the SHA-3 blocks themselves come from synthesis (per instance) "
             "and from block-level gate-level power, not from this delta.", ""]
 

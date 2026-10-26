@@ -388,8 +388,14 @@ scoreboard), which this work rules out by design. It is listed as future work
 - **Provenance.** The cycle figures come from Xcelium run P, a bundle built
   from a clean checkout (`newt-xrun-b1fa596`, task 9.1). The earlier
   dirty-tree runs (`0dee23f-dirty`, `6be5346-dirty`) gave identical figures.
-- **Single runs.** Each P&R and SoC synthesis figure is one run. Placement and
-  ABC mapping vary from run to run (see the area spread above).
+- **Single runs.** Each P&R and SoC synthesis figure is one run. P&R is
+  deterministic for a given netlist: run 40081935481 reproduced run
+  38931700180's placement and routing exactly, from the same synth key. But
+  any netlist change re-places the whole SoC, so the P&R deltas between the
+  two sides include placement differences as well as the arms. ABC mapping
+  moves whenever the RTL changes (see the area spread above). Whether
+  synthesis repeats exactly on identical inputs was not checked: the synth
+  cache serves a repeat instead of re-running it.
 - **No signoff layout.** Timing and power are quoted from global routing on
   legal placements. Both sides are detailed-routed, but not clean: the router
   ends at 8 violations with both arms and 70 for the reference, and

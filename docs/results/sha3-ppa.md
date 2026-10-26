@@ -109,7 +109,7 @@ Achieved period: 23.05 ns (11.0 ns minus WNS -12.05 ns after `grt`, before post-
 
 Only the non-clock delta is attributed to the SHA-3 arms. The clock network is whatever tree CTS built for each placement, and both sides share one fixed die, so the clock tree follows how densely each netlist is placed rather than the arms. CTS inserted 20,230 clock buffers in the reference and 14,695 with both arms. There is no workload SAIF for the whole SoC, and OpenSTA's default activity does not converge on it (`docs/infra-plan.md` Phase 17), so SoC workload power is not reported. The SHA-3 blocks' power is the activity-annotated block power in the sections above.
 
-Caveats: one run each, and placement varies from run to run. Area, power and energy of the SHA-3 blocks themselves come from synthesis (per instance) and from block-level gate-level power, not from this delta.
+Caveats: one run each. P&R is deterministic for a given netlist (run 40081935481 reproduced run 38931700180's placement and routing exactly), but any netlist change re-places the whole SoC, so a delta between the two sides includes placement differences as well as the arms. Area, power and energy of the SHA-3 blocks themselves come from synthesis (per instance) and from block-level gate-level power, not from this delta.
 
 ## SoC synthesis (task 5.3)
 
