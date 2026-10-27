@@ -1006,6 +1006,10 @@ from placements with overlapping cells, on both sides alike.
         hold-back (0.55) and jumper-only antenna repair, run `39906592139` reaches **8 router
         violations**. Antennas are down to 8,627 nets, from 11,732. Full diode repair hangs. See
         the outcome after the 2026-10-21 analysis below.
+      - **Update 2026-10-27 (`finish-antenna-diode-repair`):** antenna repair is its own
+        bounded stage, `ant` (4 h), with a jumper-only fallback. With diamond legalization, the
+        diodes are placed in 10 s, but the global reroute after them still hangs (run
+        `40399844770`). Next candidate: post-route repair. See the 2026-10-27 record below.
 
       - [x] **Adopt the routing settings as defaults, and requote the thesis P&R figures on
         them** (change `adopt-drc-clean-defaults-and-requote`, done 2026-10-26). Die scale 1.25,
@@ -1175,6 +1179,37 @@ from placements with overlapping cells, on both sides alike.
         45.3 %.)
       - Neither stop condition (router count above 1,000, WNS more than 1 ns off) applies. This
         run is the requote's both-arms side.
+
+      **Bounded diode repair, 2026-10-27: the reroute hangs, the bound holds (run
+      `40399844770`).** Change `finish-antenna-diode-repair`, design D4: resume from
+      `40081935481` on `main` (`75b7a4f`, #88), `resume_exclude=drt final`,
+      `antenna_repair=1`, everything else default. Stages through `grt_repair` were restored, and
+      the new `ant` stage ran from `grt_repaired`. `pnr` 11 h 48 m; `final ok`, DEF published.
+      Status rows:
+      `ant-repair jumpers=15557 diodes=18902 legalizer=diamond left=0`,
+      `ant failed exit=124 attempts=1 fallback=ant_jumper`,
+      `drt ok droute_end_iter=28 input=ant_jumper`.
+
+      - **`ant` timeline** (4 h timeout, from the checkpoint load at 23:59 UTC):
+        - 4 min: jumpers, 12,495 → 4,967 (15,557 on 9,647 nets); `ant_jumper` saved.
+        - 1 min: the incremental diamond call (DPL-1101) on the legal design.
+        - 2 min: 18,902 diodes. The internal legalization was **diamond** (DPL-1101, no
+          DPL-1102): 967,302 cells, 0 failures, 10.5 s. Run `39696194006`'s negotiation run
+          took 32 min and left 9,663 violations.
+        - Then nothing was logged for 3 h 52 m after GRT-0015, until the timeout.
+      - **So the legalizer was not the cause of the hang.** With a legal diamond placement, the
+        incremental global reroute after diode insertion still runs silently for hours. This is
+        step 5 of `repair_antennas` or later (design Context), which no Tcl setting reaches.
+      - **The fallback worked.** `drt` routed `ant_jumper`, which is the same design run A
+        routed in-process. It bridged the same 39 guides on 31 nets, matched A's 29-iteration
+        router trajectory count for count (8 after iteration 28), and gave the same
+        8,627 / 11,287 antenna nets / pins. `drt` took 7 h 36 m. The figures quoted from A are
+        unchanged.
+      - D5 row: "`ant` timed out after diode insertion; `drt` routed `ant_jumper`". Full repair
+        stays off by default. A dispatch with `antenna_repair=1` now costs 4 h, not a lost run.
+        **Next candidate: post-route repair.** Insert diodes after `detailed_route`, then run an
+        incremental `detailed_route`. That needs no global reroute, and is measured against
+        8,627 nets. It is its own change, and is not started.
 
 **2026-10-11 finding: `DRT-0218` is not a placement problem.** Run `38094932339` placed legally
 and `drt` still aborted with `DRT-0218`, on one clock net (`clknet_12_3602__leaf…`). Probes on
