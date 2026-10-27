@@ -49,7 +49,7 @@ Prerequisite: `adopt-drc-clean-defaults-and-requote` has merged its defaults, an
   - print the `ant-repair` row (it comes through the status table).
 
   Update `docs/pnr-pipeline.md`: the stage table row for `ant`, the `drt` row, the checkpoint list, and the reports section. Verify actionlint 1.7.10 is clean and the rendered `pnr` command differs from today's only by `PNR_TIMEOUT_ANT=14400`.
-- [ ] 2.5 **[edit]** Open the PR with groups 1–2 and this change's artifacts. Verify `openspec validate finish-antenna-diode-repair --strict` passes and the fast lane is green.
+- [x] 2.5 **[edit]** Open the PR with groups 1–2 and this change's artifacts. Verify `openspec validate finish-antenna-diode-repair --strict` passes and the fast lane is green.
 
 ## 3. Defaults stay
 
@@ -57,14 +57,14 @@ Prerequisite: `adopt-drc-clean-defaults-and-requote` has merged its defaults, an
 
 ## 4. Measured run (design D4, D5)
 
-- [ ] 4.1 **[long-run]** *(ask the user first)* Dispatch from run A's `grt` with `resume_exclude=drt final` and `antenna_repair=1`. Save its `pnr-reports` under `target/ihp13/openroad/out/ci-<run>/`. Verify:
+- [x] 4.1 **[long-run]** *(ask the user first)* Dispatch from run A's `grt` with `resume_exclude=drt final` and `antenna_repair=1`. Save its `pnr-reports` under `target/ihp13/openroad/out/ci-<run>/`. Verify:
   - stages through `grt_repair` restored;
   - an `ant` row and an `ant-repair` row;
   - `drt` ran on `ant` or `ant_jumper` as recorded;
   - a `drt-antenna` row;
   - `final ok` with the DEF.
-- [ ] 4.2 **[edit]** Compare with run A per D4, pick D5's row, and record both in `docs/infra-plan.md`. Ask the user before any follow-up dispatch or default change.
+- [x] 4.2 **[edit]** Compare with run A per D4, pick D5's row, and record both in `docs/infra-plan.md`. Ask the user before any follow-up dispatch or default change.
 
 ## 5. Close-out
 
-- [ ] 5.1 **[edit]** Check that `docs/infra-plan.md` states the outcome and the next step. Verify `openspec validate finish-antenna-diode-repair --strict` passes.
+- [x] 5.1 **[edit]** Check that `docs/infra-plan.md` states the outcome and the next step. Verify `openspec validate finish-antenna-diode-repair --strict` passes.
