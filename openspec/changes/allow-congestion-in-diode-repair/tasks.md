@@ -45,7 +45,7 @@ Prerequisite: `finish-antenna-diode-repair` is merged (the `ant` stage), and run
 
   `bash -n` and shellcheck (`-S warning`) are clean.
 - [x] 2.3 **[edit]** Update `docs/pnr-pipeline.md`: the `ant` stage row (the flag and why) and the `ant-repair` report paragraph (the two new fields). In `docs/infra-plan.md`, change run `40399844770`'s "Next candidate: post-route repair" to point to this change, and say why: post-route repair reaches the same reroute. Verify with `grep -n "allow_congestion\|rerouted=\|diode_s=" docs/pnr-pipeline.md`.
-- [ ] 2.4 **[edit]** Open the PR with groups 1–2 and this change's artifacts. Verify `openspec validate allow-congestion-in-diode-repair --strict` passes and the fast lane is green.
+- [x] 2.4 **[edit]** Open the PR with groups 1–2 and this change's artifacts. Verify `openspec validate allow-congestion-in-diode-repair --strict` passes and the fast lane is green.
 
 ## 3. Measured run (design D4)
 
