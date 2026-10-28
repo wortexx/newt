@@ -446,7 +446,7 @@ report_antenna_outcome() {
 # the diode legalization but the negotiation legalizer ran anyway (design
 # D2's check; D5's fourth row). Never changes the exit status.
 report_ant_outcome() {
-    local log="${REPORTS}/pnr_ant.log" jumpers diodes legalizer left after
+    local log="${REPORTS}/pnr_ant.log" jumpers diodes legalizer left after reroute=""
     [ -f "${log}.timestamped" ] && log="${log}.timestamped"
     jumpers="$(sed -n 's/.*GRT-0302\] Inserted \([0-9]*\) jumpers.*/\1/p' "$log" 2>/dev/null | tail -1)"
     if [ -z "$jumpers" ] && ! grep -q 'Antenna repair: diodes' "$log" 2>/dev/null; then
@@ -466,8 +466,20 @@ report_ant_outcome() {
         legalizer=unknown
     fi
     left="$(sed -n 's/.*DPL-0701\].*Violations remain: *\([0-9]*\).*/\1/p' <<< "$after" | tail -1)"
-    log_status ant-repair "jumpers=${jumpers:-0}" "diodes=${diodes:-0} legalizer=${legalizer} left=${left:-0}"
-    echo "Antenna repair: ${jumpers:-0} jumpers, ${diodes:-0} diodes, diode legalizer ${legalizer}, ${left:-0} legalization violations left"
+    if [ -n "$after" ]; then
+        # The diode step's reroute (allow-congestion-in-diode-repair design
+        # D2): its last GRT-0009 net count, and the step's duration, which
+        # is missing when the stage was killed.
+        local rerouted diode_s
+        rerouted="$(sed -n 's/.*GRT-0009\] rerouting \([0-9]*\) nets.*/\1/p' <<< "$after" | tail -1)"
+        diode_s="$(sed -n 's/.*Diode step: \([0-9]*\) s.*/\1/p' <<< "$after" | tail -1)"
+        reroute=" rerouted=${rerouted} diode_s=${diode_s}"
+    fi
+    log_status ant-repair "jumpers=${jumpers:-0}" "diodes=${diodes:-0} legalizer=${legalizer} left=${left:-0}${reroute}"
+    echo "Antenna repair: ${jumpers:-0} jumpers, ${diodes:-0} diodes, diode legalizer ${legalizer}, ${left:-0} legalization violations left${reroute}"
+    if grep -q 'GRT-0232' <<< "$after"; then
+        echo "::warning::the diode step's reroute raised GRT-0232 (routing congestion too high) although ant passes -allow_congestion: the flag did not reach the reroute. See openspec/changes/allow-congestion-in-diode-repair design D4."
+    fi
     if [ "$legalizer" = "negotiation" ] && grep -q 'Diode legalization: diamond' "$log" 2>/dev/null; then
         echo "::warning::ant selected the diamond legalizer for the diode step, but repair_antennas legalized with negotiation (DPL-1102): the sticky legalizer flag did not reach it. See openspec/changes/finish-antenna-diode-repair design D2/D5."
     fi

@@ -37,6 +37,19 @@
 # `DPL-1102 Legalizing using negotiation legalizer` when it is diamond.
 # run_pnr.sh's report_ant_outcome writes the counts (design D3).
 #
+# With that fixed, run 40399844770 placed the 18,902 diodes in 10.5 s and
+# then logged nothing for 3 h 52 m until the 4 h timeout. The diode step's
+# incremental reroute (updateDirtyRoutesFastRoute) ran with congestion not
+# allowed, so with any overflow left, up to 31 rounds each ripped up and
+# rerouted every net crossing an overflowed gcell, and then raised GRT-0232.
+# Run A's global route already has 7,153 overflow, which grt.tcl and
+# grt_repair.tcl accept with -allow_congestion. So the diode call passes
+# -allow_congestion too, and the reroute leaves the existing overflow in
+# place (openspec/changes/allow-congestion-in-diode-repair design D1).
+# grt::set_verbose 1 makes it log `GRT-0009 rerouting <n> nets`, and the
+# stage logs how long the diode step took (design D2). The jumper call
+# keeps no flag: with FastRoute it does no reroute.
+#
 # PNR_ANTENNA_REPAIR_MODE picks jumper or full; empty or unset is jumper.
 # Anything else fails the stage before loading the design
 # (drc-clean-sram-metal5-and-antenna design D2). PNR_SKIP_ANTENNA_REPAIR=1
@@ -83,9 +96,13 @@ set err [catch {
                 utl::report "Diode legalization: $pnr_dpl_legalizer (PNR_DPL_LEGALIZER)"
             }
             utl::report "Antenna repair: diodes"
+            utl::report "Diode reroute: congestion allowed"
+            grt::set_verbose 1
+            set diode_t0 [clock seconds]
             # Requires a LEF cell with class 'CORE ANTENNACELL', otherwise
             # the diode cell has to be named.
-            repair_antennas -diode_only
+            repair_antennas -diode_only -allow_congestion
+            utl::report "Diode step: [expr {[clock seconds] - $diode_t0}] s (congestion allowed)"
         }
     }
 

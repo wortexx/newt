@@ -1009,7 +1009,9 @@ from placements with overlapping cells, on both sides alike.
       - **Update 2026-10-27 (`finish-antenna-diode-repair`):** antenna repair is its own
         bounded stage, `ant` (4 h), with a jumper-only fallback. With diamond legalization, the
         diodes are placed in 10 s, but the global reroute after them still hangs (run
-        `40399844770`). Next candidate: post-route repair. See the 2026-10-27 record below.
+        `40399844770`). See the 2026-10-27 record below. Next: change
+        `allow-congestion-in-diode-repair`, which passes `-allow_congestion` to the diode step,
+        since the hang is the reroute trying to clear the global route's existing overflow.
 
       - [x] **Adopt the routing settings as defaults, and requote the thesis P&R figures on
         them** (change `adopt-drc-clean-defaults-and-requote`, done 2026-10-26). Die scale 1.25,
@@ -1207,9 +1209,13 @@ from placements with overlapping cells, on both sides alike.
         unchanged.
       - D5 row: "`ant` timed out after diode insertion; `drt` routed `ant_jumper`". Full repair
         stays off by default. A dispatch with `antenna_repair=1` now costs 4 h, not a lost run.
-        **Next candidate: post-route repair.** Insert diodes after `detailed_route`, then run an
-        incremental `detailed_route`. That needs no global reroute, and is measured against
-        8,627 nets. It is its own change, and is not started.
+        ~~Next candidate: post-route repair.~~ **Superseded (2026-10-28):** the OpenROAD source
+        (`2c56926971`) shows the diode step's reroute (`updateDirtyRoutesFastRoute`) ran with
+        congestion not allowed, because `ant.tcl` did not pass `-allow_congestion`. With run A's
+        7,153 overflow left, it runs up to 31 rounds, each rerouting every net that crosses an
+        overflowed gcell, then raises `GRT-0232`. Post-route repair goes through the same
+        reroute, so it would hang the same way. Next: change `allow-congestion-in-diode-repair`,
+        which passes the flag and measures the same dispatch again.
 
 **2026-10-11 finding: `DRT-0218` is not a placement problem.** Run `38094932339` placed legally
 and `drt` still aborted with `DRT-0218`, on one clock net (`clknet_12_3602__leaf…`). Probes on
