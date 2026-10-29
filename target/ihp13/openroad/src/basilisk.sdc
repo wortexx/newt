@@ -421,16 +421,31 @@ if { ![info exists ::env(HYPER_CONF)] || $::env(HYPER_CONF) ne "NO_HYPERBUS"} {
   # the clk is now stopped and doesn't bleed through but the paths gets timed as a data-path instead
   # this is fine but only produces reasonable results after CTS, before CTS it misleads repair_timing into erroneously placing buffers in the clock net
   # IMPORTANT!!!!! remove these false paths post-CTS via unset_path_exceptions
+  #
+  # The pad is found by name among the mux output's endpoint cells, as the
+  # USB constraints above do: after full antenna repair an antenna diode
+  # can sit on the same net, and get_name then fails on a two-cell list
+  # (STA-2204, run 40749507442; openspec/changes/allow-congestion-in-diode-repair
+  # design D5). Anything but exactly one pad is an error, not an empty match.
+  proc hyp_pad_of {mux_out} {
+    set pads [lsearch -all -inline -glob \
+      [lmap cell [get_fanout -from $mux_out -only_cells -endpoints_only] {get_name $cell}] "*i_pad"]
+    if { [llength $pads] != 1 } {
+      error "expected one pad behind $mux_out, found [llength $pads]: $pads"
+    }
+    return [lindex $pads 0]
+  }
+
   foreach mux [get_cells $HYP_DDR_DATA_MUXES] {
     set mux_out [get_name $mux]/$MUX_OUT_PIN
     set mux_ctrl [get_name $mux]/$MUX_CONTROL_PIN
-    set pad [get_name [get_fanout -from $mux_out -only_cells -endpoints_only]]
+    set pad [hyp_pad_of $mux_out]
     set_false_path -from clk_i -through $mux_ctrl -through $mux_out -to $pad/DIN
   }
 
   set mux_out $HYP_DDR_RWDS_MUX/$MUX_OUT_PIN
   set mux_ctrl $HYP_DDR_RWDS_MUX/$MUX_CONTROL_PIN
-  set pad [get_name [get_fanout -from $mux_out -only_cells -endpoints_only]]
+  set pad [hyp_pad_of $mux_out]
   set_false_path -from clk_i -through $mux_ctrl -through $mux_out -to $pad/DIN
 
 

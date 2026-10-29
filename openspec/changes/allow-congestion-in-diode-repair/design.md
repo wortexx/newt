@@ -89,6 +89,33 @@ Dispatch from run A (`40081935481`): `resume_exclude=drt final`, `antenna_repair
 | `ant` times out again, with GRT-0009 logged | The reroute itself is too slow even without the overflow loop. Next: post-route repair with `-allow_congestion`. |
 | `ant` fails with `GRT-0232` | The flag did not reach the reroute. Stop and read the source again before anything else. |
 
+### D5. The SDC's Hyperbus pad lookup must tolerate diodes
+
+Run `40749507442` (D4's dispatch) gave `ant ok antenna=full` with `rerouted=21011 diode_s=13139`. Then `drt` failed on its first command, `read_sdc`, with `STA-2204 get_property <obj> <obj> is not an object` at `basilisk.sdc` line 450, the end of the Hyperbus block.
+
+- The block finds the pad behind each DDR output mux as `get_name [get_fanout -from $mux_out -only_cells -endpoints_only]`, which assumes the mux output drives exactly one cell.
+- Full repair puts an antenna diode (`sg13g2_antennanp`, one input pin `A`) on that long mux-to-pad net. The lookup then returns two cells, and `get_name` fails on the list.
+- `ant.tcl` reads no constraints, so the first stage to hit this is `drt`. Jumper-only runs never add cells there.
+
+The fix is in `basilisk.sdc`. A `hyp_pad_of` proc picks the `*i_pad` cell out of the fanout by name, as the USB constraints already do. It errors unless it finds exactly one, so a pattern that stops matching fails loudly instead of yielding `/DIN`.
+
+- Without diodes the pad is the only endpoint, so the constraints are unchanged. The thesis figures and scheduled runs are unaffected.
+- The serial-link lookup (`SLO_CLK_CELLS`) needs no change. It keeps only pins named `S`, and a diode has none.
+- *Why not exclude `sg13g2_antennanp` instead:* matching the pad by name also holds if repair ever puts another cell type on that net.
+
+Checked locally by loading both checkpoints (`pnr_load` reads the SDC):
+
+- `ant` from this run must load, and for every mux it must list the fanout and the pad found;
+- `grt_repaired` must give the same pad as the old lookup for every mux.
+
+**Result (2026-10-29, `newt-eda:dev`; logs in `target/ihp13/openroad/out/ci-40749507442/sdc-check/`):**
+
+- On run `40749507442`'s `ant`, the SDC now loads. Four of the nine mux-to-pad nets carry a diode: `hyper_dq_o_0_`, `_5_` and `_6_` (`ANTENNA_18540`–`18542`), and `hyper_rwds_o_0_` (`ANTENNA_18543`). The old lookup fails on all four, and `hyp_pad_of` finds the right `pad_hyper_*.i_pad` for all nine.
+- On `grt_repaired` (no diodes), the old and new lookups give the same pad for all nine muxes.
+- None of the nine nets is dont-touch. `pnr_set_pad_dont_touch` covers the pad-to-port side, so `repair_antennas` may legitimately add a diode here.
+
+The re-dispatch resumes from this run (`resume_exclude=drt final`), so it reuses this `ant` result instead of spending another 3 h 45 m. The `ant` stage used 3 h 45 m of its 4 h bound, so full repair cannot become the default without a longer `PNR_TIMEOUT_ANT`.
+
 ## Risks / Trade-offs
 
 - **[The hypothesis is wrong, and the hang is elsewhere in the reroute]** → D3's probe and D2's log lines tell the two apart. The 4 h bound and the `ant_jumper` fallback still hold, so a wrong guess costs one run.
