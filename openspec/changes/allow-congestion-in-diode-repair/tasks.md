@@ -55,7 +55,7 @@ Prerequisite: `finish-antenna-diode-repair` is merged (the `ant` stage), and run
   - `grt_repaired`: every mux gets the same pad as the old lookup.
 
   Also record which mux nets got a diode, and whether they are dont-touch.
-- [ ] 3.3 **[edit]** Open the PR with 3.2 and the updated artifacts. Verify `openspec validate allow-congestion-in-diode-repair --strict` passes and the fast lane is green.
+- [x] 3.3 **[edit]** Open the PR with 3.2 and the updated artifacts. Verify `openspec validate allow-congestion-in-diode-repair --strict` passes and the fast lane is green.
 - [ ] 3.4 **[long-run]** *(ask the user first)* Re-dispatch from `40749507442`: `resume_exclude=drt final`, `antenna_repair=1`. Save its `pnr-reports` under `target/ihp13/openroad/out/ci-<run>/`. Verify:
   - stages through `ant` were restored;
   - `drt` ran on `ant` (`input=ant`), and the constraints loaded;
