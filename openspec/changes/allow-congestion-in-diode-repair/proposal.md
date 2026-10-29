@@ -40,10 +40,10 @@ None.
 
 ## Impact
 
-- **Code:** `target/ihp13/openroad/scripts/pnr/ant.tcl` (one flag, the log line and the header comment) and `target/ihp13/openroad/run_pnr.sh` (`report_ant_outcome`).
+- **Code:** `target/ihp13/openroad/scripts/pnr/ant.tcl` (one flag, the log line and the header comment) and `target/ihp13/openroad/run_pnr.sh` (`report_ant_outcome`). `target/ihp13/openroad/src/basilisk.sdc`: the Hyperbus pad lookup tolerates an antenna diode on the mux-to-pad net (design D5), found on the measured run.
 - **Docs:** `docs/pnr-pipeline.md`, `docs/infra-plan.md`.
 - **Runs:**
   - Scheduled runs are unchanged, because jumper-only never reaches the diode step.
   - A full-repair dispatch keeps its 4 h bound and its `ant_jumper` fallback.
   - With overflow allowed, the diode reroute may leave guides through congested gcells. Detailed routing already starts from such a global route, since `grt` allows congestion too.
-- **Cost:** one local probe under emulation, and one VM run of about 12 h (ask first).
+- **Cost:** one local probe under emulation, one VM run of about 12 h (ask first), and a re-dispatch of `drt`/`final` of about 8 h after the SDC fix (D5).

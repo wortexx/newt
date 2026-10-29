@@ -40,3 +40,8 @@ Detailed routing SHALL route the newest result that exists. If diode insertion f
 
 - **WHEN** the flow runs with full antenna repair on a global route that already has overflow
 - **THEN** the reroute after diode insertion reroutes only the nets the diode step changed, leaves the existing overflow in place without failing on it, the stage log states that congestion is allowed, and the status gives the diode step's duration
+
+#### Scenario: Constraints load on the diode-repaired design
+
+- **WHEN** detailed routing loads a design on which diode insertion placed a diode on a net the constraints trace through, such as a Hyperbus mux-to-pad net
+- **THEN** the constraints load without error and constrain the same pads as on the design without diodes
