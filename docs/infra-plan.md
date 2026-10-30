@@ -1012,6 +1012,13 @@ from placements with overlapping cells, on both sides alike.
         `40399844770`). See the 2026-10-27 record below. Next: change
         `allow-congestion-in-diode-repair`, which passes `-allow_congestion` to the diode step,
         since the hang is the reroute trying to clear the global route's existing overflow.
+      - **Update 2026-10-30 (`allow-congestion-in-diode-repair`):** with `-allow_congestion`,
+        full repair completes inside `ant`'s bound. Run `40749507442` inserted 18,902 diodes
+        (3 h 45 m of the 4 h). After a constraints fix (`basilisk.sdc`'s Hyperbus pad lookup),
+        run `40907413844` routed the result: **5,205 / 6,479 antenna nets / pins** against
+        8,627 / 11,287, and **1 router violation** against 8. Still well above the 10 % goal
+        (1,173 nets), and the leftover is 82 % Metal4. Full repair stays off by default. See the
+        2026-10-30 record below.
 
       - [x] **Adopt the routing settings as defaults, and requote the thesis P&R figures on
         them** (change `adopt-drc-clean-defaults-and-requote`, done 2026-10-26). Die scale 1.25,
@@ -1216,6 +1223,60 @@ from placements with overlapping cells, on both sides alike.
         overflowed gcell, then raises `GRT-0232`. Post-route repair goes through the same
         reroute, so it would hang the same way. Next: change `allow-congestion-in-diode-repair`,
         which passes the flag and measures the same dispatch again.
+
+      **Full diode repair completes, 2026-10-30 (runs `40749507442`, `40907413844`).** Change
+      `allow-congestion-in-diode-repair`, design D4/D5.
+
+      - **The `ant` run, `40749507442`.** Resumed from `40081935481` on `main` (`a8ef026`, #91),
+        `resume_exclude=drt final`, `antenna_repair=1`.
+        - Status rows: `ant ok antenna=full`, and
+          `ant-repair jumpers=15557 diodes=18902 legalizer=diamond left=0 rerouted=21011 diode_s=13139`.
+        - The diode reroute logged `GRT-0009 rerouting 21011 nets` once and no `GRT-0232`, and
+          returned after 3 h 37 m. The whole stage took 3 h 45 m of its 4 h bound.
+        - `drt` then failed in `read_sdc` (`STA-2204`, `basilisk.sdc` line 450), so `final` was
+          skipped. Four of the nine Hyperbus mux-to-pad nets (`hyper_dq_o_0_`, `_5_`, `_6_`,
+          `hyper_rwds_o_0_`) carry a diode, and the SDC called `get_name` on the mux output's
+          whole fanout. #92 finds the pad by name instead (design D5). Without diodes it finds the
+          same pads, so the quoted figures are unaffected.
+      - **The routed run, `40907413844`.** Resumed from `40749507442` on `main` (`6be2069`, #92),
+        `resume_exclude=drt final`, `antenna_repair=1`. `pnr` 6 h 09 m; `final ok`, DEF published.
+        Status rows: `drt ok droute_end_iter=28 input=ant`, `drt-violations final=1`,
+        `drt-antenna nets=5205 pins=6479`.
+
+        | | run A (`40081935481`, jumpers) | full repair (`40907413844`) |
+        |---|---:|---:|
+        | jumpers / diodes | 15,557 / 0 | 15,557 / 18,902 |
+        | `ant` time (4 h bound) | — (in `drt`) | 3 h 45 m (diode step 13,139 s) |
+        | rerouted nets after diodes | — | 21,011 |
+        | wrong-direction guides bridged | 39 on 31 nets | 108 on 66 nets |
+        | `drt` time | 7 h 36 m (`40399844770`) | 5 h 54 m |
+        | router count after iteration 28 | 8 | **1** |
+        | antenna nets / pins after `drt` | 8,627 / 11,287 | **5,205 / 6,479** |
+
+        Pins left after `drt`, by layer and by worst cumulative-area ratio over the required ratio
+        (counts from `basilisk_antenna.rpt`, which match the `drt-antenna` rows):
+
+        | layer | < 1.1× | 1.1–1.5× | 1.5–2× | ≥ 2× | total (A) |
+        |---|---:|---:|---:|---:|---:|
+        | Metal2 | 26 | 24 | 4 | 0 | 54 (43) |
+        | Metal3 | 90 | 145 | 36 | 15 | 286 (278) |
+        | Metal4 | 994 | 2,327 | 1,068 | 901 | 5,290 (6,442) |
+        | Metal5 | 121 | 251 | 170 | 249 | 791 (3,963) |
+        | TopMetal1 | 8 | 12 | 17 | 21 | 58 (561) |
+
+      - **D4 row: "`ant ok`, antenna nets still well above 1,173".** Full repair removes 40 % of
+        the antenna nets and most of the Metal5 and TopMetal1 ones, and costs no routability: the
+        router count improves (1 against 8) and `drt` is faster. The leftover is mostly Metal4,
+        and only 19 % of the pins are within 1.1× of their limit, so `-ratio_margin` alone cannot
+        reach 1,173 nets. These are wires `drt` laid longer than the global route predicted.
+      - **Timing is not requoted.** The thesis quotes WNS / TNS at `grt`, before `ant`, so the
+        diodes leave the quoted −12.05 ns unchanged. Their load on 18,902 nets after routing is
+        not measured by the flow.
+      - **Full repair stays off by default.** `ant` used 3 h 45 m of 4 h, too little margin to
+        make it the default without a longer `PNR_TIMEOUT_ANT`.
+      - **Next candidate:** a second diode pass on the detailed routes, which targets the wires
+        `drt` actually laid, with `-allow_congestion`. Or try `-ratio_margin` on the `ant` pass
+        first, for the 1.1–1.5× band. Either is its own change, and neither is started.
 
 **2026-10-11 finding: `DRT-0218` is not a placement problem.** Run `38094932339` placed legally
 and `drt` still aborted with `DRT-0218`, on one clock net (`clknet_12_3602__leaf…`). Probes on
