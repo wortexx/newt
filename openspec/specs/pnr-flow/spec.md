@@ -297,7 +297,7 @@ When antenna repair runs, it SHALL run as its own flow stage, after global routi
 - the design after jumper insertion;
 - the design after diode insertion, when diode insertion is requested and completes.
 
-Detailed routing SHALL route the newest result that exists. If diode insertion fails or times out, detailed routing SHALL route the jumper-repaired design, and the run's status SHALL record that the diode step failed and that the jumper result was routed. A failure or timeout in the antenna stage SHALL NOT prevent detailed routing from running, and SHALL NOT change the run's exit status. When diode insertion re-legalizes the placement, it SHALL use the legalizer the flow selects for every other legalization, and the stage log SHALL name it.
+Detailed routing SHALL route the newest result that exists. If diode insertion fails or times out, detailed routing SHALL route the jumper-repaired design, and the run's status SHALL record that the diode step failed and that the jumper result was routed. A failure or timeout in the antenna stage SHALL NOT prevent detailed routing from running, and SHALL NOT change the run's exit status. When diode insertion re-legalizes the placement, it SHALL use the legalizer the flow selects for every other legalization, and the stage log SHALL name it. When diode insertion reroutes the nets it changed, the reroute SHALL accept the congestion the global route already has, as the flow's global routing does, and SHALL NOT try to clear overflow it did not cause. The stage log SHALL state that congestion is allowed, and the run's status SHALL state how long the diode step took when it completes.
 
 #### Scenario: Full repair completes
 
@@ -323,3 +323,13 @@ Detailed routing SHALL route the newest result that exists. If diode insertion f
 
 - **WHEN** diode insertion re-legalizes the placement
 - **THEN** it uses the same legalizer as the flow's other legalizations, and the stage log names that legalizer
+
+#### Scenario: Diode reroute on a congested global route
+
+- **WHEN** the flow runs with full antenna repair on a global route that already has overflow
+- **THEN** the reroute after diode insertion reroutes only the nets the diode step changed, leaves the existing overflow in place without failing on it, the stage log states that congestion is allowed, and the status gives the diode step's duration
+
+#### Scenario: Constraints load on the diode-repaired design
+
+- **WHEN** detailed routing loads a design on which diode insertion placed a diode on a net the constraints trace through, such as a Hyperbus mux-to-pad net
+- **THEN** the constraints load without error and constrain the same pads as on the design without diodes
