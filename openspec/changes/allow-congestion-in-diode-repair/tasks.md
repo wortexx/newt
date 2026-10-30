@@ -56,9 +56,9 @@ Prerequisite: `finish-antenna-diode-repair` is merged (the `ant` stage), and run
 
   Also record which mux nets got a diode, and whether they are dont-touch.
 - [x] 3.3 **[edit]** Open the PR with 3.2 and the updated artifacts. Verify `openspec validate allow-congestion-in-diode-repair --strict` passes and the fast lane is green.
-- [ ] 3.4 **[long-run]** *(ask the user first)* Re-dispatch from `40749507442`: `resume_exclude=drt final`, `antenna_repair=1`. Save its `pnr-reports` under `target/ihp13/openroad/out/ci-<run>/`. Verify:
+- [x] 3.4 **[long-run]** *(ask the user first)* Re-dispatch from `40749507442`: `resume_exclude=drt final`, `antenna_repair=1`. Save its `pnr-reports` under `target/ihp13/openroad/out/ci-<run>/`. Verify:
   - stages through `ant` were restored;
   - `drt` ran on `ant` (`input=ant`), and the constraints loaded;
   - a `drt-antenna` row;
   - `final ok` with the DEF.
-- [ ] 3.5 **[edit]** Compare with run A per D4: antenna nets / pins, the router count after iteration 28, the `ant` time, diodes, and rerouted nets. Pick D4's row and record both in `docs/infra-plan.md`, with the next step and the `ant` time against its 4 h bound. Ask the user before any follow-up dispatch or default change. Verify `openspec validate allow-congestion-in-diode-repair --strict` passes.
+- [x] 3.5 **[edit]** Compare with run A per D4: antenna nets / pins, the router count after iteration 28, the `ant` time, diodes, and rerouted nets. Pick D4's row and record both in `docs/infra-plan.md`, with the next step and the `ant` time against its 4 h bound. Ask the user before any follow-up dispatch or default change. Verify `openspec validate allow-congestion-in-diode-repair --strict` passes.
