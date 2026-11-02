@@ -4,7 +4,7 @@
 instructions for a cryptographic (SHA) coprocessor on CVA6 / Cheshire, targeting IHP's
 130 nm open-source PDK.
 
-**Status:** planning. This is a living document — update it as phases complete.
+**Status:** in progress (last synced 2026-10-30). This is a living document — update it as phases complete.
 
 **Date started:** 2026-08-29
 
@@ -17,7 +17,7 @@ instructions for a cryptographic (SHA) coprocessor on CVA6 / Cheshire, targeting
 | Upstream repo dormant since 2024-10; Docker image built 2024-08-22 | Nobody upstream will refresh tooling — we own it. |
 | yosys was a **custom fork** (upstream 2024-04 + 3 commits on `abc.cc`) | **Retired 2026-09-17**: now upstream **v0.69**, pinned by release tag in `docker/yosys/Dockerfile`. The fork's `-liberty_args` landed upstream in v0.66, and v0.67+ is the first yosys with the slang frontend built in, which Phase 8 needs. Bump the tag only via a change that re-runs the synthesis adoption gate. |
 | OpenROAD is upstream (`589dee1c8`, ~mid-2024) | **Bumped to `2c56926` (2026-08-27) in `newt-eda`.** "Safe to bump" held, but the 2.5-year API gap needed real porting work: `initialize_floorplan -sites`→`-site`, `detailed_route`'s `-bottom/-top_routing_layer` now hard errors (DRT-0509/0510, use `set_routing_layers`), PDN zero-instance crashes, per-process `set_wire_rc`/`estimate_parasitics`/`set_thread_count`. **Lesson: check a command's proc body, not its `define_cmd_args`** — the deprecated flags are still declared and parsed, and only the body rejects them. Backend instability was *not* all OpenROAD: see the routability blocker in Phase 11. |
-| Simulation is **Questa-only** (`iguana.mk` → `questa-2022.3 vsim`); no Verilator flow | **Critical-path blocker for RTL CI.** Must add Verilator. |
+| Simulation is **Questa-only** (`iguana.mk` → `questa-2022.3 vsim`); no Verilator flow | **Critical-path blocker for RTL CI.** Must add Verilator. **Resolved 2026-10-06** (Phase 2): the Verilator SoC boot runs as the gating `sim-soc` job on every PR. |
 | Dev machine has 31 GB RAM; synth peaks ~35 GB | Basilisk synth needs a >64 GB box or a swap file. |
 | Stock `chip.tcl` does not complete unattended | Still true, but **the specific failure modes did not reproduce**: across 10 real P&R runs `remove_buffers` **never crashed once** (the "~1/3 runs" figure is unsubstantiated in this environment — the retry was ultimately verified by deliberate fault injection, not by a real crash). `repair_timing` looping forever did reproduce, and post-route repair is now skipped entirely. The real unattended blockers turned out to be elsewhere: `repair_antennas` hanging ~14h single-threaded, and global route's congestion iterations. |
 | Basilisk WNS ≈ −2.5 ns vs 6 ns target | Design does not close timing in the open flow (known / accepted). **Caveat for any PPA number quoted from the CI lane**: with `grt_repair` skipped (Phase 5), measured WNS at `grt` is **−14.76**, not −2.5 — post-route repair is exactly what closes that gap. Restore a bounded `grt_repair`, or requote the baseline, before using lane output as thesis PPA data. **Resolved 2026-10-07 (`bounded-grt-repair-measurement`):** since the 10-03 placement fix, WNS at `grt` is −8.36 ns (reference) and −8.23 ns (both SHA-3 arms). A bounded `grt_repair`, resumed from the reference's `grt` checkpoint (run `37512872714`), timed out at 16 h in its incremental re-route (Phase 11). So the thesis quotes `grt` figures, labelled "before post-route repair", on both sides of the comparison. **Requoted 2026-10-16 from legal placements** (`requote-sha3-pnr-legal-placement`): −8.39 ns (reference, run `38772313345`) against −8.96 ns (both arms, run `38395368038`), on the enlarged die. With both arms, the critical path is now inside `keccak_cvxif`'s R = 6 round logic. **Requoted 2026-10-26 on the routable defaults** (`adopt-drc-clean-defaults-and-requote`, die scale 1.25): −10.24 ns (reference, run `40177828976`) against −12.05 ns (both arms, run `40081935481`), both detailed-routed (8 and 70 router violations). The worst path is in CVA6 on both sides. |
@@ -51,13 +51,17 @@ the GCC ≥ 13 / binutils ≥ 2.40 floor that keeping `Zknh` open required.
 Phase 0  ──►  Phase 1 (newt-eda image) ─┐
              Phase 2 (Verilator flow)  ─┴─►  Phase 3 (fast CI) ──► Phase 4 (synth CI) ──► Phase 5+6 (P&R + Azure)
                                                                 └►  Phase 7 (coprocessor RTL)  ✅
-                                                                └►  Phase 8 (svase→yosys-slang, exploratory, parallel)
+                                                                └►  Phase 8 (svase→yosys-slang; change proposed, not started)
 
 Phase 5+6  ──►  Phase 9  ✅ (post-merge CI verification — gated on `ci-pnr-lane` landing)
 Phase 10 (Actions version upgrade)  — independent maintenance, any time
 Phase 12 (yosys fork retired -> upstream v0.69)  ✅  — unblocks Phase 8
-Phase 11 (backend routability)      — design work; gates a detail-routed DEF, nothing else
+Phase 11 (backend routability)      — design work; detail-routed DEF since 2026-10-14, 1–8 router
+                                      violations since 2026-10-23; antenna violations still open
 Phase 13 (Cheshire 4a270af -> v0.3.1)  ✅  — dependency maintenance; synth drift ≤0.32%
+Phase 14 (Xcelium simulation lane)  ✅  — restricted-VM bundle
+Phase 15 (IG_CVA6_PKG_PARAMS only partly reaches the core) — finding, not acted on
+Phase 16 (odd exit codes hang JTAG preload) — finding, worked around; fix planned for Cheshire newt.3
 Phase 17 (SoC default-activity power is an OpenSTA artefact)  ✅  — lane power now uniform-activity
 Phase 18 (stop cloning cva6-sdk, Cheshire newt.3) — optional; pairs with Phase 16's fork fix
 ```
@@ -282,8 +286,8 @@ record: `openspec/changes/archive/2026-09-02-ci-synth-lane/`.
 ## Phase 5 — CI P&R lane (self-hosted Azure agent)  ✅ built (2026-09-13)
 
 Delivered by `openspec/changes/ci-pnr-lane/` — all 18 tasks closed. **Post-merge verification
-continues in Phase 9**, and a detail-routed DEF is blocked on Phase 11; neither is a gap in
-the lane itself.
+continues in Phase 9**, and a detail-routed DEF was blocked on Phase 11 until 2026-10-14
+(run `38473439796`); neither was a gap in the lane itself.
 
 **History.** Partially pulled forward (2026-09-02) as part of Phase 4 — see
 `openspec/changes/ci-synth-lane/` design.md D1/D1a/D1b. The VM (`newt-synth-runner`,
@@ -489,11 +493,16 @@ Three options, in increasing order of payoff and effort:
 3. **Custom slang-based re-emitter** — reimplementing svase's function from scratch. Not
    recommended; more work than (2) for less benefit.
 
-- [ ] Prototype `yosys-slang` against unmodified Basilisk RTL; confirm it handles this
-      design's constructs before committing to it.
+- [x] Prototype `yosys-slang` against unmodified Basilisk RTL; confirm it handles this
+      design's constructs before committing to it. **Done (spike, 2026-09-18):** `read_slang`
+      elaborates all of `iguana_chip` with zero errors in 5.3 s and 1.4 GB. Of the eleven
+      pickle-stage patches, three are still needed.
 - [ ] If it works: dedicated OpenSpec change (its own proposal/design/tasks) to replace the
       `svase`+`sv2v` pipeline stages — this is a real architecture change to the synthesis
-      frontend, not a drop-in tool swap folded into another change.
+      frontend, not a drop-in tool swap folded into another change. **Proposed 2026-10-20
+      (#79):** `openspec/changes/replace-svase-sv2v-with-read-slang/`. It has a proposal only, with no
+      design or tasks yet. It also moves the three remaining patches into forks (see Phase 0's
+      "Still open" note).
 - [ ] If it doesn't: fall back to forking svase (option 1) so the pin stops depending on an
       archived, unmaintained upstream.
 - No critical-path dependency on this phase; `svase f5f5290` stays pinned and untouched
@@ -619,6 +628,13 @@ Actual approach diverged from the plan above, deliberately:
 
 ## Phase 11 — Backend routability  *(future work — settled 2026-10-07: not a thesis blocker)*
 
+> **Status 2026-10-30.** This section is a dated log, and its opening paragraphs describe the
+> state before the fixes. Since then: legal placement (diamond legalizer, 10-12), the first
+> detail-routed DEF (10-14), and routable defaults (die scale 1.25, density 0.50, Metal2 0.60,
+> SRAM Metal5 0.55; #85). On those defaults the both-arms build routes to 8 router violations.
+> Full diode repair (`antenna_repair=1`) brings that to 1, and the antenna nets to 5,205. Still
+> open: the remaining antenna violations, mostly Metal4 (see the 2026-10-30 record).
+
 The P&R lane now runs end to end unattended, but **the design as placed and globally routed
 cannot be detail-routed**. `pnr-bringup-10` got `detailed_route` to completion for the first
 time: ~27 min of pin access, then **12h03m on iteration 0 alone**, finishing with
@@ -724,7 +740,10 @@ Candidate levers, roughly cheapest first. The first one tried, margin blocking p
 question below is settled, none of these is needed for the thesis. They matter only for a
 detail-routed DEF, or for making post-route repair fit (2026-10-07 finding below).
 
-- [ ] *(future work)* **Relax our own layer adjustments.** `pnr_apply_routing_layers` removes 30% of M2/M3
+- [x] ~~*(future work)* **Relax our own layer adjustments.**~~ **Went the other way (2026-10-26):**
+      the default Metal2 hold-back is now 0.60 (`grt_metal2_adjust`), plus 0.55 of Metal5 over the
+      SRAMs, and that is what made the layout routable. The original item follows.
+      `pnr_apply_routing_layers` removes 30% of M2/M3
       capacity (`set_global_routing_layer_adjustment Metal2-Metal3 0.30`) and 20% of
       TopMetal1 — and Metal3 is the worst-congested layer. This looks self-inflicted and is a
       one-line experiment. *Caveat (2026-10-12):* the adjustment only changes how much capacity
@@ -736,7 +755,8 @@ detail-routed DEF, or for making post-route repair fit (2026-10-07 finding below
       to deal with". Not a straight revert: iterations cost ~25 min each (80 ≈ 20–33h) and
       iteration 15 was separately observed entering an NDR-relaxation cascade that never
       terminated.
-- [ ] *(future work)* **Lower `gpl` density** from `-density 0.65`, trading area for routability. *(Only the
+- [x] **Lower `gpl` density** from `-density 0.65`, trading area for routability. **Done:** 0.50
+      on a 1.25 die scale is the default since `6e576f2` (#85, probe P2). *(Only the
       starting target; see the 2026-10-03 correction above for what actually sets the
       density `dpl` inherits.)*
 - [ ] *(future work)* **Floorplan changes** — largest lift, last resort.
@@ -1299,9 +1319,10 @@ change; once guides pass, routing iteration 0 on the enlarged die took 2 h 32 m 
       42.5 GB. Cancelled in iteration 3: at that pace 8 iterations would have hit the timeout and
       lost the DEF. The lane now runs 5 iterations (`PNR_DRT_END_ITER=5`, about 15.5 h) with a
       24 h `drt` timeout, so `final` writes a DEF.
-- [ ] **Detailed routing does not converge** at this congestion (about 2.6 M violations after
+- [x] **Detailed routing does not converge** at this congestion (about 2.6 M violations after
       three iterations, −2.4 % per iteration and falling). A routable die needs the congestion
-      levers above, not more iterations.
+      levers above, not more iterations. **Resolved by those levers:** 8 router violations on
+      the defaults (run `40081935481`), and 1 with full diode repair (run `40907413844`).
 
 **2026-10-14 finding: cells trapped behind the macros, and routability inflation capped at ×1.2**
 (change `keep-cells-out-of-macro-margins`). The floorplan keeps every macro 8 µm (east/west) or
@@ -1736,13 +1757,13 @@ include the H extension.
 
 | Risk | Mitigation |
 | --- | --- |
-| Questa → Verilator port is hard (Cheshire TB, hyperbus / DDR models) | Start with the coprocessor unit TB; accept synth-lane-only full-SoC sim initially |
+| Questa → Verilator port is hard (Cheshire TB, hyperbus / DDR models) | Start with the coprocessor unit TB; accept synth-lane-only full-SoC sim initially. **Retired 2026-10-06:** the port landed (Phase 2) and the full-SoC boot gates every PR (`sim-soc`) |
 | OpenROAD bump breaks `chip.tcl` command APIs | Budget 2–3 days in Phase 1; keep the 2024 image as fallback |
 | Golden-image drift on every tool bump | No golden image exists — Packer is deferred out of Phase 6 to its own change. The host is instead reproduced from `infra/azure/provision-runner.sh`, which pins nothing and resolves the Actions runner release at run time, so a rebuild picks up current versions rather than drifting from a stale image. The trade-off is cold-start pull cost on every rebuild |
 | Azure cost creep | Deallocate always (Phase 5's `stop` job plus the hourly `vm-watchdog.yml`) — the fixed 10:00 UTC auto-shutdown backstop no longer exists, deleted 2026-09-16 once both mechanisms were observed working for real (`post-merge-ci-verification` tasks 4.1/5.1); a $150/month resource-group budget alerting at 50/80/100 % of actual spend (Phase 6). Spot was dropped — P&R cannot survive an eviction and the synth lane alone does not justify a second VM. Measured: 10 P&R bring-up runs cost ≈ $193 in VM time; Phase 9's own verification runs measured ≈ $33/full run (Run A, 27h4m at $1.216/h) and ≈ $0.35 per resume-slice dispatch (~12 min) |
 | Synth cache key over-includes: it hashes tracked-Makefile-input tree hashes (`Bender.{yml,lock}`, `hw/`, `target/ihp13/{yosys,pickle,pdk,src}`, `Makefile`, `iguana.mk`, `tools.mk`) rather than only the paths that actually feed synthesis, so an unrelated root-`Makefile` change (e.g. PR #18's `include apm.mk`) invalidates the key and forces a full ~3h resynthesis plus strands the previous key's Blob checkpoints (`post-merge-ci-verification` design Risks; hit for real 2026-09-13→15, run 34783899813) | Accepted — over-inclusion only costs a redundant resynthesis, never a stale netlist, which is the failure mode that actually matters (`pnr.yml`'s own cache-key comment). Narrowing the key to only the synth-relevant subset is a small, isolated follow-up once there's time to enumerate exactly which included paths never affect `synth-all`'s output |
 | A Bicep `what-if` preview is necessary but not sufficient: several VM properties (`securityType`, `ssh.publicKeys`, `osDisk.diskSizeGB`) show as a benign property-level `Create` in the preview but fail the real deployment with `PropertyChangeNotAllowed` once they'd need to change an existing VM. Separately, a template-declared SKU can be unavailable in-region (`Standard_B2s` doesn't exist in `swedencentral`) or region-available with zero subscription quota (`Standard_B2s_v2`), and a `securityType` value can need an unregistered preview feature (`Microsoft.Compute/UseStandardSecurityType`) even for a brand-new VM | Before trusting a preview on an *existing* resource, diff every leaf the template sets against the live `az … show` and treat "absent on live" as the danger signal — that is what actually catches `PropertyChangeNotAllowed` (`azure-infra-as-code` design.md Risks, task 2.2). Before picking a VM size for a *new* resource, check `az vm list-skus` and `az vm list-usage` in-region rather than assuming a size from another region or plan works here (`infra/azure/README.md`) |
-| `detailed_route` never converges on the modified design | It is congestion-bound at 63 % util even for stock Basilisk; treat a clean route as a stretch goal, not a gate. Consider a secondary easier PDK (Sky130) for fast QoR during development |
+| `detailed_route` never converges on the modified design | It is congestion-bound at 63 % util even for stock Basilisk; treat a clean route as a stretch goal, not a gate. Consider a secondary easier PDK (Sky130) for fast QoR during development. **Largely retired (2026-10-26):** on the enlarged-die defaults the both-arms build routes to 8 router violations (the reference to 70; 1 with full diode repair); antenna violations remain (Phase 11) |
 | Phase 1 adoption gate's ~1% cell/area delta has an unexplained residual: a ~830-module textual divergence in the pickled RTL (`sv2v.v`) between the 2024 baseline and the new image. Ruled out: bender release-asset choice (verified byte-identical `sources.json` from both `v0.27.4` assets on identical input) and the `TARGET_*` bender-version schema difference (those defines aren't referenced anywhere in the dependency tree). Not yet distinguished: pure module-reordering in morty's output vs. an actual semantic difference | Not blocking — delta is small and in the benign direction (design got smaller), 0 yosys `CHECK` problems both sides. Revisit if a future gate shows a similar or larger delta; a sort-and-diff-by-module pass on `sv2v.v`, or re-running pickle against a `bender 0.32.1`-shaped `sources.json`, would isolate it |
 | 2024 baseline's own `sources.json` was generated by a host-installed `bender 0.32.1`, not either Docker image's bundled `0.27.4` — a pre-existing baseline-generation inconsistency, discovered while investigating the row above | Note for future baseline captures: regenerate references fully in-container with the pinned tool versions, not via whatever `bender` happens to be on the host PATH |
 | Synthesis QoR moved +3.05% cells / +3.60% area when yosys went 0.40→v0.69, because `abc -liberty_args "-S 20 -G 3"` had to be dropped (it segfaults v0.69 — see Phase 12 / design D9). That flag gave ABC a slew/gain delay model instead of a unit one | Accepted deliberately; `synth-baseline.json` reseeded from adoption-gate run 35275581702 so later design work is measured against the tool that synthesises it. Any thesis PPA figure quoted against the older 714,166-cell baseline must be requoted. Recovering the delta is item 1 of Phase 12's PPA improvement list |
