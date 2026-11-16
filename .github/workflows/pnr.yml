@@ -22,8 +22,10 @@
 name: CI P&R Lane
 
 on:
-  schedule:
-    - cron: '0 18 * * 5' # Fridays 18:00 UTC - the run owns the weekend (design.md Open Questions; tune freely, doesn't change specs/approach)
+  # Weekly schedule paused 2026-11-16 (low activity; on-demand only).
+  # To resume, restore:
+  # schedule:
+  #   - cron: '0 18 * * 5' # Fridays 18:00 UTC - the run owns the weekend (design.md Open Questions; tune freely, doesn't change specs/approach)
   workflow_dispatch:
     inputs:
       resume_from_run:
