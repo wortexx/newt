@@ -98,7 +98,18 @@
 #                           pnr_grt_sram_metal5_adjust's default in
 #                           common.tcl (0.55; 0, no hold-back, before
 #                           adopt-drc-clean-defaults-and-requote).
-#   PNR_CELL_PAD_SITES     Passed through to gpl and every legalization
+#   PNR_GRT_SRAM_END_METAL5_ADJUST Passed through to every routing stage,
+#                           like PNR_GRT_SRAM_METAL5_ADJUST: a further share
+#                           of Metal5 held back in a 40 um strip at both
+#                           short ends of every SRAM, in [0, 1). Empty or
+#                           unset: 0, no strips.
+#   PNR_PDN_REPAIR_CHANNELS Passed through to floorplan only (acts when it
+#                           builds the power grid; a run resumed past
+#                           floorplan keeps the restored grid): "0" removes
+#                           pdngen's channel-repair straps, failing the stage
+#                           if that disconnects any supply shape. Empty or
+#                           unset: 1, keep them.
+#   PNR_CELL_PAD_SITES    Passed through to gpl and every legalization
 #                           (dpl, cts, grt_repair): free sites kept on each
 #                           side of every standard cell. Empty or unset:
 #                           pnr_cell_pad_sites's default in common.tcl (0,

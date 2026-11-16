@@ -32,11 +32,12 @@ independent of this workflow — the backstop for a `stop` job that never ran.
 
 ### Manual dispatch inputs
 
-`workflow_dispatch` accepts fourteen optional inputs, all empty by default
+`workflow_dispatch` accepts sixteen optional inputs, all empty by default
 (`resume_from_run`, `resume_exclude`, `stop_after`, `gpl_density`,
 `gpl_keep_resize`, `die_scale`, `dpl_legalizer`, `dpl_max_displacement`,
 `skip_grt_repair`, `drt_end_iter`, `antenna_repair`, `grt_metal2_adjust`,
-`sram_metal5_adjust`, `cell_pad_sites` — matching `pnr.yml`'s
+`sram_metal5_adjust`, `sram_end_metal5_adjust`, `pdn_repair_channels`,
+`cell_pad_sites` — matching `pnr.yml`'s
 `inputs:` keys exactly). With all of them empty, a dispatched run
 behaves exactly like a scheduled run:
 
@@ -168,6 +169,25 @@ behaves exactly like a scheduled run:
   adjustment changes. Like `grt_metal2_adjust`, it invalidates `grt` and
   everything after it.
 
+- `sram_end_metal5_adjust` — a further share of Metal5's capacity held
+  back in a 40 µm strip (`pnr_sram_end_strip_um`) at both short ends of
+  every `RM_IHP*` instance, in [0, 1): west and east for a macro wider than
+  tall, south and north otherwise. Feeds `PNR_GRT_SRAM_END_METAL5_ADJUST`.
+  Empty means `0`, no strips. The strips are added after the footprint
+  regions, and region adjustments stack, so inside a strip at 0.55 and 0.5
+  global routing keeps 0.45 × 0.5 = 22.5 % of Metal5. The router's last
+  Metal5 shorts cross a middle-row SRAM 8–24 µm inside its east end (run
+  41133143603; change `clear-sram-corner-router-shorts`, design D4). Every
+  routing stage logs `SRAM-end Metal5 adjustment: <v> over <n> strips
+  (40 um)`. The same resume rule as `sram_metal5_adjust` applies.
+
+- `pdn_repair_channels` — `0` removes the power-grid generator's
+  channel-repair straps after `pdngen`, behind a before/after connectivity
+  check; see the `floorplan` row of the stage table. Feeds
+  `PNR_PDN_REPAIR_CHANNELS`. Empty means `1`, keep them. It acts only when
+  `floorplan` runs, so a run resumed past `floorplan` keeps the restored
+  grid, whatever the input says.
+
 - `cell_pad_sites` — free sites kept on each side of every standard cell.
   Feeds `PNR_CELL_PAD_SITES`. Empty means `pnr_cell_pad_sites`'s default in
   `common.tcl`, `0`, no padding. Both `gpl` passes plan for it
@@ -231,7 +251,7 @@ doing anything else.
 
 | # | Stage | Checkpoint | Gate? | What it does |
 |---|---|---|---|---|
-| 1 | `floorplan` | `power_grid` | **Gate** | Reads the synthesized netlist, links the design, reads SDC, runs `check_setup`/`report_checks` sanity checks, creates the floorplan (ring layout, 2-way or 4-way L1 cache depending on `L1CACHE_WAYS`; die scaled by `pnr_die_scale`, default 1.25, see `die_scale` above), then blocks placement in every gap between a macro and the core edge no wider than `pnr_macro_margin_max` (`scripts/pnr/common.tcl`, default 20 µm; `PNR_MACRO_MARGIN_MAX`, `0` turns it off). The floorplan keeps macros 8 µm (east/west) or 14 µm (south/north) off the core edge, and without the blocking the placer filled those margins with logic the macros wall in (6,308 cells and 9,313 nets routed outside the core in run 38094932339; change `keep-cells-out-of-macro-margins`). The log lists every blockage (`Macro margin blocked: …`) and the total. Then it builds the power grid (stripes/rings). Only stage that reads the netlist directly — everything after loads a checkpoint. Changing `PNR_MACRO_MARGIN_MAX`, or resuming a run with this blocking from checkpoints made before it, mixes floorplans: the restore's synth-key guard does not catch it, because the netlist is the same, so do not combine either with `resume_from_run` across that boundary. |
+| 1 | `floorplan` | `power_grid` | **Gate** | Reads the synthesized netlist, links the design, reads SDC, runs `check_setup`/`report_checks` sanity checks, creates the floorplan (ring layout, 2-way or 4-way L1 cache depending on `L1CACHE_WAYS`; die scaled by `pnr_die_scale`, default 1.25, see `die_scale` above), then blocks placement in every gap between a macro and the core edge no wider than `pnr_macro_margin_max` (`scripts/pnr/common.tcl`, default 20 µm; `PNR_MACRO_MARGIN_MAX`, `0` turns it off). The floorplan keeps macros 8 µm (east/west) or 14 µm (south/north) off the core edge, and without the blocking the placer filled those margins with logic the macros wall in (6,308 cells and 9,313 nets routed outside the core in run 38094932339; change `keep-cells-out-of-macro-margins`). The log lists every blockage (`Macro margin blocked: …`) and the total. Then it builds the power grid (stripes/rings). pdngen always adds channel-repair straps: TopMetal2 straps shorter than the core, 10 on today's floorplan, whose via stacks are the pads behind two of the router's shorts. The log records `PDN channel repair: on|off` and `PDN TopMetal2 straps shorter than the core: <n>`. `PNR_PDN_REPAIR_CHANNELS=0` (`scripts/pnr/common.tcl`, default 1) removes them, with every via stack under them (`scripts/pdn_repair_straps.tcl`), logging `PDN channel-repair straps removed: <n> (<m> shapes under them)`. It is gated: `check_power_grid -dont_require_terminals` runs on VDD and VSS before and after the removal, the reports go to `basilisk_pgcheck_<net>_{before,after}.rpt`, and the stage fails before saving `power_grid` if the after-check reports anything the before-check did not. The log then has `Power grid check <net>: ok (<k> pre-existing)` or `failed`, followed by the new reports. Today's grid already reports 14 per net: 12 Metal1 rails at the west edge, x 388–428 µm, y 4093–4181 µm, and the two Hyperbus delay lines on them. The setting acts only when `floorplan` runs (change `clear-sram-corner-router-shorts`). Only stage that reads the netlist directly — everything after loads a checkpoint. Changing `PNR_MACRO_MARGIN_MAX`, or resuming a run with this blocking from checkpoints made before it, mixes floorplans: the restore's synth-key guard does not catch it, because the netlist is the same, so do not combine either with `resume_from_run` across that boundary. |
 | 2 | `pre_place` | `pre_place` | **Gate** | Repairs tie-cell fanout, then `remove_buffers`. Deliberately its own tiny stage: `remove_buffers` is known to segfault roughly 1 run in 3, and isolating it means a retry only redoes this cheap step, not floorplan/power-grid. The only stage with a configured retry (1). |
 | 3 | `gpl` | `gpl2` | **Gate** | Global placement, two passes. Pass 1 (routability-driven) gives rough parasitics; `repair_design`/`repair_timing -repair_tns 70` clean up setup violations on that rough placement; pass 2 (routability + timing-driven) is the placement that actually carries forward. Both passes start from target density `pnr_gpl_density` (`scripts/pnr/common.tcl`, default 0.50; `PNR_GPL_DENSITY` / the `gpl_density` input override it). Pass 2's timing-driven iterations are virtual (`-keep_resize_below_overflow`, `pnr_gpl_keep_resize`, default 0; `PNR_GPL_KEEP_RESIZE` / the `gpl_keep_resize` input): they re-weight nets but insert no buffers. `gpl.tcl` logs both values. Both passes run routability mode with `-routability_inflation_ratio_coef 2.5 -routability_max_inflation_ratio 2.5`, so cells in congested regions are inflated enough to move; upstream's 1.2 added about 1 % area per routability iteration, and with the macro margins blocked it let the displaced cells pile into the SPI host corner and tripled `grt` overflow (change `keep-cells-out-of-macro-margins`, runs 38254112819 and 38395368038). Only stage besides `drt` that calls `set_thread_count` (up to 32 threads, capped by the VM's core count). |
 | 4 | `dpl` | `dpl` | **Gate** | Detailed (legalized) placement + mirror optimization. Single-threaded. Legalizes with `pnr_dpl_legalizer` (`scripts/pnr/common.tcl`, default `diamond`, OpenROAD's classic legalizer; `PNR_DPL_LEGALIZER=negotiation` selects OpenROAD's default, which leaves cells overlapping on this design). Ends with a **gated** `check_placement`: any overlap, padding or blocked-layer violation fails the stage before its checkpoint is saved, with the counts in `pnr_status.log` and the markers in `basilisk_dpl_check_placement.rpt`. Afterwards `run_pnr.sh` reports how `gpl` ended (below). |

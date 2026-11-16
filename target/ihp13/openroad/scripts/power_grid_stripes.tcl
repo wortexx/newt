@@ -314,6 +314,17 @@ add_pdn_connect -grid {core_grid} -layers {TopMetal2 Metal1}
 
 pdngen -failed_via_report ${report_dir}/${proj_name}_pdngen.rpt -dont_add_pins
 
+# Channel-repair straps: kept by default; PNR_PDN_REPAIR_CHANNELS=0
+# (scripts/pnr/common.tcl) removes them behind a connectivity gate. chip.tcl
+# does not source common.tcl, so the variable may not exist there.
+source scripts/pdn_repair_straps.tcl
+if { ![info exists pnr_pdn_repair_channels] } { set pnr_pdn_repair_channels 1 }
+utl::report "PDN channel repair: [expr {$pnr_pdn_repair_channels ? {on} : {off}}]"
+if { !$pnr_pdn_repair_channels } { pdn_remove_repair_straps_checked }
+if { [catch { pdn_report_repair_straps } reportErr] } {
+    utl::report "PDN TopMetal2 straps shorter than the core: not counted ($reportErr)"
+}
+
 # setLayerDirection Metal1 VERTICAL
 
 # blockages under TM2 core grid
