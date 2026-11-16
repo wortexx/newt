@@ -55,8 +55,10 @@
 name: CI Synth Lane
 
 on:
-  schedule:
-    - cron: '30 2 * * *' # 02:30 UTC nightly; see note (1) above re: VM lifecycle
+  # Nightly schedule paused 2026-11-16 (low activity; on-demand only).
+  # To resume, restore:
+  # schedule:
+  #   - cron: '30 2 * * *' # 02:30 UTC nightly; see note (1) above re: VM lifecycle
   workflow_dispatch:
     inputs:
       image_tag:

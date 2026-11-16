@@ -255,6 +255,12 @@ Container `newt-eda`; runner `ubuntu-latest` (or an 8-core larger runner if sim 
 Triggers: nightly + `workflow_dispatch` + label `full-synth`. Full planning + implementation
 record: `openspec/changes/archive/2026-09-02-ci-synth-lane/`.
 
+**Paused 2026-11-16:** the synth lane's nightly cron and the P&R lane's weekly cron are
+commented out in their workflows while activity is low; both lanes run on demand only
+(`workflow_dispatch`, the `full-synth` label, and tags for P&R). `vm-watchdog.yml` keeps
+its hourly tick, since it is the only thing that deallocates the VM after a dispatched
+synth run. To resume, uncomment the `schedule:` blocks.
+
 - [x] `make ig-hw-all && make pickle-all && make synth-all` → upload netlist + reports.
       `.github/workflows/synth.yml`. Verified end-to-end across four real runs (~2.5h each);
       flow, artifact uploads, and metrics summary all confirmed working on the actual
