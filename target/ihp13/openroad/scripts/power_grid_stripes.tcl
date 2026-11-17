@@ -314,6 +314,11 @@ add_pdn_connect -grid {core_grid} -layers {TopMetal2 Metal1}
 
 pdngen -failed_via_report ${report_dir}/${proj_name}_pdngen.rpt -dont_add_pins
 
+# The delay lines' Metal1-only supply rails, which pdngen leaves 0.44 um short
+# of the core rails (scripts/pdn_delay_line_rails.tcl).
+source scripts/pdn_delay_line_rails.tcl
+pdn_bridge_delay_line_rails
+
 # Channel-repair straps: kept by default; PNR_PDN_REPAIR_CHANNELS=0
 # (scripts/pnr/common.tcl) removes them behind a connectivity gate. chip.tcl
 # does not source common.tcl, so the variable may not exist there.
@@ -324,6 +329,9 @@ if { !$pnr_pdn_repair_channels } { pdn_remove_repair_straps_checked }
 if { [catch { pdn_report_repair_straps } reportErr] } {
     utl::report "PDN TopMetal2 straps shorter than the core: not counted ($reportErr)"
 }
+
+# The grid is final: both supply nets must be fully connected.
+pdn_check_grid
 
 # setLayerDirection Metal1 VERTICAL
 

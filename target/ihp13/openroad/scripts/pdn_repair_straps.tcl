@@ -128,3 +128,22 @@ proc pdn_remove_repair_straps_checked {} {
         error "Removing the channel-repair straps disconnected supply shapes on: $failed"
     }
 }
+
+# Every run's final check (openspec/changes/fix-delay-line-power-rails D3):
+# errors if either supply net reports any unconnected shape or instance.
+proc pdn_check_grid {} {
+    set failed {}
+    foreach net {VDD VSS} {
+        set entries [pdn_check_net $net final]
+        if { $entries eq {} } {
+            utl::report "Power grid check $net: clean"
+        } else {
+            utl::report "Power grid check $net: failed ([llength $entries] reports)"
+            foreach entry $entries { utl::report "  $entry" }
+            lappend failed $net
+        }
+    }
+    if { $failed ne {} } {
+        error "Unconnected supply shapes on: $failed"
+    }
+}
