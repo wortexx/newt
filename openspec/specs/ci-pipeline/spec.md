@@ -249,9 +249,11 @@ The manual dispatch SHALL accept these optional inputs, all empty by default:
 - which antenna repair runs before detailed routing: jumper insertion only, full repair, or none;
 - the share of Metal2's capacity that global routing holds back;
 - the share of Metal5's capacity that global routing holds back over the SRAMs;
+- the extra share of Metal5's capacity that global routing holds back at the SRAMs' ends;
+- whether the power grid keeps the generator's channel-repair straps;
 - the placement padding, in sites, on each side of every standard cell.
 
-An empty input SHALL keep the flow's default for that setting. Post-route timing repair SHALL be skipped by default and SHALL run only when the dispatch explicitly asks for it. Antenna repair SHALL run in jumper-only mode by default. Full repair SHALL run only when the dispatch explicitly asks for it, and the dispatch SHALL be able to skip antenna repair. An antenna-repair value that names no known mode SHALL fail the run before P&R starts, rather than fall back to a default. An empty iteration budget SHALL keep the lane's default budget. An empty Metal2 hold-back SHALL keep the flow's default. An empty SRAM Metal5 hold-back SHALL keep the flow's default. An empty cell padding SHALL keep the flow's default of no padding. With all inputs empty, a dispatched run SHALL behave exactly like a scheduled run. These inputs SHALL NOT change the flow's success gate: a run that stops before the gate stage is reached SHALL still exit non-zero, and post-route repair, antenna repair and detailed routing SHALL stay best-effort whether they are skipped, complete, fail or time out. Selecting a legalizer SHALL NOT bypass the flow's placement legality checks.
+An empty input SHALL keep the flow's default for that setting. Post-route timing repair SHALL be skipped by default and SHALL run only when the dispatch explicitly asks for it. Antenna repair SHALL run in jumper-only mode by default. Full repair SHALL run only when the dispatch explicitly asks for it, and the dispatch SHALL be able to skip antenna repair. An antenna-repair value that names no known mode SHALL fail the run before P&R starts, rather than fall back to a default. An empty iteration budget SHALL keep the lane's default budget. An empty Metal2 hold-back SHALL keep the flow's default. An empty SRAM Metal5 hold-back SHALL keep the flow's default. An empty SRAM-end Metal5 hold-back SHALL keep the flow's default. An empty channel-repair input SHALL keep the flow's default. An empty cell padding SHALL keep the flow's default of no padding. With all inputs empty, a dispatched run SHALL behave exactly like a scheduled run. These inputs SHALL NOT change the flow's success gate: a run that stops before the gate stage is reached SHALL still exit non-zero, and post-route repair, antenna repair and detailed routing SHALL stay best-effort whether they are skipped, complete, fail or time out. Selecting a legalizer SHALL NOT bypass the flow's placement legality checks.
 
 #### Scenario: Weekly run
 
@@ -332,6 +334,16 @@ An empty input SHALL keep the flow's default for that setting. Post-route timing
 
 - **WHEN** a user dispatches the P&R lane with a cell padding of N sites
 - **THEN** global placement and every legalization keep N free sites on each side of every standard cell, the stage logs record N, the gated legality checks after `dpl` and `cts` fail the stage on any padding violation, filler placement is not padded, and the run's exit status still follows the global-route gate
+
+#### Scenario: Manual dispatch sets the SRAM-end Metal5 hold-back
+
+- **WHEN** a user dispatches the P&R lane with an SRAM-end Metal5 hold-back
+- **THEN** global routing and every later routing stage hold back that further share of Metal5's capacity in the end strips of every SRAM, the stage logs record the value used, no other layer's adjustment changes, and the run's exit status still follows the global-route gate
+
+#### Scenario: Manual dispatch turns channel repair off
+
+- **WHEN** a user dispatches the P&R lane with the power-grid generator's channel repair off
+- **THEN** the floorplan removes the channel-repair straps after generating the power grid, fails if the removal leaves any supply shape unconnected that was connected before, its log records that the straps were removed, and the run's exit status still follows the global-route gate
 
 ### Requirement: P&R lane starts the VM before the job and deallocates it after
 
