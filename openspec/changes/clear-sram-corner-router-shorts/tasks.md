@@ -46,11 +46,11 @@ Local checkpoints live in the session scratchpad, or in `target/ihp13/openroad/o
 
 ## 4. Measured run (design D6)
 
-- [ ] 4.1 **[long-run]** *(ask the user first)* Dispatch on `main` with `pdn_repair_channels=0` and `sram_end_metal5_adjust=0.5`, everything else empty and no resume. Save `pnr-reports` under `target/ihp13/openroad/out/ci-<run>/`. Verify:
+- [x] 4.1 **[long-run]** *(ask the user first)* Dispatch on `main` with `pdn_repair_channels=0` and `sram_end_metal5_adjust=0.5`, everything else empty and no resume. Save `pnr-reports` under `target/ihp13/openroad/out/ci-<run>/`. Verify:
   - the floorplan log has `PDN channel repair: off`, 10 straps removed, 0 partial-height straps left, and both power-grid checks `ok` with the pre-existing count;
   - `grt.tcl` and `drt.tcl` log the SRAM-end adjustment over 64 strips;
   - `drt ok`, `final ok`, and the DEF artifact is published.
-- [ ] 4.2 **[edit]** Compare against run `40081935481` per D6:
+- [x] 4.2 **[edit]** Compare against run `40081935481` per D6:
   - the router count and the full marker list against A–D;
   - `grt` overflow (7,153);
   - WNS at `grt` (−12.05 ns);
@@ -58,11 +58,11 @@ Local checkpoints live in the session scratchpad, or in `target/ihp13/openroad/o
   - `drt` time.
 
   Record the comparison, the 2026-11-16 probe findings (the two mechanisms, the 10 repair straps and why repair cannot be turned off, why inter-row blocking was rejected, and the pre-existing west-edge PDN hole around the two Hyperbus delay lines as a follow-up) and D6's row in `docs/infra-plan.md`, after the 2026-10-30 record. Then ask the user before any follow-up dispatch.
-- [ ] 4.3 **[long-run]** *(only if 4.2 lands on a row that names a resume, or the user asks for the isolation run; ask first)* Dispatch the resume D6 names from the measured run's `cts`. Verify that `cts` and earlier were restored, and record the result as in 4.2.
+- [ ] 4.3 **[long-run]** *(not run: 4.2 landed on the "WNS more than 1 ns worse" row, which names no resume; kept as a next candidate in `docs/infra-plan.md`)* *(only if 4.2 lands on a row that names a resume, or the user asks for the isolation run; ask first)* Dispatch the resume D6 names from the measured run's `cts`. Verify that `cts` and earlier were restored, and record the result as in 4.2.
 
 ## 5. Close-out
 
-- [ ] 5.1 **[edit]** Check that `docs/infra-plan.md` states the outcome and the next step: adopting both settings with a requote, a per-gap PDN strap change, or placement of the gap drivers. Verify `openspec validate clear-sram-corner-router-shorts --strict` passes.
+- [x] 5.1 **[edit]** Check that `docs/infra-plan.md` states the outcome and the next step: adopting both settings with a requote, a per-gap PDN strap change, or placement of the gap drivers. Verify `openspec validate clear-sram-corner-router-shorts --strict` passes.
 
 ## Workflow follow-up
 
