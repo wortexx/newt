@@ -4,7 +4,7 @@
 instructions for a cryptographic (SHA) coprocessor on CVA6 / Cheshire, targeting IHP's
 130 nm open-source PDK.
 
-**Status:** in progress (last synced 2026-10-30). This is a living document — update it as phases complete.
+**Status:** in progress (last synced 2026-11-17). This is a living document — update it as phases complete.
 
 **Date started:** 2026-08-29
 
@@ -640,6 +640,10 @@ Actual approach diverged from the plan above, deliberately:
 > SRAM Metal5 0.55; #85). On those defaults the both-arms build routes to 8 router violations.
 > Full diode repair (`antenna_repair=1`) brings that to 1, and the antenna nets to 5,205. Still
 > open: the remaining antenna violations, mostly Metal4 (see the 2026-10-30 record).
+> **2026-11-17:** removing pdngen's channel-repair straps and holding back Metal5 at the SRAMs'
+> ends cleared the B, C and D shorts (8 → 6, all now at A), but WNS at `grt` worsened by 1.28 ns,
+> so neither setting is a default yet. A PDN hole at the west edge was found on the way (see the
+> 2026-11-17 record).
 
 The P&R lane now runs end to end unattended, but **the design as placed and globally routed
 cannot be detail-routed**. `pnr-bringup-10` got `detailed_route` to completion for the first
@@ -1303,6 +1307,65 @@ from placements with overlapping cells, on both sides alike.
       - **Next candidate:** a second diode pass on the detailed routes, which targets the wires
         `drt` actually laid, with `-allow_congestion`. Or try `-ratio_margin` on the `ant` pass
         first, for the 1.1–1.5× band. Either is its own change, and neither is started.
+
+      **SRAM-corner router shorts, 2026-11-17 (run `43937159728`).** Change
+      `clear-sram-corner-router-shorts`.
+
+      - **Probe of run `41133143603`'s DEF (2026-11-16).** The 8 router markers on the defaults
+        (identical in `39906592139`, `40081935481` and `41133143603`) have two causes, both in
+        the flow's setup:
+        - **A, B×2: signal wires crossing a power via stack's 8 µm pad.** A is under the core
+          VSS stripe at x 483–491 over the left R90 column. B is under a TopMetal2 strap that
+          pdngen's channel repair added at x 7030.
+        - **C×2, D×3: Metal5 crossings near a middle-row SRAM's east end.** Drivers placed in
+          the 30 µm gap between the bottom and middle macro rows feed `A_DIN[0..1]` of middle-row
+          R180 SRAMs and cross the 119 µm macro on Metal5, between its power-pad rows.
+        - pdngen adds 10 channel-repair straps (partial-height TopMetal2): 8 in the macro-row
+          gaps and a pair next to an LLC tag macro. Repair cannot be turned off in OpenROAD
+          `2c56926971`: `repairGridChannels` always runs, and `pdn::allow_repair_channels` only
+          makes an unrepaired channel an error.
+        - Blocking placement in the gap between macro rows was rejected: the bottom row's pins
+          face only that gap.
+      - **Pre-existing PDN hole (not fixed).** With `check_power_grid -dont_require_terminals`,
+        today's grid reports 14 unconnected items per net: 12 Metal1 rails at x 388.16–428.0 µm,
+        y 4093–4181 µm, and the two Hyperbus delay lines on them (`i_delay_tx_clk_90`,
+        `i_delay_rx_rwds_90`). They may be unpowered in silicon. This needs its own change.
+      - **The settings (#97, both off by default):** `pdn_repair_channels=0` removes the 10
+        straps and their 1,404 stacked shapes after pdngen, gated by a before/after
+        connectivity check. `sram_end_metal5_adjust` holds back extra Metal5 in 40 µm strips at
+        both short ends of every SRAM.
+      - **The measured run, `43937159728`.** Dispatched on `main` (`538a198`) with
+        `pdn_repair_channels=0 sram_end_metal5_adjust=0.5` from floorplan. `pnr` took 11 h 31 m;
+        every stage `ok`, DEF published. The floorplan logged both power-grid checks
+        `ok (14 pre-existing)` and 0 straps left; every routing stage logged the end strips
+        (64).
+
+        | | run A (`40081935481`) | `43937159728` |
+        |---|---:|---:|
+        | router count after iteration 28 | 8 (A, B×2, C×2, D×3) | **6** (all at A) |
+        | `grt` overflow | 7,153 | 8,492 |
+        | WNS / TNS at `grt` | −12.05 ns / −124,006 | **−13.33 ns** / −80,688 |
+        | antenna nets after `drt` | 8,627 | 8,473 |
+        | `drt` time | 7 h 28 m | 6 h 25 m |
+
+      - **B, C and D are gone. A grew into a cluster of 6** (5 shorts, 1 spacing) at x 478–489 µm,
+        y 823–841 µm. That is just below the south end of the R90 I-cache macro `cut_high`
+        (y 842–1627), under the core VSS stripe; one short is against the VSS pad. Signal-wire
+        segments from both DEFs show the end strip moved routes there:
+
+        | window | Metal5, run A → this run | all layers |
+        |---|---:|---:|
+        | the macro's south strip (y 842–882) | 127 → 83 | 162 → 118 |
+        | below the macro (y 815–842) | 163 → 250 | 1,714 → 2,108 |
+        | the cluster (30 × 30 µm) | 65 → 165 | 702 → 1,264, nets 120 → 160 |
+
+      - **D6 row: "WNS more than 1 ns worse".** Defaults stay. One run cannot tell how much of
+        the 1.28 ns comes from the strips (overflow +19 %) and how much from the placement
+        shift the strap removal causes.
+      - **Next candidates, not started:** an end hold-back limited to the R180 macros' pin ends
+        (the R90 strips caused the cluster); the strap removal alone, by a resume from this
+        run's `cts` (change task 4.3), to separate the WNS cost; the PDN hole above. Adopting
+        either setting needs one of these first.
 
 **2026-10-11 finding: `DRT-0218` is not a placement problem.** Run `38094932339` placed legally
 and `drt` still aborted with `DRT-0218`, on one clock net (`clknet_12_3602__leaf…`). Probes on
