@@ -28,6 +28,12 @@ The local checkpoint is run `40081935481`'s `basilisk.power_grid.zip`. It is in 
   - with both sides deleted, it errors with "Delay line …i_delay_rx_rwds_90… VDD rail at y 4097.3-4097.74 um: no VDD Metal1 rail within 1.0 um on either side" and creates no boxes;
   - an unknown master logs 0.
 
+- [x] 1.2 **[eda]** Create the bridges with `$odb::dbSBox_HORIZONTAL` (design D1). Run `44169237604`'s routed DEF had none of them: `write_def` drops a square special box with no direction. Verify in the image on the local checkpoint:
+  - bridge, then `write_def`: the DEF has 48 `Metal1 440 + SHAPE FOLLOWPIN` paths spanning 387.72–388.16 or 428.0–428.44 µm;
+  - in a fresh process, `read_def` of that DEF has 48 bridges, and `pdn_check_grid` is clean on both nets.
+
+  Done 2026-11-18 on run `40081935481`'s `basilisk.power_grid`: 48 paths in the written DEF, 48 bridges after `read_def`, and both nets `clean`. Without the direction, the same `write_def` wrote none of them.
+
 ## 2. Always-on grid check (design D3)
 
 - [x] 2.1 **[eda]** Add `pdn_check_grid` next to `pdn_check_net` in `pdn_repair_straps.tcl`: run both nets with tag `final`, log `Power grid check <net>: clean` or `failed (<n> reports)` plus each entry, and error if either failed. Call it in `power_grid_stripes.tcl` after the strap count, before the stripe blockages, per D3's order. Verify in the image on the local checkpoint:
@@ -48,6 +54,24 @@ The local checkpoint is run `40081935481`'s `basilisk.power_grid.zip`. It is in 
   - the floorplan log has `Delay-line rail bridges: 48` and both `Power grid check <net>: clean` lines;
   - `drt ok` and `final ok`;
   - the final DEF has the 48 bridge boxes in `SPECIALNETS`.
+
+  First attempt, run `44169237604` (2026-11-17/18, `main` at `f9dc34f`), not passed:
+  - every stage `ok`;
+  - the floorplan logged 48 bridges and both checks `clean`;
+  - the final DEF had **no** bridges (task 1.2).
+
+  Everything through `grt` was byte-identical to run A:
+  - the `grt`, `cts` and `dpl` reports and the route guide;
+  - overflow 7,153;
+  - WNS/TNS at `grt` −12.05 ns / −124,006.
+
+  `drt` (in ODB, the bridges were present):
+  - iteration 0 matched run A and the trajectory diverged from iteration 1;
+  - 5 router markers against 8, none at the bridges: 3 at x ≈ 7030 µm and 2 Metal5 plus 1 Metal2 at x ≈ 2932–2942 µm;
+  - antenna nets 8,602 against 8,627;
+  - `drt` 8 h 31 m against 7 h 28 m.
+
+  The re-run after 1.2 is expected to reproduce this routing, because the direction changes only how the boxes are written.
 - [ ] 3.2 **[edit]** Compare against run `40081935481` (run A) per D5:
   - router markers in the bridge window (expected none);
   - the full marker list, `grt` overflow (7,153), WNS at `grt` (−12.05 ns), antenna nets (8,627) and `drt` time, against run A;
