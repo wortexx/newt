@@ -66,9 +66,12 @@ proc pdn_bridge_delay_line_rails { {master delay_line_D4_O1_6P000} {reach_um 1.0
         }
     }
     # Created only after the search, so a bridge is never taken for a rail.
+    # The direction is required: write_def silently drops a square box without
+    # one (run 44169237604's DEF had none of the 48), and the GDS is streamed
+    # from the DEF.
     foreach bridge $bridges {
         lassign $bridge swire x0 y0 x1 y1
-        odb::dbSBox_create $swire $m1 $x0 $y0 $x1 $y1 "FOLLOWPIN"
+        odb::dbSBox_create $swire $m1 $x0 $y0 $x1 $y1 "FOLLOWPIN" $odb::dbSBox_HORIZONTAL
     }
     utl::report "Delay-line rail bridges: [llength $bridges]"
 }

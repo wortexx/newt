@@ -34,6 +34,8 @@ After `pdngen`, a new proc does the following for each instance of `delay_line_D
 
 The boxes abut the pin rail and do not overlap it, so they stay outside the macro's Metal1 obstruction.
 
+Each box is created with an explicit horizontal direction (`$odb::dbSBox_HORIZONTAL`). The first measured run (`44169237604`) created them without one. They survived every ODB checkpoint, and `drt` saw them, but `write_def` silently drops a square special box with an undefined direction. So the routed DEF, which the GDS is streamed from (`klayout/scripts/def2stream.py`), had none of the 48. With the direction set, `write_def` writes each one as an ordinary `FOLLOWPIN` path.
+
 Alternatives considered:
 
 - **A macro PDN grid for the delay line** (`define_pdn_grid -macro -cells delay_line_D4_O1_6P000`) with stripes and connects. The only obstruction-free Metal2/Metal3 columns are 0.38–0.86 µm wide at the macro's edges, too narrow for a via stack. There is nothing for a macro grid to connect to except Metal1.
