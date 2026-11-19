@@ -4,7 +4,7 @@
 instructions for a cryptographic (SHA) coprocessor on CVA6 / Cheshire, targeting IHP's
 130 nm open-source PDK.
 
-**Status:** in progress (last synced 2026-11-17). This is a living document — update it as phases complete.
+**Status:** in progress (last synced 2026-11-19). This is a living document — update it as phases complete.
 
 **Date started:** 2026-08-29
 
@@ -644,6 +644,9 @@ Actual approach diverged from the plan above, deliberately:
 > ends cleared the B, C and D shorts (8 → 6, all now at A), but WNS at `grt` worsened by 1.28 ns,
 > so neither setting is a default yet. A PDN hole at the west edge was found on the way (see the
 > 2026-11-17 record).
+> **2026-11-19:** the PDN hole is fixed: the two Hyperbus delay lines are bridged to the core
+> rails, and every run now checks both supply grids (#100). The default run routes to 5 router
+> violations (see the 2026-11-19 record).
 
 The P&R lane now runs end to end unattended, but **the design as placed and globally routed
 cannot be detail-routed**. `pnr-bringup-10` got `detailed_route` to completion for the first
@@ -1326,7 +1329,7 @@ from placements with overlapping cells, on both sides alike.
           makes an unrepaired channel an error.
         - Blocking placement in the gap between macro rows was rejected: the bottom row's pins
           face only that gap.
-      - **Pre-existing PDN hole (not fixed).** With `check_power_grid -dont_require_terminals`,
+      - **Pre-existing PDN hole (fixed 2026-11-19, see the next record).** With `check_power_grid -dont_require_terminals`,
         today's grid reports 14 unconnected items per net: 12 Metal1 rails at x 388.16–428.0 µm,
         y 4093–4181 µm, and the two Hyperbus delay lines on them (`i_delay_tx_clk_90`,
         `i_delay_rx_rwds_90`). They may be unpowered in silicon. This needs its own change.
@@ -1366,6 +1369,64 @@ from placements with overlapping cells, on both sides alike.
         (the R90 strips caused the cluster); the strap removal alone, by a resume from this
         run's `cts` (change task 4.3), to separate the WNS cost; the PDN hole above. Adopting
         either setting needs one of these first.
+
+      **Delay-line power rails, 2026-11-19 (runs `44169237604`, `44382400639`).** Change
+      `fix-delay-line-power-rails` (#100, #101).
+
+      - **Mechanism.** The Hyperbus delay line `delay_line_D4_O1_6P000` (`CLASS BLOCK`,
+        39.84 × 41.58 µm) takes power only on Metal1: 6 VDD and 6 VSS pin rails, full width, at
+        the row pitch. Its obstructions cover Metal1 and almost all of Metal2 and Metal3, so no
+        via stack can land on them. The floorplan places both instances R0 at x 388.16 µm with the
+        pin rails aligned to the core's follow-pin rails, but pdngen trims those rails 0.44 µm
+        short on both sides (they end at 387.72 and restart at 428.44 µm). That left the 12 pin
+        rails and both macros unconnected: 14 reports per net.
+      - **Fix.** After pdngen, `pdn_bridge_delay_line_rails` adds one Metal1 `FOLLOWPIN` box per
+        gap, from the rail's end to the pin's edge, abutting the pin without overlapping the
+        macro's obstruction: 48 boxes (2 macros × 12 rails × 2 sides). It fails the stage if a
+        rail has no same-net rail within 1 µm on either side, or if a macro is not R0. A new
+        `pdn_check_grid` then runs `check_power_grid -dont_require_terminals` on both nets on
+        every run from `floorplan` and fails on any report. A run resumed past `floorplan` keeps
+        its checkpoint's grid, with the hole.
+      - **Probe (2026-11-17, run `40081935481`'s `power_grid` checkpoint).** With the bridges,
+        `PSM-0040 All shapes … are connected` on both nets; abutting shapes count as connected.
+        Without them, 14 reports per net, as before.
+      - **A wrong diagnosis on the way.** The first run's DEF was searched for the bridges as
+        horizontal paths, found none, and #101 was merged to give the boxes an explicit
+        horizontal direction on the theory that `write_def` drops square boxes without one. It
+        does not: it wrote them as vertical paths across the rails, the same 0.44 × 0.44 µm
+        rectangles (special-wire paths have no end extension). The two runs' DEFs differ only in
+        those 48 lines. #101 is harmless and kept, since horizontal paths match the rails.
+      - **The measured runs.** Both on lane defaults from `floorplan`. `44382400639` (`main` at
+        `b41e658`) reproduced `44169237604` (`f9dc34f`) exactly: status log, violation list,
+        route DRC report and route guide byte-identical. The floorplan logged
+        `Delay-line rail bridges: 48` and both grid checks `clean`.
+
+        | | run A (`40081935481`) | `44169237604` / `44382400639` |
+        |---|---:|---:|
+        | router count after iteration 28 | 8 (A, B×2, C×2, D×3) | **5** (B×2, C×2, 1 new) |
+        | `grt` overflow | 7,153 | 7,153 |
+        | WNS / TNS at `grt` | −12.05 ns / −124,006 | −12.05 ns / −124,006 |
+        | antenna nets after `drt` | 8,627 | 8,602 |
+        | `drt` time | 7 h 28 m | 8 h 31 m / 10 h 10 m |
+
+      - **Everything through `grt` is byte-identical to run A** (`grt`, `cts` and `dpl` reports,
+        route guide), and so was the scheduled run `41133143603` against run A. `drt` iteration
+        0 matches run A (1,029,488); the trajectories split from iteration 1, because the router
+        sees the 48 new Metal1 boxes. The marker changes are that trajectory, not the grid:
+        - no marker in the bridge window (x 387–429 µm, y 4093–4181 µm), so design D5's
+          west-only fallback is not needed;
+        - B×2 remain at x 7027.6 and 7031.4 µm, y 669 µm (Metal2 shorts against VSS under the
+          channel-repair strap);
+        - the C pair moved from x 2916 to 2932–2934 µm (Metal5, signal–signal), and a new Metal2
+          short against VDD appeared next to it at x 2941.75 µm, y 665 µm;
+        - A (x 485.7 µm) and D×3 (x 6987–6991 µm) are gone.
+      - **These runs replace run A as the default reference**: same `grt` and timing, 3 fewer
+        markers, 25 fewer antenna nets, and a connected supply grid. Against `43937159728`
+        (repair off and end hold-back 0.5, 6 markers all at A, WNS −13.33 ns) the defaults now
+        route to fewer markers without its 1.28 ns WNS cost. The `drt` time spread between the
+        two identical runs (8 h 31 m against 10 h 10 m) is VM variance.
+      - **Next candidates, not started:** the B pair under the x 7030 strap (the strap removal
+        alone, task 4.3 of `clear-sram-corner-router-shorts`); the C cluster at x 2932–2942 µm.
 
 **2026-10-11 finding: `DRT-0218` is not a placement problem.** Run `38094932339` placed legally
 and `drt` still aborted with `DRT-0218`, on one clock net (`clknet_12_3602__leaf…`). Probes on

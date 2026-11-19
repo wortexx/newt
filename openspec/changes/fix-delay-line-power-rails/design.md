@@ -34,7 +34,7 @@ After `pdngen`, a new proc does the following for each instance of `delay_line_D
 
 The boxes abut the pin rail and do not overlap it, so they stay outside the macro's Metal1 obstruction.
 
-Each box is created with an explicit horizontal direction (`$odb::dbSBox_HORIZONTAL`). The first measured run (`44169237604`) created them without one. They survived every ODB checkpoint, and `drt` saw them, but `write_def` silently drops a square special box with an undefined direction. So the routed DEF, which the GDS is streamed from (`klayout/scripts/def2stream.py`), had none of the 48. With the direction set, `write_def` writes each one as an ordinary `FOLLOWPIN` path.
+Each box is created with an explicit horizontal direction (`$odb::dbSBox_HORIZONTAL`). The direction affects only how `write_def` writes the box. The boxes are 0.44 × 0.44 µm squares, and without a direction `write_def` writes each one as a vertical path across the rail, e.g. `( 387940 4097300 ) ( 387940 4097740 )`. With the direction it writes a horizontal path along it, `( 387720 4097520 ) ( 388160 4097520 )`, like the core rails. Special-wire paths have no end extension, so both forms are the same rectangle. The first measured run (`44169237604`) used no direction, and its DEF, which the GDS is streamed from (`klayout/scripts/def2stream.py`), already had all 48. An earlier note here said `write_def` dropped them. That was wrong: the check only searched for the horizontal form (see tasks 1.2 and 3.1).
 
 Alternatives considered:
 
