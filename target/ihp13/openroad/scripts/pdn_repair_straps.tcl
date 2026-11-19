@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: SHL-0.51
 #
 # pdngen's channel-repair straps: count them, and remove them behind a
-# connectivity gate (openspec/changes/clear-sram-corner-router-shorts
+# connectivity gate (openspec/changes/archive/2026-11-17-clear-sram-corner-router-shorts
 # design D1-D3). Sourced by power_grid_stripes.tcl after pdngen.
 #
 # pdngen always repairs channels (OpenROAD 2c56926971: repairGridChannels
@@ -129,7 +129,7 @@ proc pdn_remove_repair_straps_checked {} {
     }
 }
 
-# Every run's final check (openspec/changes/fix-delay-line-power-rails D3):
+# Every run's final check (openspec/changes/archive/2026-11-19-fix-delay-line-power-rails D3):
 # errors if either supply net reports any unconnected shape or instance.
 proc pdn_check_grid {} {
     set failed {}
