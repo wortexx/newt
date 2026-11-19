@@ -28,11 +28,13 @@ The local checkpoint is run `40081935481`'s `basilisk.power_grid.zip`. It is in 
   - with both sides deleted, it errors with "Delay line …i_delay_rx_rwds_90… VDD rail at y 4097.3-4097.74 um: no VDD Metal1 rail within 1.0 um on either side" and creates no boxes;
   - an unknown master logs 0.
 
-- [x] 1.2 **[eda]** Create the bridges with `$odb::dbSBox_HORIZONTAL` (design D1). Run `44169237604`'s routed DEF had none of them: `write_def` drops a square special box with no direction. Verify in the image on the local checkpoint:
+- [x] 1.2 **[eda]** Create the bridges with `$odb::dbSBox_HORIZONTAL` (design D1), so `write_def` writes them as horizontal paths along the rails. Verify in the image on the local checkpoint:
   - bridge, then `write_def`: the DEF has 48 `Metal1 440 + SHAPE FOLLOWPIN` paths spanning 387.72–388.16 or 428.0–428.44 µm;
   - in a fresh process, `read_def` of that DEF has 48 bridges, and `pdn_check_grid` is clean on both nets.
 
-  Done 2026-11-18 on run `40081935481`'s `basilisk.power_grid`: 48 paths in the written DEF, 48 bridges after `read_def`, and both nets `clean`. Without the direction, the same `write_def` wrote none of them.
+  Done 2026-11-18 on run `40081935481`'s `basilisk.power_grid`: 48 paths in the written DEF, 48 bridges after `read_def`, and both nets `clean`.
+
+  **Correction, 2026-11-19.** This task was opened on a wrong diagnosis: that `write_def` drops a square box with no direction, so run `44169237604`'s DEF had no bridges. It had all 48, written as vertical paths across the rails (`( 387940 4097300 ) ( 387940 4097740 )`), the same rectangles. The search pattern matched only horizontal paths, and the "without the direction, none" result above came from the same pattern. The change is harmless: run `44382400639`'s DEF differs from `44169237604`'s in only those 48 lines (430 bytes, same file size).
 
 ## 2. Always-on grid check (design D3)
 
@@ -50,15 +52,17 @@ The local checkpoint is run `40081935481`'s `basilisk.power_grid.zip`. It is in 
 
 ## 3. Measured run (design D5)
 
-- [ ] 3.1 **[long-run]** *(ask the user first)* Dispatch the P&R lane on `main` with every input empty and no resume. Save `pnr-reports` under `target/ihp13/openroad/out/ci-<run>/`. Verify:
+- [x] 3.1 **[long-run]** *(ask the user first)* Dispatch the P&R lane on `main` with every input empty and no resume. Save `pnr-reports` under `target/ihp13/openroad/out/ci-<run>/`. Verify:
   - the floorplan log has `Delay-line rail bridges: 48` and both `Power grid check <net>: clean` lines;
   - `drt ok` and `final ok`;
   - the final DEF has the 48 bridge boxes in `SPECIALNETS`.
 
-  First attempt, run `44169237604` (2026-11-17/18, `main` at `f9dc34f`), not passed:
+  Passed by run `44382400639` (2026-11-18/19, `main` at `b41e658`):
   - every stage `ok`;
   - the floorplan logged 48 bridges and both checks `clean`;
-  - the final DEF had **no** bridges (task 1.2).
+  - the final DEF has the 48 bridges as horizontal paths.
+
+  The first attempt, run `44169237604` (2026-11-17/18, `main` at `f9dc34f`), passed too, but was recorded at the time as failed: its DEF had the 48 bridges as vertical paths, which the check did not match (see the correction under 1.2).
 
   Everything through `grt` was byte-identical to run A:
   - the `grt`, `cts` and `dpl` reports and the route guide;
@@ -71,13 +75,15 @@ The local checkpoint is run `40081935481`'s `basilisk.power_grid.zip`. It is in 
   - antenna nets 8,602 against 8,627;
   - `drt` 8 h 31 m against 7 h 28 m.
 
-  The re-run after 1.2 is expected to reproduce this routing, because the direction changes only how the boxes are written.
-- [ ] 3.2 **[edit]** Compare against run `40081935481` (run A) per D5:
+  The re-run `44382400639` reproduced this routing exactly: its status log, `drt` violation list, route DRC report and route guide are byte-identical to `44169237604`'s. `drt` took 10 h 10 m.
+- [x] 3.2 **[edit]** Compare against run `40081935481` (run A) per D5:
   - router markers in the bridge window (expected none);
   - the full marker list, `grt` overflow (7,153), WNS at `grt` (−12.05 ns), antenna nets (8,627) and `drt` time, against run A;
   - also, informationally, against `43937159728`.
 
   Record the hole's mechanism, the fix, the probe and the comparison in `docs/infra-plan.md` as a dated record after 2026-11-17's, and mark that record's "PDN hole (not fixed)" bullet as fixed with a pointer. If markers sit on the bridges, apply D5's fallback (west side only) in a follow-up commit and ask the user before re-running.
+
+  Done 2026-11-19: recorded in `docs/infra-plan.md` ("Delay-line power rails, 2026-11-19"). No marker in the bridge window, so no fallback. 5 markers against run A's 8: B×2 at x ≈ 7030 µm and a pair of C-type Metal5 shorts (moved from x 2916 to 2932 µm) remain, plus one new Metal2 short against VDD at x 2941.75 µm. A and D×3 are gone. `grt` is byte-identical to run A (overflow 7,153, WNS −12.05 ns), so the marker changes are `drt` trajectory, which diverges from iteration 1 because the router sees the new Metal1 boxes.
 
 ## Workflow follow-up
 
