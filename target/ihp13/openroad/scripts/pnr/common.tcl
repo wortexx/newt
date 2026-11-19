@@ -219,7 +219,7 @@ if { ![string is double -strict $pnr_grt_sram_metal5_adjust] ||
 # above (pnr_apply_sram_metal5_adjustment). The router's last Metal5 shorts
 # cross a middle-row SRAM 8-24 um inside its east end, where nets from the
 # gap below reach its first data pins (run 41133143603). Default 0 adds no
-# strip (openspec/changes/clear-sram-corner-router-shorts design D4).
+# strip (openspec/changes/archive/2026-11-17-clear-sram-corner-router-shorts design D4).
 set pnr_sram_end_strip_um 40
 if { [info exists ::env(PNR_GRT_SRAM_END_METAL5_ADJUST)] && [string trim $::env(PNR_GRT_SRAM_END_METAL5_ADJUST)] ne "" } {
     set pnr_grt_sram_end_metal5_adjust [string trim $::env(PNR_GRT_SRAM_END_METAL5_ADJUST)]
@@ -236,7 +236,7 @@ if { ![string is double -strict $pnr_grt_sram_end_metal5_adjust] ||
 # and their via stacks are the pads behind 2 of the router's last 8 shorts
 # (run 41133143603). 0 removes them after pdngen and fails the stage if that
 # disconnects any supply shape (pdn_repair_straps.tcl). Default 1 keeps them
-# (openspec/changes/clear-sram-corner-router-shorts design D1, D2).
+# (openspec/changes/archive/2026-11-17-clear-sram-corner-router-shorts design D1, D2).
 if { [info exists ::env(PNR_PDN_REPAIR_CHANNELS)] && [string trim $::env(PNR_PDN_REPAIR_CHANNELS)] ne "" } {
     set pnr_pdn_repair_channels [string trim $::env(PNR_PDN_REPAIR_CHANNELS)]
 } else {

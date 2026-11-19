@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: SHL-0.51
 #
 # Connects the Hyperbus delay-line macros' supply rails to the core grid
-# (openspec/changes/fix-delay-line-power-rails design D1, D2). Sourced by
+# (openspec/changes/archive/2026-11-19-fix-delay-line-power-rails design D1, D2). Sourced by
 # power_grid_stripes.tcl after pdngen.
 #
 # delay_line_D4_O1_6P000 takes power only on Metal1: its VDD/VSS pins are
