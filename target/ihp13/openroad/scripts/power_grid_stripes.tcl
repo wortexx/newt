@@ -330,6 +330,12 @@ if { [catch { pdn_report_repair_straps } reportErr] } {
     utl::report "PDN TopMetal2 straps shorter than the core: not counted ($reportErr)"
 }
 
+# Same-net TopMetal1 pads closer than the layer's spacing, which pdngen leaves
+# between grids, e.g. over the stacked SRAM columns
+# (scripts/pdn_fill_gaps.tcl).
+source scripts/pdn_fill_gaps.tcl
+pdn_fill_same_net_gaps TopMetal1
+
 # The grid is final: both supply nets must be fully connected.
 pdn_check_grid
 

@@ -436,10 +436,15 @@ if { ![info exists ::env(HYPER_CONF)] || $::env(HYPER_CONF) ne "NO_HYPERBUS"} {
   set dLineY_rounded  [expr $dLineY_numSites * $doubleSite + $coreArea_bottomY]
   set dLineY2_rounded  [expr $dLineY2_numSites * $doubleSite + $coreArea_bottomY]
 
-  set X [expr $floor_leftX]
+  # On the rows' site grid too: floor_leftX (core edge + floorPaddingX) is
+  # 8 um = 16.67 sites in, and 0.16 um off the grid the macro's tie contacts and
+  # Activ clash with the neighbouring cells' (floorplan_util.tcl
+  # check_delay_lines_on_grid). Rounding up keeps at least the padding.
+  set X [snap_up_to_site_grid $floor_leftX]
   # 785 cell-rows above first (bottom of core-area)
   placeInstance $delay_line_rx $X $dLineY_rounded  R0
   placeInstance $delay_line_tx $X $dLineY2_rounded R0
+  check_delay_lines_on_grid
 }
 
 

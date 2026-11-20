@@ -383,10 +383,13 @@ if { ![info exists ::env(HYPER_CONF)] || $::env(HYPER_CONF) ne "NO_HYPERBUS"} {
   set dLineY_rounded  [expr $dLineY_numSites * $doubleSite + $coreArea_bottomY]
   set dLineY2_rounded  [expr $dLineY2_numSites * $doubleSite + $coreArea_bottomY]
 
-  set X [expr $coreArea_leftX]
+  # On the rows' site grid too, so the macro abuts its neighbours like a cell
+  # (floorplan_util.tcl check_delay_lines_on_grid).
+  set X [snap_up_to_site_grid $coreArea_leftX]
   # 785 cell-rows above first (bottom of core-area)
   placeInstance $delay_line_rx $X $dLineY_rounded  R0
   placeInstance $delay_line_tx $X $dLineY2_rounded R0
+  check_delay_lines_on_grid
 }
 
 
