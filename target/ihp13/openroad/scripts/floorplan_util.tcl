@@ -139,6 +139,58 @@ proc block_macro_core_margins {max_gap} {
   return $count
 }
 
+# Site grid of the standard-cell rows, in dbu: {origin site_width}, with the
+# origin reduced modulo the site width. Every row and row segment shares it
+# (cut_rows splits rows at site boundaries).
+proc row_site_grid {} {
+  set rows [[ord::get_db_block] getRows]
+  if { [llength $rows] == 0 } {
+    error "No standard-cell rows to take the site grid from"
+  }
+  set row [lindex $rows 0]
+  set w [[$row getSite] getWidth]
+  lassign [$row getOrigin] ox oy
+  return [list [expr {$ox % $w}] $w]
+}
+
+# x in microns, rounded up to the next site boundary of the rows.
+proc snap_up_to_site_grid {x} {
+  lassign [row_site_grid] ox w
+  set xd [ord::microns_to_dbu $x]
+  set n [expr {int(ceil(double($xd - $ox) / $w))}]
+  return [ord::dbu_to_microns [expr {$ox + $n * $w}]]
+}
+
+# Logs each delay line's position and errors if one's origin is off the rows'
+# site grid or not on a row boundary. The macro abuts standard cells like a
+# multi-row cell; 0.16 um off the grid, its tie contacts overlap theirs and
+# its Activ leaves a 0.16 um gap, failing Cnt.a, Cnt.b and Act.b
+# (openspec/changes/snap-delay-lines-and-fill-tm1-gaps design D1).
+proc check_delay_lines_on_grid { {master delay_line_D4_O1_6P000} } {
+  set block [ord::get_db_block]
+  lassign [row_site_grid] ox w
+  set row_ys [dict create]
+  foreach row [$block getRows] {
+    lassign [$row getOrigin] rx ry
+    dict set row_ys $ry 1
+  }
+  set row_x [lindex [[lindex [$block getRows] 0] getOrigin] 0]
+  set n 0
+  foreach inst [$block getInsts] {
+    if { [[$inst getMaster] getName] ne $master } { continue }
+    lassign [$inst getLocation] x y
+    set pos "x [ord::dbu_to_microns $x] y [ord::dbu_to_microns $y] um"
+    utl::report "Delay line [$inst getName] at $pos"
+    if { ($x - $ox) % $w != 0 || ![dict exists $row_ys $y] } {
+      error "Delay line [$inst getName] at $pos is off the standard-cell grid\
+             (sites every [ord::dbu_to_microns $w] um in line with the rows at\
+             x [ord::dbu_to_microns $row_x] um, origin on a row boundary)"
+    }
+    incr n
+  }
+  utl::report "Delay lines on the site grid: $n"
+}
+
 proc addHaloToBlock {left bottom right top name} {
   set block [ord::get_db_block]
   set inst [odb::dbBlock_findInst $block $name]
