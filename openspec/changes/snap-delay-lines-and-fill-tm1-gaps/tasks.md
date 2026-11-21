@@ -58,18 +58,25 @@ The local checkpoint is run `44382400639`'s `basilisk.power_grid`, fetched from 
 
 ## 3. Measured run (proposal: Measured run)
 
-- [ ] 3.1 **[long-run]** *(ask the user first)* Dispatch the P&R lane on `main` with every input empty and no resume. Save `pnr-reports` under `target/ihp13/openroad/out/ci-<run>/`, and fetch the final DEF into the scratchpad. Verify the floorplan log has:
+- [x] 3.1 **[long-run]** *(ask the user first)* Dispatch the P&R lane on `main` with every input empty and no resume. Save `pnr-reports` under `target/ihp13/openroad/out/ci-<run>/`, and fetch the final DEF into the scratchpad. Verify the floorplan log has:
   - both delay-line positions at x 388.32;
   - `Delay-line rail bridges: 48`;
   - `Same-net TopMetal1 gaps filled: 12`;
   - both `Power grid check <net>: clean` lines.
 
   Also verify `drt ok` and `final ok`.
-- [ ] 3.2 **[probe]** Stream the final DEF and run the full-die sweep, or at least the delay-line window and both SRAM columns. Then run `merge.py` with macro tags. Verify:
+
+  Done: run `44708127322` on `main` (`7cbb578`), 2026-11-20 09:07 to 2026-11-21 12:47 UTC. Both delay lines at x 388.32 (y 4139.1 and 4093.74), `Delay lines on the site grid: 2`, 48 bridges, 12 fills, both nets `clean`. `drt ok` (iteration 28, 120 markers) and `final ok`. Reports in `out/ci-44708127322/`.
+- [x] 3.2 **[probe]** Stream the final DEF and run the full-die sweep, or at least the delay-line window and both SRAM columns. Then run `merge.py` with macro tags. Verify:
   - 0 `Cnt.a`, `Cnt.b`, `Act.b` and `M1.b` outside the SRAM boxes, other than delay-line-internal shapes;
   - 0 `TM1.b`;
   - no new rule or location compared with the 2026-11-20 sweep of `44382400639`.
-- [ ] 3.3 **[edit]** Compare with `44382400639`:
+
+  Done 2026-11-21: full die, 56 tiles of 1 mm, all rc 0, 7 h 19 m.
+  - **Targets met.** 0 `Cnt.b`, `Act.b`, `M1.b` and `TM1.b`. All 1,183,332 `Cnt.a` are inside SRAM boxes, the same count as the baseline. The delay line's own `Pas.a`/`Pas.b`/`M2.a`/`forbidden.PEmWind` are unchanged (996/902/388/316).
+  - **Exception: new rules.** 24 `M2.b`, 3 `M3.b` and 5 `M5.b`, all 32 within 1 µm of a marker in the run's `basilisk_route_drc.rpt` on the same layer. They are the router's own leftover markers (120 in this run, 5 in the baseline), from the different placement (see 3.3), not geometry this change adds.
+  - **Merge script.** The `merge.py` recovered after the scratchpad was cleared took every tile as 2 mm wide, so it also counted clip-edge artefacts from neighbouring tiles' margins (22 rules). The counts above use `merge2.py`, which reads the tile size from the file name. It reproduces the baseline's SRAM count exactly, so the 2026-11-20 merge used the same extent. The probe files are kept in `target/ihp13/openroad/out/drc-probe/` (git-ignored).
+- [x] 3.3 **[edit]** Compare with `44382400639`:
   - WNS, TNS, area and power from `pnr-reports`;
   - drt markers and antenna counts.
 
@@ -79,6 +86,11 @@ The local checkpoint is run `44382400639`'s `basilisk.power_grid`, fetched from 
   - the waiver list for IP items.
 
   Verify that the record's numbers match the probe's merged output and the run's reports.
+
+  Done 2026-11-21: record "First signoff DRC, and the delay lines on the site grid" in `docs/infra-plan.md` Phase 11.
+  - The DRC numbers are from `merge2.py`'s output, and the IP total (1,185,934) is the sum of the waiver-list rules.
+  - The PPA numbers are from `basilisk.grt.rpt`, `pnr_grt.log`, `pnr_status.log` and the timestamped `pnr_drt.log` of both runs.
+  - The PPA moved beyond run-to-run drift (clock power 0.373 → 0.668 W, area +3 %, WNS −1.15 ns) because CTS built the register tree two levels deeper. The cause and the follow-up change `stabilize-cts-tree-depth` are in the record. `44382400639` stays the PPA reference until that change lands, as the proposal's Impact allows ("the drift is recorded").
 
 ## Workflow follow-up
 

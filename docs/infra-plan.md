@@ -4,7 +4,7 @@
 instructions for a cryptographic (SHA) coprocessor on CVA6 / Cheshire, targeting IHP's
 130 nm open-source PDK.
 
-**Status:** in progress (last synced 2026-11-19). This is a living document — update it as phases complete.
+**Status:** in progress (last synced 2026-11-21). This is a living document — update it as phases complete.
 
 **Date started:** 2026-08-29
 
@@ -1427,6 +1427,85 @@ from placements with overlapping cells, on both sides alike.
         two identical runs (8 h 31 m against 10 h 10 m) is VM variance.
       - **Next candidates, not started:** the B pair under the x 7030 strap (the strap removal
         alone, task 4.3 of `clear-sram-corner-router-shorts`); the C cluster at x 2932–2942 µm.
+
+      **First signoff DRC, and the delay lines on the site grid, 2026-11-20/21 (runs
+      `44382400639`, `44708127322`).** Change `snap-delay-lines-and-fill-tm1-gaps` (#104).
+
+      - **Probe setup (scratch, not in the flow).**
+        - Image `drc-probe-klayout`: `ubuntu:24.04` with apt's KLayout 0.28.16.
+        - Deck: the PDK's minimum deck `libs.tech/klayout/tech/drc/sg13g2.lydrc`, rewritten for
+          batch mode by a small generator. It takes the GDS, top cell, report, clip window and
+          thread count on the command line, and runs every rule on the clipped source.
+        - GDS: streamed from the final DEF with the PDK's LEF/GDS, like
+          `klayout/scripts/def2stream.py`, plus the delay line's GDS. Each macro GDS is merged
+          with its sub-cells renamed `G<k>_…`. Without that, their via and bit-cell names
+          clash with the DEF's own cells and replace them.
+        - Sweep: 1 mm tiles over the 7,598 × 6,658 µm die, each clipped with a 20 µm margin
+          (500 µm tiles if one is killed for memory). The merge keeps an item where its first
+          point lies inside the tile proper, skips the density rules, and tags items inside
+          an SRAM or delay-line box. 56 tiles, 7 h 19 m, peak 14.8 GB.
+      - **Classification (2026-11-20, run `44382400639`; 1,186,630 non-density items in 8
+        rules).**
+
+        | rule | count | where | class |
+        | --- | ---: | --- | --- |
+        | `Cnt.a` | 1,183,332 | SRAM | IP: bar contacts as shipped |
+        | `Cnt.a` / `Cnt.b` / `Act.b` | 332 / 332 / 20 | delay-line edges | **flow**: macro 0.16 µm off the site grid |
+        | `Pas.a` / `Pas.b` | 996 / 902 | delay line | IP: its own Passiv |
+        | `M2.a` | 388 | delay line | IP |
+        | `forbidden.PEmWind` | 316 | delay line | IP |
+        | `TM1.b` | 12 | over both stacked SRAM columns | **flow**: same-net TopMetal1 pads 0.26–1.14 µm apart |
+
+        Not checked: the density rules (no metal fill yet) and the IO ring (the pinned PDK
+        has no IO-cell GDS, so the pads stream empty). Standard cells and signal routing
+        were clean.
+      - **IP waiver list.** SRAM `RM_IHPSG13_1P_*_c2_bm_bist`: `Cnt.a` (bar contacts). Delay
+        line `delay_line_D4_O1_6P000`: `Pas.a`, `Pas.b`, `M2.a`, `forbidden.PEmWind`. The
+        macros produce these on their own, as shipped.
+      - **Fix (#104).** The floorplans round the delay lines' x up to the rows' site grid
+        (388.16 → 388.32 µm) and fail the stage if one is off it. After pdngen,
+        `pdn_fill_same_net_gaps` fills same-net TopMetal1 gaps under the 1.64 µm spacing
+        (12 fills, all VDD).
+      - **The measured run, `44708127322`.** On `main` (`7cbb578`) from `floorplan`, lane
+        defaults. The floorplan logged both delay lines at x 388.32, `Delay-line rail
+        bridges: 48`, `Same-net TopMetal1 gaps filled: 12` and both grid checks `clean`;
+        `drt ok`, `final ok`. Full-die DRC of its final DEF, with the same probe:
+
+        | rule | `44382400639` | `44708127322` |
+        | --- | ---: | ---: |
+        | delay-line `Cnt.a` / `Cnt.b` / `Act.b` | 332 / 332 / 20 | **0 / 0 / 0** |
+        | `TM1.b` | 12 | **0** |
+        | `M1.b` | 0 | 0 |
+        | IP items (waiver list) | 1,185,934 | 1,185,934 |
+        | `M2.b` / `M3.b` / `M5.b` | 0 | 24 / 3 / 5 |
+
+        All 32 new spacing items lie on markers the router itself left (`basilisk_route_drc.rpt`),
+        in its clusters at x 2,143–2,151 µm, y 542–548 µm and x 3,465–3,516 µm, y 4,606–4,750 µm,
+        plus three other spots (x 3,560, 6,985 and 7,028 µm). So apart from the router's own markers, the waived IP, density
+        and the IO ring, the chip passes the minimum deck.
+      - **But the run's PPA moved, through CTS.** The 0.16 µm move changed global placement
+        (from `gpl2` on), and CTS built the register clock tree two levels deeper:
+
+        | | `44382400639` | `44708127322` |
+        | --- | ---: | ---: |
+        | `clk_i_regs` H-tree levels / buffers | 11 / 14,380 | 13 / 20,527 |
+        | clock power / total power at `grt` | 0.373 / 1.04 W | 0.668 / 1.34 W |
+        | cell area at `grt` | 18.27 mm² | 18.85 mm² |
+        | WNS / TNS at `grt` | −12.05 ns / −124,006 | −13.20 ns / −98,288 |
+        | `grt` overflow | 7,153 | 9,049 |
+        | router markers after iteration 28 | 5 | 120 |
+        | antenna nets / pins after `drt` | 8,602 / 11,270 | 8,685 / 11,390 |
+        | `drt` time | 10 h 10 m | 21 h 44 m |
+
+        TritonCTS stops the H-tree only when no branch's sinks span more than the resizer's
+        max wire length (3,162 µm). In both runs some branches hold sinks about 2.4 mm apart,
+        so the test at level 11 sits at the limit. The baseline passed it, and this placement
+        did not. Each extra level doubles the leaves, which adds about 8,200 buffers that drive
+        one or two sinks. This is not caused by the new geometry, but every variant moves
+        placement, so it makes PPA comparisons noise. Change `stabilize-cts-tree-depth` reports
+        the tree shape on every run and picks CTS settings that stop at a stable depth. Until
+        it lands, `44382400639` stays the PPA reference, and `44708127322` is the DRC
+        reference.
 
 **2026-10-11 finding: `DRT-0218` is not a placement problem.** Run `38094932339` placed legally
 and `drt` still aborted with `DRT-0218`, on one clock net (`clknet_12_3602__leaf…`). Probes on
