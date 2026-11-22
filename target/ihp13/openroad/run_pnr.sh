@@ -118,6 +118,19 @@
 #                           wrong-direction route guides onto the adjacent
 #                           preferred-direction layer before detailed routing
 #                           (DRT-0218 otherwise). Empty or unset: on.
+#   PNR_CTS_CLUSTERING_EXPONENT Passed through to cts: the clustering
+#                           exponent of its first build. Empty or unset:
+#                           OpenROAD's default (4). Setting it turns the
+#                           rebuild below off.
+#   PNR_CTS_REBUILD_EXPONENT Passed through to cts: the exponent of its
+#                           rebuild, or "off". Empty or unset: 3. When cts
+#                           finds near-empty levels in the register clock
+#                           tree it exits 75 before saving, and this driver
+#                           reruns it from dpl with PNR_CTS_BUILD=2 (and once
+#                           more, =3, if build 2 came out worse). A rebuild
+#                           is logged as `cts rebuild build=<n>` and does not
+#                           use the retry budget (stabilize-cts-tree-depth
+#                           design D2, D3). PNR_CTS_BUILD is set here only.
 #   PNR_DRY_RUN            If "1", print the planned per-stage commands
 #                           (in order, honoring resume-skip) and exit 0
 #                           without invoking OpenROAD at all - the cheap
@@ -539,6 +552,9 @@ for stage in "${STAGES[@]}"; do
     attempt=0
     max_attempts=$(( STAGE_RETRIES[$stage] + 1 ))
     rc=1
+    # cts builds the clock trees up to three times (stabilize-cts-tree-depth
+    # design D3): exit 75 asks for the next build from dpl.
+    [ "$stage" = "cts" ] && export PNR_CTS_BUILD=1
     while [ "$attempt" -lt "$max_attempts" ]; do
         attempt=$((attempt + 1))
         # Deliberately not `if run_stage_once ...; then` - when the
@@ -551,12 +567,20 @@ for stage in "${STAGES[@]}"; do
         if [ "$rc" -eq 0 ]; then
             break
         fi
+        if [ "$stage" = "cts" ] && [ "$rc" -eq 75 ] && [ "$PNR_CTS_BUILD" -lt 3 ]; then
+            export PNR_CTS_BUILD=$((PNR_CTS_BUILD + 1))
+            echo "::notice::stage 'cts' asked for a rebuild - running build ${PNR_CTS_BUILD} from dpl"
+            log_status "$stage" rebuild "build=${PNR_CTS_BUILD}"
+            attempt=$((attempt - 1))
+            continue
+        fi
         if [ "$attempt" -lt "$max_attempts" ]; then
             echo "::warning::stage '${stage}' failed (exit ${rc}) on attempt ${attempt}/${max_attempts} - retrying from its predecessor checkpoint"
             log_status "$stage" retrying "attempt=${attempt} exit=${rc}"
         fi
     done
 
+    [ "$stage" = "cts" ] && unset PNR_CTS_BUILD
     [ "$stage" = "dpl" ] && report_placement_state
     [ "$stage" = "grt" ] && report_routes_outside_core
     [ "$stage" = "ant" ] && report_ant_outcome

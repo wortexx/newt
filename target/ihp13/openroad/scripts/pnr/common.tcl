@@ -283,6 +283,41 @@ if { ![string is double -strict $pnr_macro_channel_max] || $pnr_macro_channel_ma
     error "PNR_MACRO_CHANNEL_MAX='$pnr_macro_channel_max' is not a width: use a positive number (microns)"
 }
 
+# CTS builds (stabilize-cts-tree-depth design D2, D3). cts.tcl builds the
+# trees with PNR_CTS_CLUSTERING_EXPONENT (empty: OpenROAD's default, 4). If
+# the register tree comes out with near-empty levels, it exits 75 and
+# run_pnr.sh reruns it with PNR_CTS_BUILD=2, which builds with
+# PNR_CTS_REBUILD_EXPONENT (default 3; `off` turns the rebuild off). Setting
+# PNR_CTS_CLUSTERING_EXPONENT also turns the rebuild off, so a run that asks
+# for a specific tree gets it. PNR_CTS_BUILD is set by the driver only.
+proc pnr_env_trim {name} {
+    if { [info exists ::env($name)] } { return [string trim $::env($name)] }
+    return ""
+}
+set pnr_cts_clustering_exponent [pnr_env_trim PNR_CTS_CLUSTERING_EXPONENT]
+if { $pnr_cts_clustering_exponent ne ""
+     && (![string is integer -strict $pnr_cts_clustering_exponent]
+         || $pnr_cts_clustering_exponent < 1) } {
+    error "PNR_CTS_CLUSTERING_EXPONENT='$pnr_cts_clustering_exponent' is not an exponent: use a positive integer, or empty for OpenROAD's default"
+}
+set pnr_cts_rebuild_exponent [pnr_env_trim PNR_CTS_REBUILD_EXPONENT]
+if { $pnr_cts_rebuild_exponent eq "" } { set pnr_cts_rebuild_exponent 3 }
+if { $pnr_cts_rebuild_exponent ne "off"
+     && (![string is integer -strict $pnr_cts_rebuild_exponent]
+         || $pnr_cts_rebuild_exponent < 1) } {
+    error "PNR_CTS_REBUILD_EXPONENT='$pnr_cts_rebuild_exponent' is not an exponent: use a positive integer, or off"
+}
+set pnr_cts_build [pnr_env_trim PNR_CTS_BUILD]
+if { $pnr_cts_build eq "" } { set pnr_cts_build 1 }
+if { $pnr_cts_build ni {1 2 3} } {
+    error "PNR_CTS_BUILD='$pnr_cts_build' is not a CTS build: use 1, 2 or 3"
+}
+set pnr_cts_rebuild [expr {$pnr_cts_clustering_exponent eq ""
+                           && $pnr_cts_rebuild_exponent ne "off"}]
+if { $pnr_cts_build > 1 && !$pnr_cts_rebuild } {
+    error "PNR_CTS_BUILD=$pnr_cts_build, but the rebuild is off (PNR_CTS_CLUSTERING_EXPONENT set, or PNR_CTS_REBUILD_EXPONENT=off)"
+}
+
 # OpenROAD's per-process default is 1 thread (`threads_ = 1` in
 # OpenRoad.cc), and set_thread_count is what feeds STA and the global
 # router their thread budgets. chip.tcl set this once globally (line 93)
@@ -579,6 +614,180 @@ proc pnr_placement_violations {rpt} {
         return "no markers in report"
     }
     return [join $parts ", "]
+}
+
+# -----------------------------------------------------------------------
+# pnr_report_clock_trees: the shape of every clock tree CTS built
+# (stabilize-cts-tree-depth design D1). TritonCTS names a tree's buffers
+#   clkbuf_0_<net>                      root
+#   clkbuf_<level>_<i>_<k>_<net>        H-tree level 1..depth
+#   clkbuf_<level>_<i>__f_<net>         (same, another naming of the level)
+#   clkbuf_leaf_<i>_<net>               sink-cluster buffers
+# and its H-tree stops adding levels only when no branch's sinks span more
+# than the resizer's max wire length, so a tree right at that limit can
+# grow two levels on a small placement change (runs 44382400639 and
+# 44708127322: depth 11 and 13, 14,380 and 20,527 buffers). Per tree, logs
+# and appends to pnr_status.log
+#   cts-tree <net> depth=<d> buffers=<n> fanout_le2=<m> span_um=<s>
+# fanout_le2 counts buffers whose output drives one or two loads; span_um
+# is the widest bounding box (x plus y extent) of the instances driven by
+# one buffer of the deepest level. That shows branches whose sinks lie far
+# apart, the cause of the extra levels, but it is not the stop rule's own
+# number: in the built tree it can exceed the limit the rule passed (3,661
+# um in 44382400639's checkpoint, which stopped under 3,162 um).
+# Report only: the caller must not let it fail the stage.
+# -----------------------------------------------------------------------
+proc pnr_report_clock_trees {} {
+    set block [ord::get_db_block]
+    # tree net -> dict of depth, buffers, fanout_le2, and per level the
+    # buffers of that level (only the deepest one is kept).
+    set trees [dict create]
+    set bufs {}
+    foreach inst [$block getInsts] {
+        set n [$inst getName]
+        if { ![string match clkbuf_* $n] } { continue }
+        if { [regexp {^clkbuf_0_(\D.*)$} $n -> net] } {
+            set level 0
+        } elseif { [regexp {^clkbuf_(\d+)_\d+_(?:\d+|_f)_(.+)$} $n -> level net] } {
+        } elseif { [regexp {^clkbuf_leaf_\d+_(.+)$} $n -> net] } {
+            set level leaf
+        } else {
+            continue
+        }
+        lappend bufs [list $inst $level $net]
+    }
+    foreach b $bufs {
+        lassign $b inst level net
+        if { ![dict exists $trees $net] } {
+            dict set trees $net [dict create depth 0 buffers 0 fanout_le2 0 deepest {}]
+        }
+        set t [dict get $trees $net]
+        dict incr t buffers
+        set loads {}
+        foreach it [$inst getITerms] {
+            if { ![$it isOutputSignal] } { continue }
+            set onet [$it getNet]
+            if { $onet eq "NULL" } { continue }
+            foreach lt [$onet getITerms] {
+                if { [$lt getInst] ne $inst } { lappend loads [$lt getInst] }
+            }
+        }
+        if { [llength $loads] <= 2 } { dict incr t fanout_le2 }
+        if { $level ne "leaf" } {
+            if { $level > [dict get $t depth] } {
+                dict set t depth $level
+                dict set t deepest {}
+            }
+            if { $level == [dict get $t depth] } {
+                dict lappend t deepest $loads
+            }
+        }
+        dict set trees $net $t
+    }
+    dict for {net t} $trees {
+        set span 0
+        foreach loads [dict get $t deepest] {
+            if { [llength $loads] < 2 } { continue }
+            set xs {}; set ys {}
+            foreach l $loads {
+                set bb [$l getBBox]
+                lappend xs [expr {([$bb xMin] + [$bb xMax]) / 2}]
+                lappend ys [expr {([$bb yMin] + [$bb yMax]) / 2}]
+            }
+            set s [expr {[tcl::mathfunc::max {*}$xs] - [tcl::mathfunc::min {*}$xs]
+                         + [tcl::mathfunc::max {*}$ys] - [tcl::mathfunc::min {*}$ys]}]
+            if { $s > $span } { set span $s }
+        }
+        set line [format "depth=%d buffers=%d fanout_le2=%d span_um=%.0f" \
+                    [dict get $t depth] [dict get $t buffers] \
+                    [dict get $t fanout_le2] [ord::dbu_to_microns $span]]
+        utl::report "Clock tree $net: $line"
+        pnr_status cts-tree $net $line
+    }
+    return $trees
+}
+
+# -----------------------------------------------------------------------
+# pnr_cts_exponent_options: the clock_tree_synthesis options for this
+# build (stabilize-cts-tree-depth design D2). Builds 1 and 3 use
+# PNR_CTS_CLUSTERING_EXPONENT (none: OpenROAD's default), build 2 the
+# rebuild exponent.
+# -----------------------------------------------------------------------
+proc pnr_cts_exponent_options {} {
+    global pnr_cts_build pnr_cts_clustering_exponent pnr_cts_rebuild_exponent
+    if { $pnr_cts_build == 2 } {
+        return [list -clustering_exponent $pnr_cts_rebuild_exponent]
+    }
+    if { $pnr_cts_clustering_exponent ne "" } {
+        return [list -clustering_exponent $pnr_cts_clustering_exponent]
+    }
+    return {}
+}
+
+# -----------------------------------------------------------------------
+# pnr_cts_choose_build: keep this CTS build or ask for a rebuild
+# (stabilize-cts-tree-depth design D2). Takes pnr_report_clock_trees'
+# result. The register tree is the one with the most buffers; it is deep
+# when more than 10 % of its buffers drive one or two loads. The probe of
+# 2026-11-22 found 0.3-0.7 % in shallow trees and 18-40 % in deep ones:
+# the extra H-tree levels are near-empty. Appends
+#   cts-build <n> exponent=<e> net=<net> depth=<d> buffers=<b> fanout_le2=<m> deep=<0|1>
+# and, when keeping, `cts-kept build=<n>`. Returns keep or rebuild:
+#   build 1: keep unless deep (then saves its counts for build 2);
+#   build 2: keep unless deep with more near-empty buffers than build 1;
+#   build 3: build 1's options again, so the same tree; always keep.
+# With the rebuild off, always keeps.
+# -----------------------------------------------------------------------
+proc pnr_cts_choose_build {trees} {
+    global pnr_cts_build pnr_cts_rebuild save_dir
+    set first_file ${save_dir}/cts_build1.txt
+    if { $pnr_cts_build == 1 } { file delete -force $first_file }
+
+    set reg ""
+    set best -1
+    dict for {net t} $trees {
+        if { [dict get $t buffers] > $best } {
+            set reg $net
+            set best [dict get $t buffers]
+        }
+    }
+    if { $reg eq "" } {
+        utl::report "CTS build $pnr_cts_build: no clock tree found, keeping it"
+        pnr_status cts-kept "build=$pnr_cts_build"
+        return keep
+    }
+    set t [dict get $trees $reg]
+    set buffers [dict get $t buffers]
+    set le2 [dict get $t fanout_le2]
+    set deep [expr {$le2 > 0.10 * $buffers}]
+    set exp_opts [pnr_cts_exponent_options]
+    set exponent [expr {[llength $exp_opts] ? [lindex $exp_opts 1] : "default"}]
+    set line [format "exponent=%s net=%s depth=%d buffers=%d fanout_le2=%d deep=%d" \
+                  $exponent $reg [dict get $t depth] $buffers $le2 $deep]
+    utl::report "CTS build $pnr_cts_build: $line"
+    pnr_status cts-build "$pnr_cts_build $line"
+
+    set decision keep
+    if { $pnr_cts_rebuild && $deep } {
+        if { $pnr_cts_build == 1 } {
+            set f [open $first_file w]
+            puts $f $le2
+            close $f
+            set decision rebuild
+        } elseif { $pnr_cts_build == 2 } {
+            set f [open $first_file r]
+            set first_le2 [string trim [read $f]]
+            close $f
+            if { $le2 > $first_le2 } { set decision rebuild }
+        }
+    }
+    if { $decision eq "keep" } {
+        utl::report "CTS build $pnr_cts_build kept"
+        pnr_status cts-kept "build=$pnr_cts_build"
+    } else {
+        utl::report "CTS build $pnr_cts_build: register tree has near-empty levels, rebuild requested"
+    }
+    return $decision
 }
 
 # -----------------------------------------------------------------------

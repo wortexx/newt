@@ -36,9 +36,27 @@ set err [catch {
     # evaluate buffer max wire length.
     set_wire_rc -clock -layer Metal4
     set_wire_rc -signal -layer Metal4
-    clock_tree_synthesis -buf_list $ctsBuf -root_buf $ctsBufRoot \
-                         -sink_clustering_enable \
-                         -obstruction_aware
+    # Build 1, 2 or 3 (stabilize-cts-tree-depth design D2): only the
+    # clustering exponent differs between builds.
+    set cts_cmd [list clock_tree_synthesis -buf_list $ctsBuf -root_buf $ctsBufRoot \
+                     -sink_clustering_enable -obstruction_aware \
+                     {*}[pnr_cts_exponent_options]]
+    # utl::report formats its message, so the list's braces become quotes.
+    utl::report "CTS build $pnr_cts_build: [string map {\{ \" \} \"} $cts_cmd]"
+    {*}$cts_cmd
+
+    # Each tree's depth, size and span, before anything moves its buffers
+    # (stabilize-cts-tree-depth design D1). The report never fails the
+    # stage; without it, the build is kept.
+    if { [catch { pnr_report_clock_trees } trees] } {
+        utl::report "WARNING: clock tree report failed: $trees"
+        set trees {}
+    }
+    # Near-empty levels in the register tree: exit 75 before anything is
+    # saved, and run_pnr.sh rebuilds from dpl (design D2, D3).
+    if { [pnr_cts_choose_build $trees] eq "rebuild" } {
+        exit 75
+    }
 
     # Repair wire length between clock pad and clock-tree root
     utl::report "Repair clock nets"
