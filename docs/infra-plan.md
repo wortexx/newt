@@ -1507,6 +1507,69 @@ from placements with overlapping cells, on both sides alike.
         it lands, `44382400639` stays the PPA reference, and `44708127322` is the DRC
         reference.
 
+      **The register clock tree, kept shallow, 2026-11-22/23 (run `45035313880`).** Change
+      `stabilize-cts-tree-depth` (#107).
+
+      - **Cause.** Each H-tree branch's sinks are split between its two children by
+        capacitated k-means (`refineBranchingPointsWithClustering`). Near level 11 a few
+        sinks assigned to the far side of a branch decide whether its sinks span more than
+        3,162 µm, and so whether the tree stops. CTS is deterministic for a given placement and
+        options (local reruns from both runs' `dpl` checkpoints reproduced the VM trees
+        exactly), but a 0.16 µm move upstream is enough to flip the outcome.
+      - **Probe (local, from each run's `dpl` checkpoint, `clk_i_regs` right after
+        `clock_tree_synthesis`).** A = `44382400639`, B = `44708127322`; clock power at
+        uniform activity 0.1, before repair.
+
+        | options | depth A / B | buffers A / B | fanout ≤ 2 A / B | clock power A / B |
+        | --- | --- | --- | --- | --- |
+        | lane default | 11 / 13 | 14,380 / 20,527 | 47 / 8,239 | 0.352 / 0.611 W |
+        | `-clustering_exponent 3` | 13 / 11 | 20,524 / 14,383 | 8,239 / 47 | 0.576 / 0.357 W |
+        | `-clustering_exponent 5` | 13 / 13 | 19,981 / 20,370 | 7,290 / 7,998 | 0.547 / 0.557 W |
+        | `-sink_clustering_max_diameter 50` | 12 / 13 | 20,848 / 25,025 | 152 / 4,488 | 0.541 / 0.701 W |
+
+        `-clustering_unbalance_ratio` and `-sink_clustering_size` change nothing here: with a
+        maximum fanout set, the split capacity is fixed at half the sinks and the cluster size
+        is capped at 8. No single setting gives the shallow tree on both placements, but the
+        default and exponent 3 between them always do.
+      - **Rule.** `cts.tcl` reports every tree (`cts-tree` lines) and tests the register tree,
+        the one with the most buffers: it is deep when more than 10 % of its buffers drive one
+        or two sinks (shallow trees 0.3–0.7 %, deep 18–40 %). A deep build 1 exits 75 before
+        anything is saved, and `run_pnr.sh` reruns the stage from `dpl` with exponent 3
+        (`PNR_CTS_BUILD=2`). Build 2 is kept unless it is deep and worse than build 1; then
+        build 3 repeats build 1. Knobs: `PNR_CTS_CLUSTERING_EXPONENT` (fixes build 1 and turns
+        the rebuild off) and `PNR_CTS_REBUILD_EXPONENT` (default 3, `off` restores a single
+        build).
+      - **The measured run, `45035313880`.** On `main` (`e9affef`) from `floorplan`, lane
+        defaults, 12 h 57 m in all. Its `dpl` report is byte-identical to `44708127322`'s, so
+        the two compare tree against tree on one placement. Build 1 gave B's tree again
+        (13 levels, 20,527 buffers, 8,239 near-empty, `deep=1`), the driver logged
+        `cts rebuild build=2`, and build 2 gave 11 levels, 14,383 buffers and 47 near-empty
+        (`cts-kept build=2`). Build 1 took 3 minutes and the whole stage 37 minutes, against
+        32 and 42 minutes in the two earlier runs. `drt ok`, `final ok`.
+
+        | | `44382400639` | `44708127322` | `45035313880` |
+        | --- | ---: | ---: | ---: |
+        | placement | A | B | B |
+        | `clk_i_regs` H-tree levels / buffers | 11 / 14,380 | 13 / 20,527 | **11 / 14,383** |
+        | clock power / total power at `grt` | 0.373 / 1.04 W | 0.668 / 1.34 W | **0.372 / 1.04 W** |
+        | cell area at `grt` | 18.27 mm² | 18.85 mm² | **18.32 mm²** |
+        | WNS / TNS at `grt` | −12.05 ns / −124,006 | −13.20 ns / −98,288 | **−12.89 ns / −98,518** |
+        | `grt` overflow | 7,153 | 9,049 | **6,027** |
+        | router markers after iteration 28 | 5 | 120 | **22** |
+        | antenna nets / pins after `drt` | 8,602 / 11,270 | 8,685 / 11,390 | **8,449 / 11,159** |
+        | antenna jumpers | 15,557 | 16,208 | 17,289 |
+        | `drt` time | 10 h 10 m | 21 h 44 m | **8 h 04 m** |
+
+        - **On the same placement the shallow tree wins everywhere but TNS,** which is level:
+          −0.30 W of clock power, −0.53 mm², WNS +0.31 ns, overflow −34 %, router markers 120 →
+          22, and `drt` in less than half the time.
+        - **WNS is 0.84 ns worse than `44382400639`'s.** That is over the 0.5 ns the change set
+          for flagging, and was reported before the rule was kept. It comes from placement B:
+          the deep tree on that placement was worse still (−13.20 ns), and placement B has the
+          better TNS. The rule was kept (2026-11-23).
+        - **References from now on:** `45035313880` for PPA and the current placement;
+          `44708127322` stays the DRC reference (same placement and geometry).
+
 **2026-10-11 finding: `DRT-0218` is not a placement problem.** Run `38094932339` placed legally
 and `drt` still aborted with `DRT-0218`, on one clock net (`clknet_12_3602__leaf…`). Probes on
 branch `drt-0218-probe` (runs `38138040839`, `38163283136`, `38165507881`, `38169388017`)
