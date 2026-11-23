@@ -230,6 +230,20 @@ if { ![string is double -strict $pnr_grt_sram_end_metal5_adjust] ||
      $pnr_grt_sram_end_metal5_adjust < 0 || $pnr_grt_sram_end_metal5_adjust >= 1 } {
     error "PNR_GRT_SRAM_END_METAL5_ADJUST='$pnr_grt_sram_end_metal5_adjust' is not an adjustment: use a number in \[0, 1)"
 }
+# Which short ends get the strip. `both`: both ends of every SRAM. `pin`:
+# only SRAMs wider than tall, at the end nearest their A_DIN[0] pin, where
+# the router's last Metal5 shorts bunch (run 45035313880, group D). The
+# both-ends strips at the R90 macros' pin rows grew another group from 1 to
+# 6 shorts in run 43937159728, so taller-than-wide SRAMs get none. Default
+# both (openspec/changes/clear-remaining-router-markers design D1).
+if { [info exists ::env(PNR_GRT_SRAM_END_SIDES)] && [string trim $::env(PNR_GRT_SRAM_END_SIDES)] ne "" } {
+    set pnr_grt_sram_end_sides [string trim $::env(PNR_GRT_SRAM_END_SIDES)]
+} else {
+    set pnr_grt_sram_end_sides both
+}
+if { $pnr_grt_sram_end_sides ni {both pin} } {
+    error "PNR_GRT_SRAM_END_SIDES='$pnr_grt_sram_end_sides' is not an end choice: use both or pin"
+}
 # Whether the power grid keeps pdngen's channel-repair straps
 # (power_grid_stripes.tcl, floorplan stage only). pdngen always repairs
 # channels; it put 10 partial-height TopMetal2 straps in the macro-row gaps,
@@ -445,15 +459,16 @@ proc pnr_apply_routing_layers {} {
 # the global router and each one scales the capacity left by the ones before
 # it, so the regions are added only on the first call in a process to keep
 # this proc idempotent (design D1's task 1.1 check). The SRAM-end strips
-# (pnr_grt_sram_end_metal5_adjust, default 0 = none) are added in the same
-# first call, after the footprints, so inside a strip both apply.
+# (pnr_grt_sram_end_metal5_adjust, default 0 = none; at the ends chosen by
+# pnr_grt_sram_end_sides) are added in the same first call, after the
+# footprints, so inside a strip both apply.
 set pnr_sram_metal5_regions_added 0
 proc pnr_apply_sram_metal5_adjustment {} {
     global pnr_grt_sram_metal5_adjust pnr_grt_sram_end_metal5_adjust \
-        pnr_sram_end_strip_um pnr_sram_metal5_regions_added
+        pnr_grt_sram_end_sides pnr_sram_end_strip_um pnr_sram_metal5_regions_added
     if { $pnr_grt_sram_metal5_adjust == 0 && $pnr_grt_sram_end_metal5_adjust == 0 } { return }
     if { $pnr_sram_metal5_regions_added } {
-        set ends [expr {$pnr_grt_sram_end_metal5_adjust != 0 ? " (ends $pnr_grt_sram_end_metal5_adjust)" : ""}]
+        set ends [expr {$pnr_grt_sram_end_metal5_adjust != 0 ? " (ends $pnr_grt_sram_end_metal5_adjust, $pnr_grt_sram_end_sides)" : ""}]
         utl::report "SRAM Metal5 adjustment: $pnr_grt_sram_metal5_adjust$ends already applied in this process"
         return
     }
@@ -463,33 +478,49 @@ proc pnr_apply_sram_metal5_adjustment {} {
     foreach inst [$block getInsts] {
         if { ![string match RM_IHP* [[$inst getMaster] getName]] } { continue }
         set bbox [$inst getBBox]
-        lappend srams [list [expr {double([$bbox xMin]) / $dbu}] [expr {double([$bbox yMin]) / $dbu}] \
-                            [expr {double([$bbox xMax]) / $dbu}] [expr {double([$bbox yMax]) / $dbu}]]
+        lappend srams [list $inst [expr {double([$bbox xMin]) / $dbu}] [expr {double([$bbox yMin]) / $dbu}] \
+                                  [expr {double([$bbox xMax]) / $dbu}] [expr {double([$bbox yMax]) / $dbu}]]
     }
     if { $pnr_grt_sram_metal5_adjust != 0 } {
-        foreach box $srams {
-            set_global_routing_region_adjustment $box -layer Metal5 -adjustment $pnr_grt_sram_metal5_adjust
+        foreach sram $srams {
+            set_global_routing_region_adjustment [lrange $sram 1 4] -layer Metal5 -adjustment $pnr_grt_sram_metal5_adjust
         }
         utl::report "SRAM Metal5 adjustment: $pnr_grt_sram_metal5_adjust over [llength $srams] regions"
     }
     if { $pnr_grt_sram_end_metal5_adjust != 0 } {
-        # Both short ends: west/east when the macro is wider than tall,
-        # south/north otherwise.
+        # `both`: both short ends, west/east when the macro is wider than
+        # tall, south/north otherwise. `pin`: wider-than-tall macros only, at
+        # the end nearest the centre of their A_DIN[0] pin shape.
         set s $pnr_sram_end_strip_um
         set n 0
-        foreach box $srams {
-            lassign $box x0 y0 x1 y1
-            if { $x1 - $x0 > $y1 - $y0 } {
-                set strips [list [list $x0 $y0 [expr {$x0 + $s}] $y1] [list [expr {$x1 - $s}] $y0 $x1 $y1]]
+        foreach sram $srams {
+            lassign $sram inst x0 y0 x1 y1
+            set wide [expr {$x1 - $x0 > $y1 - $y0}]
+            set west [list $x0 $y0 [expr {$x0 + $s}] $y1]
+            set east [list [expr {$x1 - $s}] $y0 $x1 $y1]
+            if { $pnr_grt_sram_end_sides eq "both" } {
+                if { $wide } {
+                    set strips [list $west $east]
+                } else {
+                    set strips [list [list $x0 $y0 $x1 [expr {$y0 + $s}]] [list $x0 [expr {$y1 - $s}] $x1 $y1]]
+                }
+            } elseif { !$wide } {
+                set strips {}
             } else {
-                set strips [list [list $x0 $y0 $x1 [expr {$y0 + $s}]] [list $x0 [expr {$y1 - $s}] $x1 $y1]]
+                set iterm [$inst findITerm {A_DIN[0]}]
+                if { $iterm eq "NULL" || $iterm eq "" } {
+                    error "SRAM-end Metal5 adjustment (PNR_GRT_SRAM_END_SIDES=pin): [$inst getName] ([[$inst getMaster] getName]) has no A_DIN\[0\] pin"
+                }
+                set pbox [$iterm getBBox]
+                set pin_x [expr {double([$pbox xMin] + [$pbox xMax]) / 2 / $dbu}]
+                set strips [list [expr {$pin_x < ($x0 + $x1) / 2 ? $west : $east}]]
             }
             foreach strip $strips {
                 set_global_routing_region_adjustment $strip -layer Metal5 -adjustment $pnr_grt_sram_end_metal5_adjust
                 incr n
             }
         }
-        utl::report "SRAM-end Metal5 adjustment: $pnr_grt_sram_end_metal5_adjust over $n strips ($s um)"
+        utl::report "SRAM-end Metal5 adjustment: $pnr_grt_sram_end_metal5_adjust over $n strips ($s um, $pnr_grt_sram_end_sides end)"
     }
     set pnr_sram_metal5_regions_added 1
 }

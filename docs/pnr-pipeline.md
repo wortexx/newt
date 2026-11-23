@@ -32,11 +32,12 @@ independent of this workflow — the backstop for a `stop` job that never ran.
 
 ### Manual dispatch inputs
 
-`workflow_dispatch` accepts sixteen optional inputs, all empty by default
+`workflow_dispatch` accepts seventeen optional inputs, all empty by default
 (`resume_from_run`, `resume_exclude`, `stop_after`, `gpl_density`,
 `gpl_keep_resize`, `die_scale`, `dpl_legalizer`, `dpl_max_displacement`,
 `skip_grt_repair`, `drt_end_iter`, `antenna_repair`, `grt_metal2_adjust`,
-`sram_metal5_adjust`, `sram_end_metal5_adjust`, `pdn_repair_channels`,
+`sram_metal5_adjust`, `sram_end_metal5_adjust`, `sram_end_sides`,
+`pdn_repair_channels`,
 `cell_pad_sites` — matching `pnr.yml`'s
 `inputs:` keys exactly). With all of them empty, a dispatched run
 behaves exactly like a scheduled run:
@@ -179,7 +180,20 @@ behaves exactly like a scheduled run:
   Metal5 shorts cross a middle-row SRAM 8–24 µm inside its east end (run
   41133143603; change `clear-sram-corner-router-shorts`, design D4). Every
   routing stage logs `SRAM-end Metal5 adjustment: <v> over <n> strips
-  (40 um)`. The same resume rule as `sram_metal5_adjust` applies.
+  (40 um, <both|pin> end)`. The same resume rule as `sram_metal5_adjust`
+  applies.
+
+- `sram_end_sides` — which short ends get the `sram_end_metal5_adjust`
+  strips. Feeds `PNR_GRT_SRAM_END_SIDES`. `both` (empty means `both`) puts
+  one at both short ends of every SRAM, as above. `pin` puts one only on
+  each SRAM wider than tall, at the short end nearest the centre of its
+  `A_DIN[0]` pin (west at R0, east at R180 for every SRAM master in the
+  PDK), and none on SRAMs taller than wide, whose pin rows lie along a long
+  edge. A wider-than-tall SRAM with no `A_DIN[0]` pin fails the stage. Any
+  other value fails the first stage that runs, naming the variable. In run
+  43937159728 the both-ends strips at the R90 I-cache macros' ends grew a
+  short group from 1 to 6 markers (change `clear-remaining-router-markers`,
+  design D1). The same resume rule as `sram_metal5_adjust` applies.
 
 - `pdn_repair_channels` — `0` removes the power-grid generator's
   channel-repair straps after `pdngen`, behind a before/after connectivity
