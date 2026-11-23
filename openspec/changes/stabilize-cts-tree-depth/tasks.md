@@ -126,10 +126,12 @@ Local checkpoints: `basilisk.dpl` and `basilisk.cts` of runs `44382400639` and `
 
 ## 4. Measured run
 
-- [ ] 4.1 **[long-run]** *(ask the user first)* Dispatch the P&R lane on `main` with every input empty and no resume. Save `pnr-reports` under `target/ihp13/openroad/out/ci-<run>/`. Verify:
+- [x] 4.1 **[long-run]** *(ask the user first)* Dispatch the P&R lane on `main` with every input empty and no resume. Save `pnr-reports` under `target/ihp13/openroad/out/ci-<run>/`. Verify:
   - the `cts-build`/`cts-kept` lines and the `cts-tree` line for `clk_i_regs`, with the kept tree below the 10 % threshold;
   - `drt ok` and `final ok`.
-- [ ] 4.2 **[edit]** Compare with `44382400639` and `44708127322`: tree shape; clock and total power; area; WNS/TNS at `grt`; router markers; antenna counts. Report a WNS loss of more than 0.5 ns against `44382400639` to the user before keeping the rule. Add a `docs/infra-plan.md` record with the cause, the probe table, the rule and this run. Verify that the record's numbers match the reports.
+  - *Run `45035313880` (`e9affef`, 2026-11-22/23): build 1 deep (13 levels, 20,527 buffers, 8,239 near-empty), `cts rebuild build=2`, build 2 kept (11 levels, 14,383 buffers, 47 near-empty, 0.3 %); `drt ok`, `final ok`.*
+- [x] 4.2 **[edit]** Compare with `44382400639` and `44708127322`: tree shape; clock and total power; area; WNS/TNS at `grt`; router markers; antenna counts. Report a WNS loss of more than 0.5 ns against `44382400639` to the user before keeping the rule. Add a `docs/infra-plan.md` record with the cause, the probe table, the rule and this run. Verify that the record's numbers match the reports.
+  - *Same placement as `44708127322` (byte-identical `dpl` report). At `grt` against it: clock power 0.668 → 0.372 W, area 18.85 → 18.32 mm², WNS −13.20 → −12.89 ns, TNS level, router markers 120 → 22. WNS is 0.84 ns worse than `44382400639`'s (placement A); reported to the user, who kept the rule on 2026-11-23. Record in `docs/infra-plan.md` Phase 11.*
 
 ## Workflow follow-up
 
