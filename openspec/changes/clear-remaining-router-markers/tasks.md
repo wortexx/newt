@@ -63,24 +63,73 @@ Local inputs: `45035313880`'s `basilisk.cts` checkpoint (from the `pnr-checkpoin
 
 ## 3. Measured runs (design D5)
 
-- [ ] 3.1 **[long-run]** *(ask the user first)* Run 1: dispatch on `main` with `pdn_repair_channels=0`, everything else empty, no resume. Save `pnr-reports` under `target/ihp13/openroad/out/ci-<run>/`. Verify:
+- [x] 3.1 **[long-run]** *(ask the user first)* Run 1: dispatch on `main` with `pdn_repair_channels=0`, everything else empty, no resume. Save `pnr-reports` under `target/ihp13/openroad/out/ci-<run>/`. Verify:
   - the floorplan logged repair off, 0 short straps and both power-grid checks `ok`;
   - the `cts-kept` line;
   - `drt ok` and `final ok`.
 
   Compare with `45035313880` per D5, and stop at any row that says ask.
-- [ ] 3.2 **[long-run]** *(ask the user first)* Run 2: resume from run 1 with `resume_exclude=grt grt_repaired ant_jumper ant drt final`, `pdn_repair_channels=0 sram_end_metal5_adjust=0.5 sram_end_sides=pin`. Save the reports. Verify:
+
+  **Result (2026-11-24): run `45262070315`, 11 h 0 min, all stages ok.**
+  - Floorplan: `PDN channel repair: off`, `channel-repair straps removed: 10 (1404 shapes under them)`, both checks `ok (0 pre-existing)`, 0 short straps.
+  - CTS: build 1 deep (14 levels, 32,143 buffers), `cts-kept build=2` (11 levels, 14,383 buffers, as in the reference).
+  - `drt ok droute_end_iter=28`, `final ok`.
+
+  | | `45035313880` | run 1 |
+  | --- | ---: | ---: |
+  | WNS / TNS at `grt` | −12.89 / −98,517.91 ns | −8.75 / −73,790.32 ns |
+  | `grt` overflow (max H / V / total) | 13 / 13 / 6,027 | 12 / 12 / 6,025 |
+  | markers, total | 22 | 10 |
+  | group B (repair-strap pads) | 7 | 0 |
+  | group D (bank 0 cut `__1` east end) | 14 | 1, Metal5 at (6,997.4, 674.1), 11 µm north of the macro's top edge |
+  | group A (south of `cut_high`) | 1 | 1, Metal2 at (487.7, 827.8) |
+  | new: `slink_rcv_clk_i_0_` vs VDD, Metal3 | 0 | 8, x 6,228–6,232, y 1,255–1,331 |
+  | antenna nets / pins after `drt` | 8,449 / 11,159 | 8,319 / 10,908 |
+  | clock / total power at `grt` | 0.372 / 1.04 W | 0.376 / 1.04 W |
+  | design area after CTS | 18,323,579 µm² | 18,293,746 µm² |
+  | `drt` time | 7 h 39 min | 5 h 40 min |
+
+  The macros are placed identically. The new cluster is one clock net, the serial-link receive clock, shorting VDD on Metal3. It is present in every intermediate report from iteration 5 (251 markers in the window) to the end, and absent from all of the reference's. Its clock tree went from a 65 µm span in the reference to 2,517 µm here (depth 3, 44 → 48 buffers), so the strap removal moved its registers apart in placement. D5: "B clear, WNS more than 0.5 ns worse" does not apply (WNS is 4.14 ns better).
+
+  *The new cluster, probed on run 1's `drt` checkpoint.* The shorting net is the pad net `slink_rcv_clk_i_0_`, routed with `CTS_NDR_0`, which CTS gives to root-level clock nets.
+  - In the reference, the pad (`pad_slink_clk_i`, east edge, at (7,288, 1,020)) drives the tree's root buffer directly, at (7,073, 3,145).
+  - In run 1, the serial-link registers spread out and the root buffer sits at (5,243, 2,601). The pad net is now longer than the 3,162 µm maximum wire length, so `repair_clock_nets` inserted `wire504239` (`sg13g2_buf_16`) at (6,215, 1,852).
+  - The pad-to-`wire504239` route runs a vertical Metal3 trunk from y 1,203 to y 1,377 at x 6,225–6,234. That is inside the via column of the VDD TopMetal2 strap at x 6,230.16, which drops a 6 µm-wide via stack to every Metal1 rail, one every 7.56 µm. The 8 shorts sit on those rails.
+
+  The power grid there is identical in both runs; only the clock route moved onto it. The serial-link cluster comes from the placement shift that the strap removal caused, not from the grid change. Run 2 resumes from run 1's `cts` and keeps `wire504239` where it is, so the cluster can stay. Its routing could still change, because `grt` reruns.
+- [x] 3.2 **[long-run]** *(ask the user first)* Run 2: resume from run 1 with `resume_exclude=grt grt_repaired ant_jumper ant drt final`, `pdn_repair_channels=0 sram_end_metal5_adjust=0.5 sram_end_sides=pin`. Save the reports. Verify:
   - `cts` and earlier were restored;
   - every routing stage logged the pin-end strips with the count from 2.2;
   - `drt ok`, `final ok`.
 
   Compare with run 1 and `45035313880` per D5, and give the user the outcome row.
-- [ ] 3.3 **[edit]** Add a `docs/infra-plan.md` record: the 22 markers by group, D3's IR figures, D4's window counts, both runs' table and the outcome row. Verify that the numbers match the reports.
+
+  **Result (2026-11-24): run `45365266924`, 7 h 36 min, 0 markers.**
+  - `floorplan` through `cts` were logged `skipped resume`.
+  - `SRAM-end Metal5 adjustment: 0.5 over 20 strips (40 um, pin end)` appears once each in `grt`, `grt_repair`, `ant` and `drt`, the count from 2.2.
+  - `drt ok droute_end_iter=28`, `drt-violations final=0`, `final ok`.
+
+  | | `45035313880` | run 1 `45262070315` | run 2 `45365266924` |
+  | --- | ---: | ---: | ---: |
+  | repair straps / power-grid checks | 10 / clean | 0 / ok | 0 / ok (restored) |
+  | WNS at `grt` | −12.89 ns | −8.75 ns | −7.63 ns |
+  | TNS at `grt` | −98,517.91 ns | −73,790.32 ns | −70,143.86 ns |
+  | `grt` overflow (max H / V / total) | 13 / 13 / 6,027 | 12 / 12 / 6,025 | 13 / 12 / 6,795 |
+  | markers: B / D / A / other | 7 / 14 / 1 / 0 | 0 / 1 / 1 / 8 | 0 / 0 / 0 / 0 |
+  | antenna nets / pins after `drt` | 8,449 / 11,159 | 8,319 / 10,908 | 8,317 / 10,848 |
+  | clock / total power at `grt` | 0.372 / 1.04 W | 0.376 / 1.04 W | 0.378 / 1.05 W |
+  | design area | 18,323,579 µm² | 18,293,746 µm² | 18,293,746 µm² |
+  | `drt` time | 7 h 39 min | 5 h 40 min | 5 h 47 min |
+
+  The serial-link clock shorts were still in run 2's iteration-20 report (33 of its 44 markers), and gone by iteration 25. Its pad net still has `wire504239` at the same place, so the router cleared it late rather than avoiding it. This deserves a look if a later run brings it back.
+
+  **Outcome row: adopt.** B and D have no markers, there are 0 in total, and WNS is 5.26 ns better than `45035313880` (within 0.5 ns is required, worse would fail).
+- [x] 3.3 **[edit]** Add a `docs/infra-plan.md` record: the 22 markers by group, D3's IR figures, D4's window counts, both runs' table and the outcome row. Verify that the numbers match the reports.
 
 ## 4. Adoption (design D6)
 
-- [ ] 4.1 **[edit]** Only on D5's adopt row: in `common.tcl`, flip the empty defaults to repair 0, end share 0.5 and sides `pin`. Leave `power_grid_stripes.tcl`'s fallback at 1. Update `pnr.yml`'s input descriptions, `run_pnr.sh`'s header and `docs/pnr-pipeline.md`. Name run 2 as the PPA and router reference in `docs/infra-plan.md`. Verify with the image call from 1.1 that empty inputs now parse as 0 / 0.5 / `pin`, and that `chip.tcl`'s path still keeps the straps.
-- [ ] 4.2 **[edit]** Not on the adopt row: revert the default clauses of the two MODIFIED requirements in `specs/pnr-flow/spec.md` (and its Default scenarios) to today's defaults, keeping the pin-end mode. Verify with `openspec validate --strict`. On the adopt row, mark this task "not needed".
+- [x] 4.1 **[edit]** Only on D5's adopt row: in `common.tcl`, flip the empty defaults to repair 0, end share 0.5 and sides `pin`. Leave `power_grid_stripes.tcl`'s fallback at 1. Update `pnr.yml`'s input descriptions, `run_pnr.sh`'s header and `docs/pnr-pipeline.md`. Name run 2 as the PPA and router reference in `docs/infra-plan.md`. Verify with the image call from 1.1 that empty inputs now parse as 0 / 0.5 / `pin`, and that `chip.tcl`'s path still keeps the straps.
+- [x] 4.2 **[edit]** Not on the adopt row: revert the default clauses of the two MODIFIED requirements in `specs/pnr-flow/spec.md` (and its Default scenarios) to today's defaults, keeping the pin-end mode. Verify with `openspec validate --strict`. On the adopt row, mark this task "not needed". **Not needed:** run 2 met the adopt row, and the spec deltas already state the adopted defaults.
 
 ## Workflow follow-up
 
