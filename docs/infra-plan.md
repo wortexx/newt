@@ -1570,6 +1570,66 @@ from placements with overlapping cells, on both sides alike.
         - **References from now on:** `45035313880` for PPA and the current placement;
           `44708127322` stays the DRC reference (same placement and geometry).
 
+      **The last router markers cleared, 2026-11-23/24 (runs `45262070315`, `45365266924`).**
+      Change `clear-remaining-router-markers` (#110 and its adoption PR).
+
+      - **The 22 markers in `45035313880`** (21 shorts, 1 spacing), in three groups:
+
+        | group | markers | where | cause |
+        | --- | ---: | --- | --- |
+        | B | 7 | x 7,028–7,033, y 661–669 (6); x 6,147, y 665 (1) | Metal2/Metal4 signal wires crossing the via-stack pads of the channel-repair straps at x 7,030 (VSS) and 6,150 (VDD) |
+        | D | 14 | x 6,966–6,997, y 587–658 | Metal5 crossings at the east end of D-cache bank 0 (cut `__1`, R180), next to its `A_DIN[0]` |
+        | A | 1 | (486, 835) | Metal2 short at a core VSS stripe's via pad, south of the R90 I-cache macro `cut_high` |
+
+      - **Two settings.** `pdn_repair_channels=0` removes the 10 channel-repair TopMetal2 straps
+        (B). The new `sram_end_sides=pin` puts the `sram_end_metal5_adjust` strip only on SRAMs
+        wider than tall, at the end nearest `A_DIN[0]` (east at R180, west at R0, none on R90/R270).
+        It replaces the both-ends strips that cleared D in `43937159728` but pushed routes into A.
+      - **Local checks on `45035313880`'s `cts` checkpoint.**
+        - *IR drop without the straps* (`analyze_power_grid -source_type STRAPS`, uniform
+          activity 0.1): worst drop VDD 0.888 → 0.888 mV, VSS 1.347 → 4.936 mV. That is under the
+          gate of max(10 %, 5 mV), using 72 % of it. The worst VSS node moves into the gap
+          under the removed x 5,298 strap (0.304 → 4.936 mV in that window).
+        - *Global routing with pin-end strips at 0.5:* 20 strips (13 east, 7 west). Metal5 guides
+          in the D window 267 → 210 segments (109 → 94 nets), in the A window 94 → 77 (52 → 46
+          nets); `grt` overflow 6,027 → 6,271.
+        - *Side finding:* `GRT-0114` underflow. A Metal5 edge already at zero capacity wraps to
+          65,535 inside a region adjustment, which is why the resource table shows negative
+          Metal5 reductions. The guides show no edge above 18 Metal5 nets, so it has no measured
+          effect. It is an upstream defect, not fixed.
+      - **Run 1, `45262070315`:** on `main`, from `floorplan`, `pdn_repair_channels=0`, 11 h 0 m.
+      - **Run 2, `45365266924`:** resumed from run 1's `cts`, adding `sram_end_metal5_adjust=0.5
+        sram_end_sides=pin`, 7 h 36 m. Every routing stage logged `0.5 over 20 strips (40 um, pin end)`.
+
+        | | `45035313880` | run 1 | run 2 |
+        | --- | ---: | ---: | ---: |
+        | repair straps | 10 | 0 | 0 |
+        | WNS / TNS at `grt` | −12.89 ns / −98,518 | −8.75 ns / −73,790 | **−7.63 ns / −70,144** |
+        | `grt` overflow | 6,027 | 6,025 | 6,795 |
+        | markers B / D / A / other | 7 / 14 / 1 / 0 | 0 / 1 / 1 / 8 | **0 / 0 / 0 / 0** |
+        | antenna nets / pins after `drt` | 8,449 / 11,159 | 8,319 / 10,908 | 8,317 / 10,848 |
+        | clock / total power at `grt` | 0.372 / 1.04 W | 0.376 / 1.04 W | 0.378 / 1.05 W |
+        | cell area | 18.32 mm² | 18.29 mm² | 18.29 mm² |
+        | `drt` time | 7 h 39 m | 5 h 40 m | 5 h 47 m |
+
+        - **Removing the straps cleared B and moved placement.** The macros stayed where they
+          were and CTS kept its 11-level tree again (build 1 was deep, at 14 levels), but WNS
+          improved by 4.1 ns.
+        - **The 8 "other" markers in run 1** are the serial-link receive clock's pad net shorting
+          VDD on Metal3. The serial-link registers spread out (that tree's span went from 65 to
+          2,517 µm), so the pad-to-root net grew past the 3,162 µm maximum wire length.
+          `repair_clock_nets` then inserted `wire504239` at (6,215, 1,852). The pad-to-buffer route
+          (rule `CTS_NDR_0`) runs a vertical Metal3 trunk from y 1,203 to y 1,377 inside the via column of
+          the VDD TopMetal2 strap at x 6,230.16. The power grid there is the same as in the
+          reference. Run 2 keeps the same buffer, and its router cleared the cluster only between
+          iterations 20 and 25 (33 of 44 markers at iteration 20). **If it returns in a later run,
+          that is where to look.**
+        - **The pin-end strips cleared D and A** without the A regression the both-ends strips
+          caused. They cost +12 % `grt` overflow against run 1, with WNS 1.1 ns better.
+        - **Outcome: adopted.** The lane's defaults are now repair off, SRAM-end share 0.5,
+          pin end. **Run 2, `45365266924`, is the PPA and router reference from now on**: the
+          lane's first build with no router markers.
+
 **2026-10-11 finding: `DRT-0218` is not a placement problem.** Run `38094932339` placed legally
 and `drt` still aborted with `DRT-0218`, on one clock net (`clknet_12_3602__leaf…`). Probes on
 branch `drt-0218-probe` (runs `38138040839`, `38163283136`, `38165507881`, `38169388017`)

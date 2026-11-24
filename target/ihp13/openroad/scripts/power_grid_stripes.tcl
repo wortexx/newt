@@ -319,9 +319,10 @@ pdngen -failed_via_report ${report_dir}/${proj_name}_pdngen.rpt -dont_add_pins
 source scripts/pdn_delay_line_rails.tcl
 pdn_bridge_delay_line_rails
 
-# Channel-repair straps: kept by default; PNR_PDN_REPAIR_CHANNELS=0
-# (scripts/pnr/common.tcl) removes them behind a connectivity gate. chip.tcl
-# does not source common.tcl, so the variable may not exist there.
+# Channel-repair straps: the staged flow removes them by default
+# (PNR_PDN_REPAIR_CHANNELS, scripts/pnr/common.tcl) behind a connectivity
+# gate. chip.tcl does not source common.tcl, so the variable may not exist
+# there, and that path keeps them.
 source scripts/pdn_repair_straps.tcl
 if { ![info exists pnr_pdn_repair_channels] } { set pnr_pdn_repair_channels 1 }
 utl::report "PDN channel repair: [expr {$pnr_pdn_repair_channels ? {on} : {off}}]"

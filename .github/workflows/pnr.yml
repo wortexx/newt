@@ -81,15 +81,15 @@ on:
         required: false
         default: ''
       sram_end_metal5_adjust:
-        description: 'Further share of Metal5 capacity held back in a 40 um strip at both short ends of every SRAM, on top of sram_metal5_adjust, 0 to <1 (empty = 0, no strips)'
+        description: 'Further share of Metal5 capacity held back in a 40 um strip at the SRAM ends sram_end_sides chooses, on top of sram_metal5_adjust, 0 to <1; 0 = no strips (empty = 0.5)'
         required: false
         default: ''
       sram_end_sides:
-        description: 'Which short ends get the sram_end_metal5_adjust strip: both (both ends of every SRAM) or pin (only SRAMs wider than tall, at the end nearest A_DIN[0]) (empty = both)'
+        description: 'Which short ends get the sram_end_metal5_adjust strip: both (both ends of every SRAM) or pin (only SRAMs wider than tall, at the end nearest A_DIN[0]) (empty = pin)'
         required: false
         default: ''
       pdn_repair_channels:
-        description: 'Keep (1) or remove (0) the power-grid generator''s channel-repair straps, checked for lost connectivity; acts only when floorplan runs (empty = 1, keep)'
+        description: 'Keep (1) or remove (0) the power-grid generator''s channel-repair straps, checked for lost connectivity; acts only when floorplan runs (empty = 0, remove)'
         required: false
         default: ''
       cell_pad_sites:
@@ -720,18 +720,18 @@ jobs:
         # every later checkpoint (drc-clean-sram-metal5-and-antenna D1).
         #
         # PNR_GRT_SRAM_END_METAL5_ADJUST: the sram_end_metal5_adjust dispatch
-        # input, empty by default (common.tcl's 0, no strips). Applied by the
+        # input, empty by default (common.tcl's 0.5). Applied by the
         # same stages as the SRAM Metal5 one, with the same resume rule
         # (clear-sram-corner-router-shorts D4).
         #
         # PNR_GRT_SRAM_END_SIDES: the sram_end_sides dispatch input, empty by
-        # default (common.tcl's both). Chooses the ends the strips above go
-        # on, so it has the same resume rule (clear-remaining-router-markers D1, D2).
+        # default (common.tcl's pin). Chooses the ends the strips above go
+        # on, so it has the same resume rule (clear-remaining-router-markers D1, D2, D6).
         #
         # PNR_PDN_REPAIR_CHANNELS: the pdn_repair_channels dispatch input, empty
-        # by default (common.tcl's 1, keep the straps). Acts only in floorplan,
+        # by default (common.tcl's 0, remove the straps). Acts only in floorplan,
         # so a run resumed past it keeps the restored grid
-        # (clear-sram-corner-router-shorts D1, D2).
+        # (clear-sram-corner-router-shorts D1, D2; clear-remaining-router-markers D6).
         #
         # PNR_CELL_PAD_SITES: the cell_pad_sites dispatch input, empty by
         # default (common.tcl's 0, no padding). Applied from gpl on, so with

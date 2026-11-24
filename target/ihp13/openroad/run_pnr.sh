@@ -100,20 +100,20 @@
 #                           adopt-drc-clean-defaults-and-requote).
 #   PNR_GRT_SRAM_END_METAL5_ADJUST Passed through to every routing stage,
 #                           like PNR_GRT_SRAM_METAL5_ADJUST: a further share
-#                           of Metal5 held back in a 40 um strip at both
-#                           short ends of every SRAM, in [0, 1). Empty or
-#                           unset: 0, no strips.
+#                           of Metal5 held back in a 40 um strip at the
+#                           short ends PNR_GRT_SRAM_END_SIDES chooses, in
+#                           [0, 1); 0 adds no strip. Empty or unset: 0.5.
 #   PNR_GRT_SRAM_END_SIDES  Passed through to every routing stage with
 #                           PNR_GRT_SRAM_END_METAL5_ADJUST: "both" puts the
 #                           strips at both short ends of every SRAM, "pin"
 #                           only on SRAMs wider than tall, at the end nearest
-#                           their A_DIN[0] pin. Empty or unset: both.
+#                           their A_DIN[0] pin. Empty or unset: pin.
 #   PNR_PDN_REPAIR_CHANNELS Passed through to floorplan only (acts when it
 #                           builds the power grid; a run resumed past
 #                           floorplan keeps the restored grid): "0" removes
 #                           pdngen's channel-repair straps, failing the stage
-#                           if that disconnects any supply shape. Empty or
-#                           unset: 1, keep them.
+#                           if that disconnects any supply shape; "1" keeps
+#                           them. Empty or unset: 0, remove them.
 #   PNR_CELL_PAD_SITES    Passed through to gpl and every legalization
 #                           (dpl, cts, grt_repair): free sites kept on each
 #                           side of every standard cell. Empty or unset:

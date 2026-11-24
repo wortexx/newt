@@ -218,13 +218,15 @@ if { ![string is double -strict $pnr_grt_sram_metal5_adjust] ||
 # strip at both short ends of every SRAM, on top of the footprint hold-back
 # above (pnr_apply_sram_metal5_adjustment). The router's last Metal5 shorts
 # cross a middle-row SRAM 8-24 um inside its east end, where nets from the
-# gap below reach its first data pins (run 41133143603). Default 0 adds no
-# strip (openspec/changes/archive/2026-11-17-clear-sram-corner-router-shorts design D4).
+# gap below reach its first data pins (run 41133143603). 0 adds no strip
+# (openspec/changes/archive/2026-11-17-clear-sram-corner-router-shorts design D4).
+# Default 0.5, at the pin end below: run 45365266924 ended detailed routing
+# with no markers (openspec/changes/clear-remaining-router-markers design D6).
 set pnr_sram_end_strip_um 40
 if { [info exists ::env(PNR_GRT_SRAM_END_METAL5_ADJUST)] && [string trim $::env(PNR_GRT_SRAM_END_METAL5_ADJUST)] ne "" } {
     set pnr_grt_sram_end_metal5_adjust [string trim $::env(PNR_GRT_SRAM_END_METAL5_ADJUST)]
 } else {
-    set pnr_grt_sram_end_metal5_adjust 0
+    set pnr_grt_sram_end_metal5_adjust 0.5
 }
 if { ![string is double -strict $pnr_grt_sram_end_metal5_adjust] ||
      $pnr_grt_sram_end_metal5_adjust < 0 || $pnr_grt_sram_end_metal5_adjust >= 1 } {
@@ -235,11 +237,11 @@ if { ![string is double -strict $pnr_grt_sram_end_metal5_adjust] ||
 # the router's last Metal5 shorts bunch (run 45035313880, group D). The
 # both-ends strips at the R90 macros' pin rows grew another group from 1 to
 # 6 shorts in run 43937159728, so taller-than-wide SRAMs get none. Default
-# both (openspec/changes/clear-remaining-router-markers design D1).
+# pin (openspec/changes/clear-remaining-router-markers design D1, D6).
 if { [info exists ::env(PNR_GRT_SRAM_END_SIDES)] && [string trim $::env(PNR_GRT_SRAM_END_SIDES)] ne "" } {
     set pnr_grt_sram_end_sides [string trim $::env(PNR_GRT_SRAM_END_SIDES)]
 } else {
-    set pnr_grt_sram_end_sides both
+    set pnr_grt_sram_end_sides pin
 }
 if { $pnr_grt_sram_end_sides ni {both pin} } {
     error "PNR_GRT_SRAM_END_SIDES='$pnr_grt_sram_end_sides' is not an end choice: use both or pin"
@@ -249,12 +251,15 @@ if { $pnr_grt_sram_end_sides ni {both pin} } {
 # channels; it put 10 partial-height TopMetal2 straps in the macro-row gaps,
 # and their via stacks are the pads behind 2 of the router's last 8 shorts
 # (run 41133143603). 0 removes them after pdngen and fails the stage if that
-# disconnects any supply shape (pdn_repair_straps.tcl). Default 1 keeps them
+# disconnects any supply shape (pdn_repair_straps.tcl); 1 keeps them
 # (openspec/changes/archive/2026-11-17-clear-sram-corner-router-shorts design D1, D2).
+# Default 0: without them VSS worst IR drop rises 1.3 -> 4.9 mV and run
+# 45262070315 cleared their 7 shorts (openspec/changes/clear-remaining-router-markers
+# design D3, D6).
 if { [info exists ::env(PNR_PDN_REPAIR_CHANNELS)] && [string trim $::env(PNR_PDN_REPAIR_CHANNELS)] ne "" } {
     set pnr_pdn_repair_channels [string trim $::env(PNR_PDN_REPAIR_CHANNELS)]
 } else {
-    set pnr_pdn_repair_channels 1
+    set pnr_pdn_repair_channels 0
 }
 if { $pnr_pdn_repair_channels ni {0 1} } {
     error "PNR_PDN_REPAIR_CHANNELS='$pnr_pdn_repair_channels' is not 0 or 1"
@@ -459,7 +464,7 @@ proc pnr_apply_routing_layers {} {
 # the global router and each one scales the capacity left by the ones before
 # it, so the regions are added only on the first call in a process to keep
 # this proc idempotent (design D1's task 1.1 check). The SRAM-end strips
-# (pnr_grt_sram_end_metal5_adjust, default 0 = none; at the ends chosen by
+# (pnr_grt_sram_end_metal5_adjust, default 0.5, 0 = none; at the ends chosen by
 # pnr_grt_sram_end_sides) are added in the same first call, after the
 # footprints, so inside a strip both apply.
 set pnr_sram_metal5_regions_added 0
