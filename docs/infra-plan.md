@@ -1629,6 +1629,13 @@ from placements with overlapping cells, on both sides alike.
         - **Outcome: adopted.** The lane's defaults are now repair off, SRAM-end share 0.5,
           pin end. **Run 2, `45365266924`, is the PPA and router reference from now on**: the
           lane's first build with no router markers.
+        - **Signoff DRC on run 2, 2026-11-24/25.** The same KLayout full-die sweep as the first
+          signoff DRC (1 mm tiles, all 56 exited cleanly; the macro boxes matched
+          `44708127322`'s) found 1,185,934 non-density items in 5 rules, all inside the IP:
+          `Cnt.a` 1,183,332 in the SRAMs, and `Pas.a`/`Pas.b`/`M2.a`/`forbidden.PEmWind`
+          996/902/388/316 in the delay lines. Every count matches `44708127322` exactly. The
+          24/3/5 `M2.b`/`M3.b`/`M5.b` items that run had on its router markers are now 0, so
+          **run 2 has no DRC violations outside the IP waiver list.**
 
 **2026-10-11 finding: `DRT-0218` is not a placement problem.** Run `38094932339` placed legally
 and `drt` still aborted with `DRT-0218`, on one clock net (`clknet_12_3602__leaf…`). Probes on
