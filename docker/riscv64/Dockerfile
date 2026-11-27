@@ -23,8 +23,12 @@ RUN apt-get update && \
 
 WORKDIR /riscv
 # pull and build (bare-metal newlib target)
+# No --recursive: the toolchain's Makefile fetches only the submodules the
+# build needs (shallow, on demand). A recursive clone also pulls the
+# testsuite-only dejagnu from git.savannah.gnu.org, whose HTTP 500s failed
+# image builds 45925639741 and 45984323904, plus LLVM, QEMU and spike.
 RUN mkdir -p /build
-RUN git clone --recursive --branch ${RISCV64_TAG} ${RISCV64_REPO}.git && \
+RUN git clone --branch ${RISCV64_TAG} ${RISCV64_REPO}.git && \
     cd riscv-gnu-toolchain && ./configure --prefix=/build && make -j$(nproc)
 
 # copy into runnner
