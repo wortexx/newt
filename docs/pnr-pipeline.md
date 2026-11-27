@@ -11,7 +11,7 @@ that workflow invokes on it.
 |---|---|---|
 | `start` | `ubuntu-latest` | OIDC login to Azure, starts the self-hosted VM (idempotent — no-op if already running). |
 | `restore-checkpoints` | self-hosted VM (no container) | Only does work when `PNR_RESUME_FROM_RUN` (repository variable) or the `resume_from_run` dispatch input names a previous run: downloads that run's checkpoints from Blob into `/home/newt/pnr-restore/<run_id>` — outside the workspace, which `actions/checkout` would `git clean -ffdx`. The `pnr` job's own restore step then honors the `resume_exclude` dispatch input to leave named checkpoints out, so their stages run again. Runs outside the job container because az CLI lives on the VM host, and design D8 gives the `pnr` job no Azure access. |
-| `pnr` | self-hosted VM | Checks out the repo, generates the hardware config, pickles RTL, runs `make synth-all` (cached — see below) then `make -C target/ihp13/openroad -f openroad.mk run-pnr PROJ_NAME=basilisk` (the 10-stage flow below), then moves the stage checkpoints and `synth-key.txt` out of the workspace into `/home/newt/pnr-export/<run_id>` (the export step — see the collision note below), builds a stage-status summary from `pnr_status.log`, uploads the final DEF and the reports/logs as workflow artifacts. |
+| `pnr` | self-hosted VM | Checks out the repo, generates the hardware config, pickles RTL, runs `make synth-all` (cached — see below) then `make -C target/ihp13/openroad -f openroad.mk run-pnr PROJ_NAME=basilisk` (the 10-stage flow below), then moves the stage checkpoints and `synth-key.txt` out of the workspace into `/home/newt/pnr-export/<run_id>` (the export step — see the collision note below), streams the final DEF to GDS when there is one (best-effort, see "GDS stream" below), builds a stage-status summary from `pnr_status.log`, uploads the final DEF, the GDS (`basilisk-pnr-gds`) and the reports/logs as workflow artifacts. |
 | `upload-checkpoints` | self-hosted VM | Pushes `.zip` checkpoints from `/home/newt/pnr-export/<run_id>` — never from the workspace — to the `pnr-checkpoints` blob container (task 1.3) so a later run can resume without redoing synth+P&R from scratch, then removes that directory. Fails loudly when the `pnr` job succeeded but left no checkpoint to upload; a `pnr` job that failed before its first checkpoint, or never reached the export step, is reported and passed over. |
 | `stop` | `ubuntu-latest` | Checks whether the runner is still needed (busy, or another `pnr.yml`/`synth.yml` run queued) before deallocating the VM — the coexistence guard. |
 
@@ -381,6 +381,49 @@ blanket `PNR_STAGE_TIMEOUT`): `floorplan` 1h, `pre_place` 30m, `gpl` 4h,
 `dpl` 4h, `cts` 8h, `grt` 4h (in practice needed 8h+ — see Notes),
 `grt_repair` 6h, `ant` 4h (also 4h in `pnr.yml`, `PNR_TIMEOUT_ANT`), `drt` 16h (24h in `pnr.yml`, `PNR_TIMEOUT_DRT`, as margin over the
 lane's 28-iteration budget, which took 7 h 28 m of `drt` on run 39906592139), `final` 1h.
+
+## GDS stream (`target/ihp13/klayout/`)
+
+After the flow, the routed DEF is streamed to GDS with KLayout
+(`docs/infra-plan.md` Phase 19 Stage A; change `stream-final-gds`). This is
+a separate step, not a `run_pnr.sh` stage: it is not OpenROAD, saves no
+checkpoint, and runs on any DEF.
+
+```bash
+make gds                                    # target/ihp13/openroad/out/basilisk.final.def
+make gds GDS_DEF=/path/to/basilisk.final.def   # e.g. a downloaded basilisk-pnr-def artifact
+```
+
+Outputs, in `target/ihp13/klayout/out/`: `basilisk.gds.gz` (top cell
+`iguana_chip`) and `basilisk.stream.log`. The lane runs the same thing as its
+"Stream GDS" step after P&R when a DEF exists, and uploads both as the
+`basilisk-pnr-gds` artifact. A failed stream is reported in the run summary
+and never fails the run.
+
+- **Inputs** (`klayout.mk`): the LEFs P&R reads (`init_tech.tcl`, including
+  the delay line's `.abst.lef`), the GDS of the standard cells, the delay
+  line and all six SRAM sizes, and the layer map `src/sg13g2.map` (IHP
+  drawing layers; top-level pin names as text on `<Metal>.txt`, n/25).
+  `scripts/def2stream.py` takes them as `-rd` variables, as croc's does.
+- **Cells.** Every LEF cell is emptied and refilled from its GDS. Each merged
+  GDS keeps its own top cells' names, so they bind to the DEF's instances, and
+  every other cell in it becomes `G<k>_<name>` (k = position in the GDS
+  list). Without that rename, the delay line's `VIA_Via1_YX_so` replaces the
+  DEF's via of the same name, and the SRAM sizes overwrite each other's
+  `RM_IHPSG13_1P_BITKIT_*` cells (found by the scratch DRC probe). Library
+  cells the design does not use are dropped; the output has one top cell.
+- **Empty cells.** A cell the DEF instantiates that ends up empty fails the
+  stream, except the pre-release IO library's cells (`ixc013_*`,
+  `vddpad`/`gndpad`/`vddcore`/`gndcore`, `corner`, `filler*u`, `power_cut*`):
+  the pinned PDK has their LEF but no GDS, so the pad ring streams empty
+  until Phase 19 Stage C replaces it with the public `sg13g2_io` cells. The
+  log lists them with instance counts. Empty sub-cells shipped inside the
+  SRAM GDS files are only counted.
+- **Cost.** On run `45365266924`'s 1.74 GB DEF: a 210 MB `basilisk.gds.gz`
+  GDS (about 2 GB uncompressed), 6.3 GiB peak memory, 1,962 empty IO
+  instances (12 cells). 13.7 min in `newt-eda` under amd64 emulation on an
+  M3 Max, 6.5 min of it reading the DEF; the scratch probe streamed the same
+  DEF in 110 s in its own image. The lane step has a 30 min timeout.
 
 ## Notes from real bring-up (task 2.4)
 

@@ -176,6 +176,7 @@ BENDER_SYNTH_TARGETS := rtl $(BENDER_PROJ_TARGETS)
 include $(IG_ROOT)/target/ihp13/pickle/pickle.mk
 include $(IG_ROOT)/target/ihp13/yosys/yosys.mk
 include $(IG_ROOT)/target/ihp13/openroad/openroad.mk
+include $(IG_ROOT)/target/ihp13/klayout/klayout.mk
 
 
 ##############

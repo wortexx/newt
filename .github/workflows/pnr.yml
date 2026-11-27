@@ -816,6 +816,24 @@ jobs:
           chmod a+rwx "${PNR_EXPORT_DIR}"
           chmod -R a+rwX "$dest"
 
+      # Stream the routed DEF to GDS (stream-final-gds, design D6; spec
+      # ci-pipeline "P&R lane publishes the streamed GDS"). Best-effort like
+      # detailed routing: a failed stream is reported below and never fails
+      # a run whose P&R succeeded. The existence test is in the shell, not
+      # `if: hashFiles(...)`, which would hash the 1.7 GB DEF to answer it.
+      # About 2 min for the full die (the scratch probe on run 45365266924).
+      - name: Stream GDS (make gds)
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 30
+        run: |
+          DEF=target/ihp13/openroad/out/basilisk.final.def
+          if [ ! -f "$DEF" ]; then
+            echo "No routed DEF, nothing to stream."
+            exit 0
+          fi
+          make -C target/ihp13/klayout -f klayout.mk gds GDS_DEF="$PWD/$DEF" PROJ_NAME=basilisk
+
       - name: Stage-status summary
         if: always()
         run: |
@@ -870,6 +888,10 @@ jobs:
               echo "**Routed design:** none produced${blocker:+ - first failing stage was \`$blocker\`}."
               echo "Detailed routing is best-effort (success is gated through global route), so this does not fail the run."
             fi
+            # The GDS outcome (stream-final-gds): nothing without a DEF.
+            bash target/ihp13/klayout/scripts/gds_summary.sh "$DEF" \
+              target/ihp13/klayout/out/basilisk.gds.gz \
+              target/ihp13/klayout/out/basilisk.stream.log
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload DEF
@@ -880,6 +902,21 @@ jobs:
           path: target/ihp13/openroad/out/basilisk.final.def
           retention-days: 30
           if-no-files-found: warn
+
+      # Its own artifact, so the layout can be fetched without the DEF. The
+      # log goes along whenever it exists, including on a failed stream.
+      # Already gzipped, so no second compression pass over it.
+      - name: Upload GDS
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: basilisk-pnr-gds
+          path: |
+            target/ihp13/klayout/out/basilisk.gds.gz
+            target/ihp13/klayout/out/basilisk.stream.log
+          retention-days: 30
+          compression-level: 0
+          if-no-files-found: ignore
 
       - name: Upload reports and logs
         if: always()

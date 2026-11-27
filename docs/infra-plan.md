@@ -64,6 +64,7 @@ Phase 15 (IG_CVA6_PKG_PARAMS only partly reaches the core) — finding, not acte
 Phase 16 (odd exit codes hang JTAG preload) — finding, worked around; fix planned for Cheshire newt.3
 Phase 17 (SoC default-activity power is an OpenSTA artefact)  ✅  — lane power now uniform-activity
 Phase 18 (stop cloning cva6-sdk, Cheshire newt.3) — optional; pairs with Phase 16's fork fix
+Phase 19 (chip finishing: GDS, seal, DRC, logo) — A, B, E planned for 2026-11-26 → ~12-10; C, D deferred
 ```
 
 **Do Phase 2 first among the technical work** — it is the long pole; everything meaningful
@@ -1926,6 +1927,108 @@ internet. Change: `openspec/changes/xcelium-sim-lane`. How to use it: `target/xc
     network route dropped.
   - Label-triggered synth runs (`full-synth`) wait for a deallocated runner VM. `synth.yml` has no
     start step, so start the VM (`az vm start`) or wait for `pnr.yml`.
+
+---
+
+## Phase 19 — Chip finishing: DEF → GDS → signoff, croc-style  *(planned 2026-11-26; A, B, E by ~2026-12-10)*
+
+The flow stops at `out/basilisk.final.def`. Croc (`pulp-platform/croc`, `klayout/run_finishing.sh`,
+`run_drc.sh`, `.github/scripts/run_full_flow.sh`) carries its DEF through GDS, seal ring, fill,
+DRC and an ArtistIC logo. This phase does the same for newt in stages. A, B and E don't move PPA
+numbers and need no new P&R run (they work on run `45365266924`'s DEF). C changes the chip; D
+depends on C.
+
+Two facts set the staging:
+
+- **The pinned PDK (`4fdc719`, 2024-02) has none of croc's KLayout tooling.** Current
+  IHP-Open-PDK `ihp-sg13g2` has `libs.tech/klayout/tech/drc/run_drc.py` and
+  `tech/scripts/{filler,sealring,bondpad}.py`.
+- **The pad ring has no public GDS.** `mc_pad.sv`/`init_tech.tcl` use Basilisk's pre-release IO
+  cells (`ixc013_b16m*`, `ixc013_i16x`, `vddpad`/`gndpad`/`vddcore`/`gndcore`, `corner`,
+  `filler*u`, `power_cut*`; LEF only, in `pdk/future/sg13g2_iocell`). The public `sg13g2_io`
+  library (`sg13g2_IOPad*`, `sg13g2_Corner`, `sg13g2_Filler*`) has different cells. Until C, the
+  GDS pad ring streams empty.
+
+```text
+ final.def --A--> basilisk.gds.gz --B--> basilisk.sealed.gds.gz --B--> minimal DRC
+                        |                         |
+                        +----------E--------------+--> logo merge + die render
+ C (public IO ring, new P&R reference) --> D (fill, full DRC + antenna) --> tapeout-complete GDS
+```
+
+### Stage A — Stream the final DEF to GDS  (`stream-final-gds`, ~4 days)
+
+- [x] Rewrite `target/ihp13/klayout/scripts/def2stream.py` croc-style: inputs through `-rd`
+      (`in_def`, `lef_files`, `gds_files`, `design_name`, `out_file`, `layer_map`,
+      `io_allow`), set by `target/ihp13/klayout/klayout.mk`. The LEFs are the ones P&R reads
+      (delay line's `.abst.lef`); the GDS list has all six SRAM sizes, unused ones are dropped.
+      `ihp130.lyt` is replaced by the layer map `src/sg13g2.map` (drawing layers + top-level
+      pin names on `<Metal>.txt`, n/25).
+- [x] Rename-on-merge (macro sub-cells → `G<k>_…`). Shown load-bearing: without it the DEF's
+      `VIA_Via1_YX_so` picks up the delay line's version of that via (extra Metal1, 9/0, 7/0
+      shapes, everywhere that via is used) and `RM_IHPSG13_1P_BITKIT_CELL` becomes the union of
+      all six SRAM sizes' versions.
+- [x] Empty-cell check on the cells the DEF instantiates: the 15 pre-release IO cells are
+      allowed and logged, anything else fails the stream (checked: without the delay-line GDS
+      it exits non-zero naming `delay_line_D4_O1_6P000`). Empty sub-cells inside the SRAM GDS
+      are counted only.
+- [x] KLayout **0.30.5** in `newt-eda` (`docker/all`, klayout.de Ubuntu 24.04 `.deb`,
+      SHA-256-pinned): the version IHP-Open-PDK pins in its `versions.txt` for its sg13g2
+      KLayout DRC runner, so Stage B needs no second bump. +272 MB image layer;
+      `smoke-test.sh` checks the version and a headless `pya` GDS write.
+- [x] `make gds [GDS_DEF=…]`; `pnr.yml` "Stream GDS" step after P&R (best-effort, 30 min),
+      summary line, `basilisk-pnr-gds` artifact beside the DEF. First lane run pending (needs
+      the image on `:dev`).
+- [x] Done when: the GDS of `45365266924` opens in KLayout, every non-IO cell has geometry,
+      and the probe's tiled DRC on it reproduces the 2026-11-24/25 counts. **Status
+      2026-11-27:** the GDS streams (rc 0, top `iguana_chip`; 12 IO cells / 1,962 instances
+      empty as allowed, nothing else; 210 MB gzipped; 6.3 GiB peak, 13.7 min under amd64
+      emulation on an M3 Max). It is identical to the probe's GDS (the one the 2026-11-24/25
+      DRC ran on) in cells, instances and per-cell per-layer shape counts, except the 68 new
+      TopMetal2 pin labels, all on their pin shapes. The full tiled DRC rerun on it (same
+      deck and 1 mm tiles, 56/56 tiles rc 0, 2026-11-26/27) reproduces the baseline exactly:
+      1,185,934 non-density items in 5 rules, Cnt.a 1,183,332 (SRAM macros), Pas.a 996,
+      Pas.b 902, M2.a 388, forbidden.PEmWind 316 (all delay line), nothing in the design's
+      own routing.
+
+### Stage B — Side-loaded KLayout tech, seal ring, minimal DRC  (`seal-and-drc-gds`, ~5 days)
+
+- [ ] Pin only `libs.tech/klayout` from a newer IHP-Open-PDK commit (subtree or sparse
+      checkout, croc's `pdk_manifest.csv` pattern with digests). The stdcell, SRAM and LEF views
+      stay at `4fdc719`, so no synth/P&R input moves.
+- [ ] Seal ring: `sealring.py` (or croc's `generate_seal_ring.py` + `merge_sealring.py`), die
+      + margin (croc: 42 µm/side) → top cell `iguana_chip_sealed`, `basilisk.sealed.gds.gz`.
+- [ ] Minimal DRC through `run_drc.py --precheck_drc --no_feol --no_density …` (croc's
+      `--minimal`), with the IP waiver list from Phase 11 (SRAM `Cnt.a`; delay line `Pas.a`,
+      `Pas.b`, `M2.a`, `forbidden.PEmWind`). Retires the scratch probe.
+- [ ] Measure first: the probe needed 1 mm tiles and 14.8 GB peak on the 7.6 × 6.7 mm die.
+      If `run_drc.py` can't do the full die in one go on the VM, keep the tiling.
+- [ ] Where it runs: on the VM after `final` (adds hours to the P&R job), or as its own
+      job from the DEF/GDS artifacts — decide from the measured time.
+
+### Stage E — ArtistIC logo and die render  (`chip-artwork`, ~3 days)
+
+- [ ] ArtistIC (`pulp-platform/artistic`, croc's `artistic/`) as a pinned dependency, with a
+      `newt.toml` (placement, layers, colours). Tools: Inkscape, potrace, img2pdf, Pillow.
+- [ ] Logo on top metal clear of the TopMetal1/2 power grid; minimal DRC on the merged GDS
+      (logo spacing is not checked by ArtistIC itself).
+- [ ] Die render for the thesis (the logo is optional; the render is wanted either way).
+
+### Stage C — Public IO ring  *(deferred; changes the chip)*
+
+- [ ] Map pads to `sg13g2_io`: `ixc013_b16m*` → `sg13g2_IOPadInOut16mA`, `ixc013_i16x` →
+      `sg13g2_IOPadIn`, supply pads → `IOPadIOVdd/IOPadIOVss/IOPadVdd/IOPadVss`, `corner` →
+      `sg13g2_Corner`, fillers. Open: the public library has no built-in pull-up/pull-down
+      equivalents of `ixc013_b16mpup/-pdn`.
+- [ ] `mc_pad.sv`, pad-ring floorplan, IO Liberty, bondpads (croc ships its own).
+- [ ] New P&R reference run; PPA compared against `45365266924`.
+
+### Stage D — Fill and full signoff DRC  *(deferred; after C)*
+
+- [ ] Metal + Activ fill (`filler.py`, or OpenROAD `density_fill`; the DEF reader in
+      `def2stream.py` already side-loads FILLS). Slow even for croc, so it runs on the VM.
+- [ ] `run_drc.py` full + antenna on the sealed, filled GDS. LVS is not in croc's flow either;
+      adding it is its own item.
 
 ---
 

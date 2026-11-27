@@ -25,213 +25,164 @@
 # CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
 # OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+#
+# Originally from OpenROAD-flow-scripts' flow/util/def2stream.py (copied July
+# 2023 by upstream Basilisk). Rewritten 2026 by the newt project authors
+# (openspec/changes/stream-final-gds, design D1), from the scratch DRC probe's
+# stream.py, whose GDS the 2026-11-24/25 signoff DRC ran on, with croc's -rd
+# interface (pulp-platform/croc klayout/scripts/def2stream.py).
+#
+# Streams a routed DEF to GDS: reads the DEF against the LEFs, replaces every
+# cell by its geometry from the given GDS files, and writes the top cell.
+#
+# Run in KLayout batch mode, all inputs as -rd variables (klayout.mk sets them):
+#   klayout -b -rd in_def=... -rd lef_files="a.lef b.lef" -rd gds_files="..." \
+#     -rd layer_map=src/sg13g2.map -rd design_name=iguana_chip \
+#     -rd io_allow='corner|vddpad|...' -rd out_file=out/basilisk.gds.gz \
+#     -r scripts/def2stream.py
+#
+# Exit status: the number of errors (0 = GDS written and every check passed).
 
-# Copied and adapted July 2023 from:
-# https://github.com/The-OpenROAD-Project/OpenROAD-flow-scripts/blob/master/flow/util/def2stream.py
-
-# Python script for KLayout to merge DEF and LEF into final GDS
+import os
+import re
+import sys
+import tempfile
+import time
 
 import pya
-import re
-import json
-import copy
-import sys
-import os
+
+T0 = time.time()
+
+
+def log(msg):
+    print(f"[{time.time() - T0:7.0f}s] {msg}", flush=True)
+
+
+def err(msg):
+    global errors
+    errors += 1
+    log(f"ERROR: {msg}")
+
+
+def rd(name, default=None):
+    # -rd variables are globals of this script; a missing one is an error.
+    value = globals().get(name, default)
+    if value is None:
+        log(f"ERROR: missing -rd {name}=...")
+        sys.exit(1)
+    return value
+
 
 errors = 0
-design_name = "iguana_chip"
-in_def = "../openroad/out/iguana.final.def"
-out_file = "./out/iguana.gds"
+in_def = rd("in_def")
+lef_list = rd("lef_files").split()
+gds_list = rd("gds_files").split()
+map_file = rd("layer_map")
+top_name = rd("design_name")
+out_path = rd("out_file")
+# Cells allowed to stay empty: an exact-name regex (design D1 step 4). Empty
+# means "nothing allowed"; the flow passes the pre-release IO cells.
+io_allow = re.compile(rd("io_allow", "") or r"(?!)")
 
-tech_file = "./src/ihp130.lyt"
-in_files  = "../pdk/ihp-sg13g2/ihp-sg13g2/libs.ref/sg13g2_stdcell/gds/sg13g2_stdcell.gds ../pdk/ihp-sg13g2/ihp-sg13g2/libs.ref/sg13g2_iocell/gds/sg13g2_iocell.gds ../macro_cells/mc_sg13g2_delay/delay_line_D4_O1_6P000.gds ../pdk/ihp-sg13g2/ihp-sg13g2/libs.ref/sg13g2_sram/gds/RM_IHPSG13_1P_64x64_c2_bm_bist.gds ../pdk/ihp-sg13g2/ihp-sg13g2/libs.ref/sg13g2_sram/gds/RM_IHPSG13_1P_256x64_c2_bm_bist.gds ../pdk/ihp-sg13g2/ihp-sg13g2/libs.ref/sg13g2_sram/gds/RM_IHPSG13_1P_1024x64_c2_bm_bist.gds"
-config_file = ""
-seal_file = ""
-layer_map = ""
+missing = [f for f in [in_def, map_file] + lef_list + gds_list if not os.path.isfile(f)]
+for f in missing:
+    err(f"input not found: {f}")
+if missing:
+    sys.exit(errors)
 
-# Expand layers in json
-def expand_cfg_layers(cfg):
-  layers = cfg['layers']
-  expand = [layer for layer in layers if 'layers' in layers[layer]]
-  for layer in expand:
-    for i, (name, num) in enumerate(zip(layers[layer]['names'],
-                                        layers[layer]['layers'])):
-      new_layer = copy.deepcopy(layers[layer])
-      del new_layer['names']
-      new_layer['name'] = name
-      del new_layer['layers']
-      new_layer['layer'] = num
-      layers[name] = new_layer
-    del layers[layer]
+# 1. DEF + LEFs. LEF cells come in as abstracts and are replaced in step 3;
+#    the map file decides which DEF geometry becomes mask layers.
+opt = pya.LoadLayoutOptions()
+cfg = opt.lefdef_config
+cfg.lef_files = lef_list
+cfg.read_lef_with_def = False
+cfg.dbu = 0.001
+cfg.map_file = map_file
+cfg.read_all_layers = False
+for flag in ("produce_obstructions", "produce_blockages", "produce_cell_outlines",
+             "produce_placement_blockages", "produce_regions", "produce_lef_pins",
+             "produce_lef_labels", "produce_fills"):
+    setattr(cfg, flag, False)
+for flag in ("produce_routing", "produce_special_routing", "produce_via_geometry",
+             "produce_pins", "produce_labels"):
+    setattr(cfg, flag, True)
 
-def read_cfg():
-  print('INFO: Reading config file: ' + config_file)
-  with open(config_file, 'r') as f:
-    cfg = json.load(f)
+ly = pya.Layout()
+log(f"reading DEF {in_def}")
+ly.read(in_def, opt)
+if not ly.has_cell(top_name):
+    err(f"DEF has no cell '{top_name}' (top cells: {[c.name for c in ly.top_cells()]})")
+    sys.exit(errors)
+top = ly.cell(top_name)
+log(f"DEF read: top {top.name}, {ly.cells()} cells")
 
-  expand_cfg_layers(cfg)
-  cfg = cfg['layers'] # ignore the rest
+# 2. Empty every LEF cell, so only its GDS defines it. VIA_* cells are the
+#    DEF/LEF vias KLayout generated; they are real geometry and stay.
+for c in ly.each_cell():
+    if c.cell_index() != top.cell_index() and not c.name.startswith("VIA_"):
+        c.clear()
 
-  # Map gds layers & datatype to KLayout indices
-  # These are arrays for the different mask numbers
-  for layer, vals in cfg.items():
-    layer = vals['layer']
-    for key in ('opc', 'non-opc'):
-      if key not in vals:
-        continue
-      data = vals[key]
-      if isinstance(data['datatype'], int):
-        data['datatype'] = [data['datatype']] # convert to array
-      data['klayout'] = [main_layout.find_layer(layer, datatype)
-                         for datatype in data['datatype']]
+# 3. Merge each GDS. Its own top cells keep their names and bind to the DEF's
+#    instances; every other cell in it becomes G<k>_<name>, so a macro's
+#    sub-cells can neither replace the DEF's cells (e.g. the delay line's
+#    VIA_Via1_YX_so) nor another macro's same-named sub-cells (the SRAMs'
+#    RM_IHPSG13_1P_BITKIT_*). Merged through a temporary GDS, as in the probe.
+with tempfile.TemporaryDirectory(prefix="def2stream-") as tmpdir:
+    for k, path in enumerate(gds_list):
+        part = pya.Layout()
+        part.read(path)
+        tops = {c.cell_index() for c in part.top_cells()}
+        renamed = 0
+        for c in part.each_cell():
+            if c.cell_index() not in tops:
+                c.name = f"G{k}_{c.name}"
+                renamed += 1
+        tmp = os.path.join(tmpdir, f"part{k}.gds")
+        part.write(tmp)
+        ly.read(tmp)
+        log(f"merged {os.path.basename(path)}: {len(tops)} top cells, {renamed} sub-cells renamed G{k}_")
 
-  return cfg
+# 4. Drop what the design does not use: every top cell but ours (unused
+#    library cells the merges brought in).
+extra = [c.cell_index() for c in ly.top_cells() if c.cell_index() != top.cell_index()]
+for ci in extra:
+    ly.delete_cell_rec(ci)
+log(f"dropped {len(extra)} unused top cells")
 
-#match a line like:
-# - LAYER M2 + MASK 2 + OPC RECT ( 3000 3000 ) ( 5000 5000 ) ;
-rect_pat = re.compile(r'''
-  \s*\-\ LAYER\ (?P<layer>\S+)  # The layer name
-  (?:                           # Non-capturing group
-  \s+\+\ MASK\ (?P<mask>\d+)    # Mask, None if absent
-  )?
-  (?P<opc>                      # OPC, None if absent
-  \s+\+\ OPC
-  )?
-  \s+RECT\
-   \(\ (?P<xlo>\d+)\ (?P<ylo>\d+)\ \)\   # rect lower-left pt
-  \(\ (?P<xhi>\d+)\ (?P<yhi>\d+)\ \)\ ; # rect upper-right pt
-  ''',
-                      re.VERBOSE)
-
-def read_fills(top):
-  if config_file == '':
-    print('WARNING: no fill config file specified')
-    return
-  # KLayout doesn't support FILL in DEF so we have to side load them :(
-  cfg = read_cfg()
-  in_fills = False
-  units = None
-  with open(in_def) as fp:
-    for line in fp:
-      if in_fills:
-        if re.match('END FILLS', line):
-          break # done with fills; don't care what follows
-        m = re.match(rect_pat, line)
-        if not m:
-          raise Exception('Unrecognized fill: ' + line)
-        opc_type = 'opc' if m.group('opc') else 'non-opc'
-        mask = m.group('mask')
-        if not mask: #uncolored just uses first entry
-          mask = 0
-        else:
-          mask = int(mask) - 1 # DEF is 1-based indexing
-        layer = cfg[m.group('layer')][opc_type]['klayout'][mask]
-        xlo = int(m.group('xlo')) / units
-        ylo = int(m.group('ylo')) / units
-        xhi = int(m.group('xhi')) / units
-        yhi = int(m.group('yhi')) / units
-        top.shapes(layer).insert(pya.DBox(xlo, ylo, xhi, yhi))
-      elif re.match('FILLS \d+ ;', line):
-        in_fills = True
-      elif not units:
-        m = re.match('UNITS DISTANCE MICRONS (\d+)', line)
-        if m:
-          units = float(m.group(1))
-
-# Load technology file
-tech = pya.Technology()
-tech.load(tech_file)
-layoutOptions = tech.load_layout_options
-if len(layer_map) > 0:
-  layoutOptions.lefdef_config.map_file = layer_map
-
-# Load def file
-main_layout = pya.Layout()
-print("[INFO] Reporting cells prior to loading DEF ...")
-for i in main_layout.each_cell():
-  print("[INFO] '{0}'".format(i.name))
-
-print("[INFO] Reading DEF ...")
-main_layout.read(in_def, layoutOptions)
-
-#print("[INFO] Reporting cells after loading DEF ...")
-#for i in main_layout.each_cell():
-#  print("[INFO] '{0}'".format(i.name))
-
-# Clear cells
-top_cell_index = main_layout.cell(design_name).cell_index()
-
-# remove orphan cell BUT preserve cell with VIA_
-#  - KLayout is prepending VIA_ when reading DEF that instantiates LEF's via
-print("[INFO] Clearing cells...")
-for i in main_layout.each_cell():
-  if i.cell_index() != top_cell_index:
-    if not i.name.startswith("VIA_"):
-      i.clear()
-
-# Load in the gds to merge
-print("[INFO] Merging GDS/OAS files...")
-for fil in in_files.split():
-  print("\t{0}".format(fil))
-  main_layout.read(fil)
-
-# Copy the top level only to a new layout
-print("[INFO] Copying toplevel cell '{0}'".format(design_name))
-top_only_layout = pya.Layout()
-top_only_layout.dbu = main_layout.dbu
-top = top_only_layout.create_cell(design_name)
-top.copy_tree(main_layout.cell(design_name))
-
-read_fills(top)
-
-print("[INFO] Checking for missing cell from GDS/OAS...")
-missing_cell = False
-regex = None
-if 'GDS_ALLOW_EMPTY' in os.environ:
-    print("[INFO] Found GDS_ALLOW_EMPTY variable.")
-    regex = os.getenv('GDS_ALLOW_EMPTY')
-for i in top_only_layout.each_cell():
-  if i.is_empty():
-    missing_cell = True
-    if regex is not None and re.match(regex, i.name):
-        print("[WARNING] LEF Cell '{0}' ignored. Matches GDS_ALLOW_EMPTY.".format(i.name))
-    else:
-        print("[ERROR] LEF Cell '{0}' has no matching GDS/OAS cell."
-              " Cell will be empty.".format(i.name))
-        errors += 1
-
-if not missing_cell:
-  print("[INFO] All LEF cells have matching GDS/OAS cells")
-
-print("[INFO] Checking for orphan cell in the final layout...")
-orphan_cell = False
-for i in top_only_layout.each_cell():
-  if i.name != design_name and i.parent_cells() == 0:
-    orphan_cell = True
-    print("[ERROR] Found orphan cell '{0}'".format(i.name))
-    errors += 1
-
-if not orphan_cell:
-  print("[INFO] No orphan cells")
+# 5. Empty-cell check on the cells the DEF instantiates directly. Empty
+#    sub-cells deeper down ship that way inside the macros' GDS (the SRAMs'
+#    BITKIT_* cells) and are only counted.
+def inst_count(cell):
+    # Instances of `cell` placed anywhere (arrays counted element by element).
+    return sum(pi.child_inst().size() for pi in cell.each_parent_inst())
 
 
-if seal_file:
+direct = set(top.each_child_cell())
+allowed, missing_gds = [], []
+for ci in direct:
+    c = ly.cell(ci)
+    if c.is_empty():
+        (allowed if io_allow.fullmatch(c.name) else missing_gds).append(c)
+for c in sorted(allowed, key=lambda c: c.name):
+    log(f"empty, allowed (no public GDS): {c.name} x {inst_count(c)}")
+log(f"empty allowed cells: {len(allowed)}, instances: {sum(inst_count(c) for c in allowed)}")
+for c in sorted(missing_gds, key=lambda c: c.name):
+    err(f"cell '{c.name}' ({inst_count(c)} instances) has no geometry in any GDS")
+deep_empty = sum(1 for c in ly.each_cell() if c.is_empty() and c.cell_index() not in direct
+                 and c.cell_index() != top.cell_index())
+log(f"empty macro sub-cells (as shipped, not checked): {deep_empty}")
 
-  top_cell = top_only_layout.top_cell()
+tops = [c.name for c in ly.top_cells()]
+if tops != [top_name]:
+    err(f"expected exactly one top cell '{top_name}', got {tops}")
 
-  print("[INFO] Reading seal GDS/OAS file...")
-  print("\t{0}".format(seal_file))
-  top_only_layout.read(seal_file)
-
-  for cell in top_only_layout.top_cells():
-    if cell != top_cell:
-      print("[INFO] Merging '{0}' as child of '{1}'".format(cell.name, top_cell.name))
-      top.insert(pya.CellInstArray(cell.cell_index(), pya.Trans()))
-
-# Write out the GDS
-print("[INFO] Writing out GDS/OAS '{0}'".format(out_file))
-top_only_layout.write(out_file)
-
-print("[INFO] Writing GDS finished!")
+# 6. Write. A .gz suffix makes KLayout compress the stream.
+if errors == 0:
+    os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
+    log(f"writing {out_path}")
+    ly.write(out_path)
+    log(f"done: {os.path.getsize(out_path)} bytes")
+else:
+    log(f"{errors} error(s), no GDS written")
 
 sys.exit(errors)

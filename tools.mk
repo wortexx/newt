@@ -18,6 +18,7 @@ SVASE    := svase    # https://github.com/pulp-platform/svase
 SV2V     := sv2v     # https://https://github.com/zachjs/sv2v
 YOSYS    := yosys    # https://github.com/YosysHQ/yosys
 OPENROAD := openroad # https://github.com/The-OpenROAD-Project/OpenROAD
+KLAYOUT  := klayout  # https://www.klayout.de (DEF -> GDS stream, target/ihp13/klayout)
 
 # LSOracle could be used in Yosys, currently deactived and not used
 # LSORACLE_ROOT := 
@@ -35,6 +36,7 @@ tools.log:
 	@which $(SV2V)     >> $@
 	@which $(YOSYS)    >> $@
 	@which $(OPENROAD) >> $@
+	@which $(KLAYOUT)  >> $@
 
 # we want to regenerate it everytime to always see the current tools
 .PHONY: tools.log
