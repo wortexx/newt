@@ -1,0 +1,34 @@
+# Copyright 2026 the newt project authors.
+# Solderpad Hardware License, Version 0.51, see LICENSE for details.
+# SPDX-License-Identifier: SHL-0.51
+#
+# IP waiver list for the minimal DRC (`make drc`, scripts/drc_summary.py;
+# change seal-and-drc-gds, design D4). A DRC item is waived only when its rule
+# is listed here for the macro it lies in: the macro's top cell, or any cell
+# inside it. `cells` are shell-style patterns on macro top-cell names; `rules`
+# are rule names exactly as the rule set's report spells them.
+#
+# Every entry is something the macro produces on its own, as shipped by IHP,
+# with the evidence that showed it. Add an entry only with such evidence; a
+# rule hit in the design's own geometry is a flow bug, not a waiver.
+
+waivers:
+  - cells: ["RM_IHPSG13_1P_*_c2_bm_bist"]
+    rules: ["Cnt.a"]
+    reason: >-
+      The SRAM macros' bar contacts (non-square Cont) as shipped in the PDK's
+      sg13g2_sram GDS.
+    evidence: >-
+      docs/infra-plan.md Phase 11, signoff DRC of runs 44382400639 and
+      44708127322 (1,183,332 items, all inside SRAM boxes), reproduced on
+      45365266924 (2026-11-24/25) and on its stream-final-gds GDS (2026-11-27).
+
+  - cells: ["delay_line_D4_O1_6P000"]
+    rules: ["Pas.a", "Pas.b", "M2.a", "forbidden.pemwind"]
+    reason: >-
+      The delay-line macro's own Passiv openings, Metal2 and PEmWind layer as
+      shipped in its GDS (target/ihp13/src/mc_delay). The old deck spelled the
+      last rule forbidden.PEmWind.
+    evidence: >-
+      docs/infra-plan.md Phase 11, same runs: Pas.a 996, Pas.b 902, M2.a 388,
+      forbidden.PEmWind 316, all inside the delay-line boxes.

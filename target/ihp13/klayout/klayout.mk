@@ -11,6 +11,13 @@
 # Writes out/$(PROJ_NAME).gds.gz and out/$(PROJ_NAME).stream.log here. The IO
 # pads stream empty: the pinned PDK has their LEF but no GDS (Phase 19 Stage C
 # replaces them).
+#
+# Stage B, change seal-and-drc-gds: seal ring and minimal DRC with IHP's
+# KLayout tech from a newer IHP-Open-PDK commit (the PDK submodule's views stay).
+#
+#   make drc-tech                    # fetch the pinned KLayout tech (once)
+#   make seal [SEAL_MARGIN=42]       # out/$(PROJ_NAME).sealed.gds.gz, top <top>_sealed
+#   make drc [DRC_JOBS=4]            # minimal DRC of the sealed GDS -> out/drc-minimal/
 
 KLAYOUT ?= klayout
 
@@ -48,6 +55,25 @@ GDS_GDS := \
 # MACRO in sg13g2_iocell.lef), by exact name. Anything else empty fails.
 GDS_IO_ALLOW := corner|filler1u|filler2u|filler4u|filler10u|gndcore|gndpad|vddcore|vddpad|ixc013_b16m|ixc013_b16mpdn|ixc013_b16mpup|ixc013_i16x|power_cut4u|power_cut60u
 
+# IHP's KLayout tech (run_drc.py, rule decks, seal-ring PCell code), pinned
+# apart from the PDK submodule (design D1). IHP-Open-PDK main, 2026-11-10.
+IHP_KLAYOUT_REPO ?= https://github.com/IHP-GmbH/IHP-Open-PDK.git
+IHP_KLAYOUT_REV  := e73adb4045731ddec21634146d536380057f6a26
+IHP_KLAYOUT_ROOT ?= $(TARGET_DIR)/pdk/klayout-tech
+IHP_KLAYOUT      := $(IHP_KLAYOUT_ROOT)/ihp-sg13g2/libs.tech/klayout
+
+# Seal ring around the DEF's die area plus SEAL_MARGIN um per side (croc's 42).
+SEAL_MARGIN ?= 42
+SEAL_RING   := $(GDS_OUT_DIR)/seal_ring.gds.gz
+SEAL_OUT    := $(GDS_OUT_DIR)/$(PROJ_NAME).sealed.gds.gz
+SEAL_LOG    := $(GDS_OUT_DIR)/$(PROJ_NAME).seal.log
+
+# Minimal DRC (IHP run_drc.py --minimum_drc --no_density) with the IP waiver
+# list. Each job is a klayout process holding the whole layout.
+DRC_JOBS    ?= 4
+DRC_DIR     := $(GDS_OUT_DIR)/drc-minimal
+DRC_WAIVERS ?= $(KLAYOUT_DIR)/drc-waivers.yaml
+
 gds:
 	@test -f "$(GDS_DEF)" || { echo "ERROR: DEF not found: $(GDS_DEF) (set GDS_DEF=...)" >&2; exit 1; }
 	mkdir -p $(GDS_OUT_DIR)
@@ -67,4 +93,26 @@ gds:
 gds-clean:
 	rm -f $(GDS_OUT) $(GDS_LOG)
 
-.PHONY: gds gds-clean
+drc-tech:
+	$(KLAYOUT_DIR)/scripts/fetch_klayout_tech.sh "$(IHP_KLAYOUT_ROOT)" "$(IHP_KLAYOUT_REPO)" "$(IHP_KLAYOUT_REV)"
+
+seal: drc-tech
+	@test -f "$(GDS_OUT)" || { echo "ERROR: streamed GDS not found: $(GDS_OUT) (run make gds)" >&2; exit 1; }
+	@test -f "$(GDS_DEF)" || { echo "ERROR: DEF not found: $(GDS_DEF) (set GDS_DEF=...)" >&2; exit 1; }
+	rm -f $(SEAL_RING) $(SEAL_OUT)
+	$(KLAYOUT_DIR)/scripts/seal.sh "$(KLAYOUT)" "$(IHP_KLAYOUT)" "$(GDS_DEF)" "$(GDS_OUT)" \
+		"$(TOP_DESIGN)" "$(SEAL_MARGIN)" "$(SEAL_RING)" "$(SEAL_OUT)" > $(SEAL_LOG) 2>&1; \
+	rc=$$?; grep -v 'Box.destroy: already destroyed' $(SEAL_LOG); exit $$rc
+
+seal-clean:
+	rm -f $(SEAL_RING) $(SEAL_OUT) $(SEAL_LOG)
+
+drc: drc-tech
+	@test -f "$(SEAL_OUT)" || { echo "ERROR: sealed GDS not found: $(SEAL_OUT) (run make seal)" >&2; exit 1; }
+	$(KLAYOUT_DIR)/scripts/drc.sh "$(IHP_KLAYOUT)" "$(SEAL_OUT)" "$(TOP_DESIGN)_sealed" \
+		"$(DRC_DIR)" "$(DRC_JOBS)" "$(DRC_WAIVERS)"
+
+drc-clean:
+	rm -rf $(DRC_DIR)
+
+.PHONY: gds gds-clean drc-tech seal seal-clean drc drc-clean
