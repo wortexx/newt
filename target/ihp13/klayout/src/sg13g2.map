@@ -1,0 +1,49 @@
+# Copyright 2026 the newt project authors.
+# Solderpad Hardware License, Version 0.51, see LICENSE for details.
+# SPDX-License-Identifier: SHL-0.51
+#
+# LEF/DEF -> GDS layer map for the DEF stream (scripts/def2stream.py), in the
+# EDI map format KLayout's LEF/DEF reader takes as `map_file` (the format
+# croc's klayout/sg13cmos5l.map uses). Change stream-final-gds, design D3.
+#
+# GDS numbers are the IHP SG13G2 ones, checked against the PDK's
+# libs.tech/klayout/tech/sg13g2.lyp (<Layer>.drw = n/0, <Metal>.txt = n/25).
+#
+# Kept to mask data plus pin names:
+# - routing (NET), special routing (SPNET, the power grid), DEF pins (PIN)
+#   and via geometry (VIA) go on the drawing datatype, as in the scratch DRC
+#   probe whose GDS the 2026-11-24/25 signoff DRC ran on;
+# - each top-level pin's name is a text on its metal's .txt datatype (25);
+# - no LEF pins, obstructions, fills or cell/die outlines: the LEF cells are
+#   replaced by their GDS, and the rest are LEF/DEF abstractions, not masks.
+#   The pin purpose (n/2, croc writes it too) is for LVS, added with it.
+#
+#EDI Layer Name  EDI Layer Type      GDS Layer Number   GDS Layer Type
+#==============  ==============      ================   ==============
+
+Metal1           NET,SPNET,PIN,VIA   8                  0
+NAME             Metal1/PIN          8                  25
+Via1             VIA                 19                 0
+
+Metal2           NET,SPNET,PIN,VIA   10                 0
+NAME             Metal2/PIN          10                 25
+Via2             VIA                 29                 0
+
+Metal3           NET,SPNET,PIN,VIA   30                 0
+NAME             Metal3/PIN          30                 25
+Via3             VIA                 49                 0
+
+Metal4           NET,SPNET,PIN,VIA   50                 0
+NAME             Metal4/PIN          50                 25
+Via4             VIA                 66                 0
+
+Metal5           NET,SPNET,PIN,VIA   67                 0
+NAME             Metal5/PIN          67                 25
+TopVia1          VIA                 125                0
+
+TopMetal1        NET,SPNET,PIN,VIA   126                0
+NAME             TopMetal1/PIN       126                25
+TopVia2          VIA                 133                0
+
+TopMetal2        NET,SPNET,PIN,VIA   134                0
+NAME             TopMetal2/PIN       134                25

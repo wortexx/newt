@@ -66,6 +66,26 @@ check "unzip"        unzip -v
 # make run, so `make ig-sw-all` now fails outright without it.
 check "sgdisk"       sgdisk --version
 
+# KLayout streams the routed DEF to GDS (target/ihp13/klayout/, change
+# stream-final-gds). Pinned to the version IHP-Open-PDK pins (docker/all).
+# Beyond the version: the stream runs `klayout -b -r` with the pya API and no
+# display, so write a GDS that way and check the file exists.
+EXPECT_KLAYOUT_VERSION="${EXPECT_KLAYOUT_VERSION:-0.30.5}"
+check_contains "klayout version is ${EXPECT_KLAYOUT_VERSION}" "KLayout ${EXPECT_KLAYOUT_VERSION}" \
+  klayout -v
+kltmp=$(mktemp -d)
+cat > "$kltmp/probe.py" <<'EOF'
+import pya
+ly = pya.Layout()
+top = ly.create_cell("TOP")
+top.shapes(ly.layer(8, 0)).insert(pya.Box(0, 0, 1000, 1000))
+ly.write(out)  # `out` comes from -rd
+EOF
+check "klayout -b writes a GDS with pya, no display" \
+  env -u DISPLAY klayout -b -rd out="$kltmp/probe.gds" -r "$kltmp/probe.py"
+check "klayout probe GDS exists" test -s "$kltmp/probe.gds"
+rm -rf "$kltmp"
+
 # Python modules the flow's RTL generators import at `make ig-hw-all` time
 # (register_interface/opentitan regtool: hjson, mako, yaml, tabulate; iDMA
 # 0.6's gen_idma.py: flatdict). A missing one fails hardware generation

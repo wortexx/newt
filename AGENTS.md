@@ -99,6 +99,10 @@ make synth-all
 # backend: OpenROAD place & route (>24 h — see "Expensive targets" below)
 make backend-all
 
+# GDS: stream the routed DEF to target/ihp13/klayout/out/basilisk.gds.gz
+# (minutes; any DEF via GDS_DEF=..., IO pads stream empty - docs/pnr-pipeline.md)
+make gds
+
 # software: build Cheshire test binaries
 make ig-sw-all
 
